@@ -9,3 +9,7 @@ dist/
 .env
 .DS_Store
 Thumbs.db
+
+# Syncthing
+.stfolder/
+.stignore
