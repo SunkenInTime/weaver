@@ -2,3 +2,11 @@ runtime/.native-sdk
 runtime/.zig-cache
 runtime/zig-out
 
+
+# General
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+Thumbs.db
