@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weaver — Product Spec</title>
+<style>
+  :root {
+    --bg: #0a0a0c; --panel: #131316; --panel-2: #1a1a1f; --border: #26262c;
+    --text: #ececf1; --muted: #9a9aa5; --faint: #5c5c66;
+    --accent: #7dd3a8; --accent-2: #8ab4f8; --warn: #fdd663; --danger: #f28b82;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.65 "Segoe UI", system-ui, sans-serif; padding-bottom: 120px; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 28px; }
+  header { padding: 72px 0 24px; }
+  .kicker { color: var(--accent); font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-size: 40px; font-weight: 650; letter-spacing: -.02em; margin: 8px 0 12px; }
+  .lede { color: var(--muted); font-size: 18px; max-width: 640px; }
+  h2 { font-size: 24px; font-weight: 650; margin: 64px 0 6px; }
+  h2 .num { color: var(--faint); font-weight: 500; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 650; margin: 26px 0 6px; }
+  .sub { color: var(--muted); margin-bottom: 20px; max-width: 660px; }
+  p { margin: 12px 0; color: #c9c9d1; max-width: 700px; }
+  strong { color: var(--text); }
+  ul { margin: 10px 0 10px 22px; color: #c9c9d1; }
+  li { margin: 5px 0; max-width: 680px; }
+
+  .desktop {
+    position: relative; height: 400px; border-radius: var(--radius);
+    border: 1px solid var(--border); overflow: hidden; margin: 24px 0 10px;
+    background:
+      radial-gradient(1200px 500px at 20% 110%, #1d3a5f 0%, transparent 60%),
+      radial-gradient(900px 400px at 85% -10%, #3f2a5d 0%, transparent 55%),
+      linear-gradient(160deg, #0e1420 0%, #131022 100%);
+  }
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 34px; background: rgba(12,12,16,.75); border-top: 1px solid rgba(255,255,255,.06); display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .taskbar i { width: 18px; height: 18px; border-radius: 5px; background: rgba(255,255,255,.14); }
+  .caption { color: var(--faint); font-size: 13px; margin-bottom: 4px; }
+  .widget { position: absolute; border-radius: 14px; background: rgba(16,16,20,.82); border: 1px solid rgba(255,255,255,.08); box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+  .w-clock { top: 26px; right: 26px; width: 240px; padding: 18px 22px 14px; }
+  .w-clock .time { font-size: 42px; font-weight: 300; line-height: 1.05; }
+  .w-clock .time .sec { font-size: 19px; color: var(--muted); margin-left: 6px; }
+  .w-clock .date { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .w-viz { top: 168px; right: 26px; width: 240px; height: 74px; padding: 12px 16px; display: flex; align-items: flex-end; gap: 3px; }
+  .w-viz i { flex: 1; background: linear-gradient(180deg, #8ab4f8, #7dd3a8); border-radius: 2px 2px 0 0; min-height: 3px; transition: height 90ms linear; }
+  .w-cpu { top: 26px; left: 26px; width: 190px; padding: 16px 18px; }
+  .w-cpu .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .w-cpu .row { display: flex; align-items: baseline; gap: 8px; }
+  .w-cpu .val { font-size: 30px; font-weight: 350; }
+  .w-cpu .unit { color: var(--muted); font-size: 14px; }
+  .bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.09); margin-top: 10px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #4db6ac); transition: width .8s ease; }
+  .w-media { bottom: 58px; left: 26px; width: 250px; padding: 14px 16px; display: flex; gap: 12px; align-items: center; }
+  .w-media .art { width: 44px; height: 44px; border-radius: 9px; background: linear-gradient(135deg, #f28b82, #fdd663); flex: none; }
+  .w-media .t { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-media .a { font-size: 12px; color: var(--muted); }
+
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; overflow-x: auto; font: 13px/1.7 "Cascadia Code", Consolas, monospace; margin: 16px 0; }
+  code { font-family: "Cascadia Code", Consolas, monospace; }
+  p code, li code, td code { background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 13px; color: #d7d7de; }
+  .k { color: var(--accent-2); } .s { color: var(--accent); } .t { color: var(--danger); }
+  .a { color: var(--warn); } .c { color: var(--faint); font-style: italic; } .b { color: #c58af9; }
+  .filename { display: inline-block; font: 12px/1 Consolas, monospace; color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-bottom: none; padding: 7px 12px; border-radius: 8px 8px 0 0; margin-bottom: -17px; position: relative; z-index: 1; margin-left: 8px; }
+  .prompt { background: linear-gradient(135deg, rgba(138,180,248,.10), rgba(125,211,168,.08)); border: 1px solid rgba(138,180,248,.25); border-radius: var(--radius); padding: 16px 20px; font-size: 15px; color: #dfe6f3; margin: 16px 0; }
+  .prompt .who { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); display: block; margin-bottom: 6px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  th, td { padding: 9px 14px 9px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 600; border-radius: 20px; padding: 2px 10px; border: 1px solid; }
+  .pill.quiet { color: var(--accent); border-color: rgba(125,211,168,.35); }
+  .pill.mild { color: var(--warn); border-color: rgba(253,214,99,.35); }
+  .pill.loud { color: var(--danger); border-color: rgba(242,139,130,.4); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 20px; padding: 3px 11px; margin-right: 6px; border: 1px solid; }
+  .badge.green { color: var(--accent); border-color: rgba(125,211,168,.35); background: rgba(125,211,168,.08); }
+  .badge.blue { color: var(--accent-2); border-color: rgba(138,180,248,.35); background: rgba(138,180,248,.08); }
+
+  .loop { display: flex; gap: 10px; align-items: stretch; margin: 20px 0; flex-wrap: wrap; }
+  .loop .step { flex: 1; min-width: 160px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .loop .step b { display: block; font-size: 15px; margin-bottom: 4px; color: var(--accent); }
+  .loop .step span { font-size: 13px; color: var(--muted); }
+  .loop .arrow { align-self: center; color: var(--faint); font-size: 18px; }
+
+  .manager { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin: 16px 0; overflow: hidden; }
+  .manager .mrow { display: flex; align-items: center; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .manager .mrow:last-child { border-bottom: none; }
+  .manager .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+  .manager .name { width: 150px; font-weight: 600; }
+  .manager .meta { color: var(--faint); font-size: 12.5px; width: 170px; }
+  .manager .cost { margin-left: auto; font: 12.5px Consolas, monospace; color: var(--muted); }
+  .manager .cost b { color: var(--text); font-weight: 600; }
+  footer { margin-top: 80px; color: var(--faint); font-size: 13px; border-top: 1px solid var(--border); padding-top: 20px; }
+  a { color: var(--accent-2); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">Weaver · product spec</div>
+  <h1>Conjure. Share. Remix.</h1>
+  <p class="lede">A desktop where widgets are conjured by prompting your agent, shared as source, and remixed by anyone's agent — alive at 60fps, honest about what it costs, crash-isolated by construction.</p>
+  <p style="margin-top:14px">
+    <span class="badge green">Grilled &amp; decided — ADRs 0001–0006</span>
+    <span class="badge blue">Substrate re-audit in flight</span>
+  </p>
+</header>
+
+<h2><span class="num">0</span>The desktop</h2>
+<p class="sub">Live mock — the clock ticks, the meters move, the visualizer dances. Each widget is one crash-isolated process on the desktop layer.</p>
+<div class="desktop">
+  <div class="widget w-clock">
+    <div class="time"><span id="hm">00:00</span><span class="sec" id="ss">00</span></div>
+    <div class="date" id="date">—</div>
+  </div>
+  <div class="widget w-viz" id="viz"></div>
+  <div class="widget w-cpu">
+    <div class="label">CPU</div>
+    <div class="row"><span class="val" id="cpuv">12</span><span class="unit">%</span></div>
+    <div class="bar"><i id="cpub" style="width:12%"></i></div>
+    <div style="margin-top:12px" class="label">Memory</div>
+    <div class="bar"><i id="memb" style="width:54%; background:linear-gradient(90deg,var(--accent-2),#7986cb)"></i></div>
+  </div>
+  <div class="widget w-media">
+    <div class="art"></div>
+    <div style="min-width:0">
+      <div class="t">Midnight City</div>
+      <div class="a">M83 — Hurry Up, We're Dreaming</div>
+    </div>
+  </div>
+  <div class="taskbar"><i></i><i></i><i></i><i></i></div>
+</div>
+<div class="caption">Mock rendered in HTML for this preview; real widgets render natively with per-pixel transparency (proven: see RESULTS.md, Gate 2).</div>
+
+<h2><span class="num">1</span>The Loop</h2>
+<p class="sub">Weaver's product is one flywheel with three verbs. Conjure is the core focus; the other two come nearly free because a widget is always its source.</p>
+<div class="loop">
+  <div class="step"><b>Conjure</b><span>Prompt your agent → a working widget on your desktop in under a minute. The primary authoring act; hand-writing code is the special case.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><b>Share</b><span>Send the widget — which IS its source. What your friend reads is exactly what runs. Lineage travels in the manifest.</span></div>
+  <div class="arrow">→</div>
+  <div class="step"><b>Remix</b><span>Their agent patches it to their taste — colors, size, data, anything. Every install is a potential fork. Every remix is a new share.</span></div>
+</div>
+
+<h3>The two-minute demo</h3>
+<div class="prompt"><span class="who">you, to your agent</span>"make me a translucent now-playing widget with a seek bar, bottom left, dark, rounded — and a little audio visualizer that reacts to whatever's playing"</div>
+<p>Thirty seconds later both exist on the desktop. That moment — <strong>conjuring</strong> — is what v1 is engineered around: the SDK, the agent skill, hot reload, and check-time validation all exist to make an agent one-shot that prompt reliably.</p>
+
+<h2><span class="num">2</span>A widget is one TypeScript component</h2>
+<p class="sub">One TSX module: config, state, and rendering in a single mental model that scales from a 10-line clock to a pomodoro app. (ADR 0001)</p>
+
+<span class="filename">now-playing/widget.tsx</span>
+<pre><code><span class="k">import</span> { widget, useProvider } <span class="k">from</span> <span class="s">"@weaver/sdk"</span>;
+
+<span class="k">export default</span> widget({
+  name: <span class="s">"Now Playing"</span>,
+  size: [<span class="b">280</span>, <span class="b">96</span>],
+  anchor: { corner: <span class="s">"bottom-left"</span>, offset: [<span class="b">24</span>, <span class="b">64</span>] },
+  layer: <span class="s">"desktop"</span>,
+  subscribe: [<span class="s">"media"</span>],
+  origins: [],                    <span class="c">// talks to no network — the media provider does the work</span>
+  capabilities: [],               <span class="c">// touches nothing on your system</span>
+}, () =&gt; {
+  <span class="k">const</span> media = useProvider(<span class="s">"media"</span>);
+  <span class="k">return</span> (
+    <span class="t">&lt;row</span> <span class="a">class</span>=<span class="s">"p-3 gap-3 items-center bg-[#101014]/85 rounded-2xl"</span><span class="t">&gt;</span>
+      <span class="t">&lt;image</span> <span class="a">src</span>={media.art} <span class="a">class</span>=<span class="s">"w-11 h-11 rounded-lg"</span> <span class="t">/&gt;</span>
+      <span class="t">&lt;column</span> <span class="a">class</span>=<span class="s">"min-w-0 grow gap-0.5"</span><span class="t">&gt;</span>
+        <span class="t">&lt;text</span> <span class="a">class</span>=<span class="s">"text-sm font-semibold truncate"</span><span class="t">&gt;</span>{media.title}<span class="t">&lt;/text&gt;</span>
+        <span class="t">&lt;text</span> <span class="a">class</span>=<span class="s">"text-xs text-[#9a9aa5]"</span><span class="t">&gt;</span>{media.artist}<span class="t">&lt;/text&gt;</span>
+        <span class="t">&lt;slider</span> <span class="a">value</span>={media.position} <span class="a">max</span>={media.duration}
+                <span class="a">onChange</span>={(p) =&gt; media.seek(p)} <span class="t">/&gt;</span>
+      <span class="t">&lt;/column&gt;</span>
+    <span class="t">&lt;/row&gt;</span>
+  );
+});</code></pre>
+
+<ul>
+  <li><strong>Styling is free.</strong> Utility classes keep the Tailwind shape everyone already knows — including arbitrary values (<code>bg-[#101014]/85</code>) and any color. There is no theming system and no token law: the author's look is the intended vision, and making it yours is a remix, not a runtime override (ADR 0003). The built-in components (<code>slider</code>, <code>button</code>, charts…) have good defaults, so low-effort widgets still look decent.</li>
+  <li><strong>State is normal React-shaped state.</strong> <code>useState</code>, <code>useProvider</code>, event handlers. Interactive widgets — seek bars, text inputs, settings — are the expected case, not an escape hatch.</li>
+  <li><strong>Drawing is first-class.</strong> A <code>&lt;canvas&gt;</code> element with an immediate-mode draw API for visualizers, graphs, analog hands — data-space coordinates, any frame rate.</li>
+  <li><strong>Check-time validation is mechanical, not aesthetic.</strong> Types, bindings vs subscriptions, undeclared origins, invalid capabilities — loud errors with fix-its. Taste is the author's (and the remixer's) domain.</li>
+</ul>
+
+<h2><span class="num">3</span>What a widget can reach</h2>
+<p class="sub">Quiet standard surface; loud, graded system access. Deliberately not Rainmeter's anything-goes. (ADR 0002)</p>
+<table>
+  <tr><th>Surface</th><th>Consent</th><th>Examples</th></tr>
+  <tr><td><strong>Providers</strong> — host-collected, shared</td><td><span class="pill quiet">quiet</span></td><td><code>time</code> <code>cpu</code> <code>memory</code> <code>network</code> <code>battery</code> <code>media</code> <code>audio</code> (spectrum) <code>weather</code></td></tr>
+  <tr><td><strong>Declared origins</strong> — direct API calls</td><td><span class="pill quiet">quiet, auditable</span></td><td><code>origins: ["api.spotify.com", "homeassistant.local"]</code> — visible before install</td></tr>
+  <tr><td><strong>Scoped storage</strong> — widget's own KV state</td><td><span class="pill quiet">quiet</span></td><td>pomodoro settings, todo items</td></tr>
+  <tr><td><strong>Notifications</strong></td><td><span class="pill mild">one-line grant</span></td><td>timer done, build finished</td></tr>
+  <tr><td><strong>Launch app / open URL</strong></td><td><span class="pill mild">one-line grant</span></td><td>click artist → open Spotify</td></tr>
+  <tr><td><strong>Run commands / read files</strong></td><td><span class="pill loud">loud, per-widget, badged</span></td><td>power-user widgets; a gallery shows these as warnings</td></tr>
+</table>
+
+<h2><span class="num">4</span>Fully alive, honestly billed</h2>
+<p class="sub">Any widget may animate at any rate. In exchange: idle-zero is a platform guarantee, and every widget's cost is always visible. (ADR 0005)</p>
+<div class="manager">
+  <div class="mrow"><span class="dot"></span><span class="name">Now Playing</span><span class="meta">by dara · remixed from @kae</span><span class="cost"><b>0.0%</b> cpu · <b>12.1</b> MB</span></div>
+  <div class="mrow"><span class="dot"></span><span class="name">Spectrum</span><span class="meta">by dara · conjured 07-12</span><span class="cost"><b>4.2%</b> cpu · <b>13.8</b> MB</span></div>
+  <div class="mrow"><span class="dot"></span><span class="name">Clock</span><span class="meta">by @minimal-setups</span><span class="cost"><b>0.1%</b> cpu · <b>11.4</b> MB</span></div>
+  <div class="mrow"><span class="dot" style="background:var(--warn)"></span><span class="name">System Monitor</span><span class="meta">by @rice-king · ⚠ reads files</span><span class="cost"><b>0.3%</b> cpu · <b>12.9</b> MB</span></div>
+</div>
+<ul>
+  <li><strong>Idle-zero:</strong> a widget whose data isn't changing costs literally 0% CPU — event-driven repaints only; the platform has no polling render loop.</li>
+  <li><strong>Visible bills:</strong> live CPU/RAM per widget in the manager, surfaceable as badges when sharing. "Make it under 3% CPU" is a spec an agent can be held to.</li>
+  <li><strong>Crash isolation:</strong> one process per widget; one dies alone and the host restarts it.</li>
+</ul>
+
+<h2><span class="num">5</span>Sharing: the widget is the source</h2>
+<p class="sub">No sealed blobs, no author-choice opt-outs. What you read is what runs. (ADR 0004)</p>
+<pre><code>now-playing/
+├── widget.tsx          <span class="c">— the whole widget: config, state, render</span>
+├── assets/             <span class="c">— optional images/fonts</span>
+└── weaver.lock         <span class="c">— provenance: author, version, remixed-from lineage</span></code></pre>
+<p>Install = Weaver builds the source locally (sub-second for a single TSX module). This is the decision that makes the Loop structurally cheap: sharing is sending a folder, remixing is your agent editing it, and the capability audit is reading the manifest fields at the top of the file you're about to run. Lineage fields exist from day one so a future gallery can treat "remixed from" as a first-class social credit.</p>
+
+<h2><span class="num">6</span>Platforms</h2>
+<p><strong>Windows first</strong> (the customization culture lives there — and the windowing spike is already proven: transparent, desktop-layer, Win+D-surviving widgets at 11 MB / 0.6% CPU). <strong>macOS developed alongside</strong>, tested on real hardware. <strong>Linux acknowledged, very low priority.</strong> One platform seam internally; no OS-ism ever leaks into the SDK. (ADR 0006)</p>
+
+<h2><span class="num">7</span>Open engineering questions (in flight)</h2>
+<ul>
+  <li><strong>Substrate re-audit:</strong> TSX components mean an embedded JS engine per widget, and visualizers mean sustained 30–60fps — a different load profile than the compiled-markup/1Hz numbers our substrate gates measured. Spikes running now: QuickJS marginal footprint, and the high-FPS present path cost. Verdict lands in RESULTS.md.</li>
+  <li><strong>High-FPS render path:</strong> the current layered-window present is proven at 1Hz; dirty-region/SIMD/GPU work is a headline workstream if the spike says 60fps is marginal.</li>
+  <li><strong>TSX → native tree bridge:</strong> reconciler design (a Preact-class VDOM driving the native canvas tree over the component boundary).</li>
+</ul>
+
+<footer>
+  Weaver product spec · rewritten 2026-07-12 after the step-back grilling session ·
+  decisions: <code>docs/adr/0001–0006</code> · glossary: <code>CONTEXT.md</code> · measurements: <code>E:\Projects\native-spike\RESULTS.md</code>
+</footer>
+
+</div>
+<script>
+  function tick() {
+    const d = new Date(); const p = n => String(n).padStart(2, "0");
+    document.getElementById("hm").textContent = p(d.getHours()) + ":" + p(d.getMinutes());
+    document.getElementById("ss").textContent = p(d.getSeconds());
+    document.getElementById("date").textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  }
+  tick(); setInterval(tick, 1000);
+
+  const viz = document.getElementById("viz");
+  const bars = Array.from({ length: 28 }, () => { const i = document.createElement("i"); viz.appendChild(i); return i; });
+  let t = 0;
+  setInterval(() => {
+    t += 0.35;
+    bars.forEach((b, i) => {
+      const v = Math.abs(Math.sin(t + i * 0.55)) * 0.6 + Math.abs(Math.sin(t * 1.7 + i)) * 0.4;
+      b.style.height = Math.max(6, v * 46) + "px";
+    });
+  }, 100);
+
+  let cpu = 12, mem = 54;
+  setInterval(() => {
+    cpu = Math.max(3, Math.min(96, cpu + (Math.random() - 0.48) * 14));
+    mem = Math.max(30, Math.min(88, mem + (Math.random() - 0.5) * 2));
+    document.getElementById("cpuv").textContent = Math.round(cpu);
+    document.getElementById("cpub").style.width = cpu + "%";
+    document.getElementById("memb").style.width = mem + "%";
+  }, 1200);
+</script>
+</body>
+</html>
