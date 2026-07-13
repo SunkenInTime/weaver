@@ -21,7 +21,9 @@ From the Weaver repository root in PowerShell:
 ```powershell
 git clean -xfd
 git -C E:\Projects\native switch weaver-fork
-New-Item -ItemType Junction -Path runtime\.native-sdk -Target E:\Projects\native
+if (-not (Test-Path runtime\.native-sdk)) {
+    New-Item -ItemType Junction -Path runtime\.native-sdk -Target E:\Projects\native
+}
 $env:PATH = 'E:\Projects\native-spike\zig\zig-x86_64-windows-0.16.0;' + $env:PATH
 Push-Location runtime
 zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
@@ -102,6 +104,11 @@ correction retry or the Windows layered-present path and remove it where safe.
 - QuickJS runs on the UI thread and has neither a memory limit nor an interrupt
   deadline yet. A malicious or accidental infinite loop can hang the widget;
   process isolation limits the blast radius but does not make that acceptable.
+- The current SDK `UiApp` rebuilds after every dispatched Msg. The clock changes
+  retained text on every timer Msg, so its rebuilds are warranted and it is
+  fully idle between ticks; a future timer callback that makes no effective op
+  would nevertheless rebuild once. The tree generation already identifies that
+  case, but honoring it requires an SDK “skip rebuild” seam in M1.
 - The M0 bridge supports only the properties listed in the milestone and uses
   `#RRGGBBAA` for its RGBA value. There is no TSX compiler, reconciler, input
   event surface, module loader, persistence, or hot reload yet.
