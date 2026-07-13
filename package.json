@@ -1,0 +1,23 @@
+{
+  "name": "weaver-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "sdk",
+    "cli"
+  ],
+  "scripts": {
+    "build": "node cli/build.mjs",
+    "postinstall": "npm run build",
+    "test": "node --test test/all.test.mjs",
+    "typecheck": "tsc -p sdk/tsconfig.json --noEmit && tsc -p cli/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.13",
+    "esbuild": "0.25.6",
+    "typescript": "5.8.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@weaver/sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./src/index.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./jsx-runtime.d.ts",
+      "default": "./src/jsx-runtime.ts"
+    }
+  },
+  "files": [
+    "src",
+    "index.d.ts",
+    "jsx-runtime.d.ts",
+    "CONTRACT.md"
+  ]
+}
+
