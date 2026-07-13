@@ -80,6 +80,13 @@ function initWidget(name: string): void {
       jsx: "react-jsx",
       jsxImportSource: "@weaver/sdk",
       types: [],
+      // Widgets scaffold anywhere on disk, not just inside the Weaver
+      // monorepo, so the SDK types must be reachable by absolute path.
+      baseUrl: ".",
+      paths: {
+        "@weaver/sdk": [join(repoRoot, "sdk", "index.d.ts").replace(/\\/g, "/")],
+        "@weaver/sdk/jsx-runtime": [join(repoRoot, "sdk", "jsx-runtime.d.ts").replace(/\\/g, "/")],
+      },
     },
     include: ["widget.tsx"],
   }, null, 2)}\n`, "utf8");
