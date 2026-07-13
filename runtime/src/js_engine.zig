@@ -3,6 +3,12 @@ const bridge = @import("bridge.zig");
 const qjs = @import("qjs.zig");
 const tree_mod = @import("tree.zig");
 const c = qjs.c;
+const win = @cImport({
+    @cInclude("windows.h");
+});
+
+pub const memory_limit_bytes: usize = 32 * 1024 * 1024;
+pub const turn_budget_ms: u64 = 100;
 
 pub const Error = error{
     OutOfMemory,
@@ -16,6 +22,8 @@ pub const Engine = struct {
     runtime: *c.JSRuntime,
     context: *c.JSContext,
     bridge_state: bridge.State,
+    deadline_ms: u64 = 0,
+    executing: bool = false,
 
     pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree) Error!*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
@@ -29,6 +37,8 @@ pub const Engine = struct {
             .context = context,
             .bridge_state = .{ .tree = tree },
         };
+        c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
+        c.JS_SetInterruptHandler(runtime, interruptHandler, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
         return self;
     }
@@ -46,19 +56,26 @@ pub const Engine = struct {
         // capacity is not initialized, so make that byte explicit.
         const terminated = std.heap.page_allocator.dupeZ(u8, source) catch return error.OutOfMemory;
         defer std.heap.page_allocator.free(terminated);
+        self.beginTurn();
+        defer self.endTurn();
         const result = c.JS_Eval(self.context, terminated.ptr, source.len, file_name, c.JS_EVAL_TYPE_GLOBAL);
         defer c.JS_FreeValue(self.context, result);
         if (c.JS_IsException(result)) return self.reportException();
         try self.pumpJobs();
     }
 
-    pub fn intervalMs(self: *const Engine) u64 {
-        return self.bridge_state.interval_ms;
+    pub fn timers(self: *const Engine) []const bridge.TimerSlot {
+        return &self.bridge_state.timers;
     }
 
-    pub fn fireTimer(self: *Engine) Error!void {
-        if (!c.JS_IsFunction(self.context, self.bridge_state.timer_callback)) return;
-        const result = c.JS_Call(self.context, self.bridge_state.timer_callback, qjs.undefinedValue(), 0, null);
+    pub fn fireTimer(self: *Engine, timer_id: u64) Error!void {
+        const timer = for (&self.bridge_state.timers) |*candidate| {
+            if (candidate.active and candidate.id == timer_id) break candidate;
+        } else return;
+        if (!c.JS_IsFunction(self.context, timer.callback)) return;
+        self.beginTurn();
+        defer self.endTurn();
+        const result = c.JS_Call(self.context, timer.callback, qjs.undefinedValue(), 0, null);
         defer c.JS_FreeValue(self.context, result);
         if (c.JS_IsException(result)) return self.reportException();
         try self.pumpJobs();
@@ -71,6 +88,15 @@ pub const Engine = struct {
             if (result == 0) return;
             if (result < 0) return self.reportExceptionFrom(job_context orelse self.context);
         }
+    }
+
+    fn beginTurn(self: *Engine) void {
+        self.deadline_ms = win.GetTickCount64() + turn_budget_ms;
+        self.executing = true;
+    }
+
+    fn endTurn(self: *Engine) void {
+        self.executing = false;
     }
 
     fn reportException(self: *Engine) Error {
@@ -91,3 +117,8 @@ pub const Engine = struct {
         return error.ScriptException;
     }
 };
+
+fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
+    const self: *Engine = @ptrCast(@alignCast(context orelse return 1));
+    return if (self.executing and win.GetTickCount64() >= self.deadline_ms) 1 else 0;
+}

@@ -11,7 +11,11 @@ pub const Model = struct {
     tree: tree_mod.Tree = .{},
     engine: ?*js_engine.Engine = null,
     timer_fires: u64 = 0,
+    armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
 };
+
+const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
+fn bridgeTimerCapacity() usize { return @import("bridge.zig").max_timers; }
 
 pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
@@ -20,24 +24,17 @@ pub const Msg = union(enum) {
 const WidgetApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = false });
 const WidgetUi = WidgetApp.Ui;
 const Effects = WidgetApp.Effects;
-var presented_frames: u64 = 0;
-var first_present_ns: u64 = 0;
+var rendered_presents: u64 = 0;
+var first_render_ns: u64 = 0;
+var last_canvas_revision: u64 = 0;
 
 fn initEffects(model: *Model, effects: *Effects) void {
-    const engine = model.engine orelse return;
-    const interval_ms = engine.intervalMs();
-    if (interval_ms == 0) return;
-    effects.startTimer(.{
-        .key = 1,
-        .interval_ms = interval_ms,
-        .mode = .repeating,
-        .on_fire = Effects.timerMsg(.timer),
-    });
+    syncTimers(model, effects);
 }
 
 /// One SDK timer delivery is one JS batch. All retained-tree ops complete
 /// before update returns, after which UiApp derives and presents once.
-fn update(model: *Model, msg: Msg, _: *Effects) void {
+fn update(model: *Model, msg: Msg, effects: *Effects) void {
     switch (msg) {
         .timer => |timer| {
             if (timer.outcome != .fired) {
@@ -45,10 +42,11 @@ fn update(model: *Model, msg: Msg, _: *Effects) void {
                 return;
             }
             const before = model.tree.generation;
-            (model.engine orelse return).fireTimer() catch |err| {
+            (model.engine orelse return).fireTimer(timer.key) catch |err| {
                 std.log.err("widget timer callback failed: {s}", .{@errorName(err)});
                 return;
             };
+            syncTimers(model, effects);
             model.timer_fires += 1;
             if (model.timer_fires % 10 == 0) {
                 std.log.info("widget timer: {d} callbacks, generation {d}, changed={}", .{ model.timer_fires, model.tree.generation, before != model.tree.generation });
@@ -57,12 +55,55 @@ fn update(model: *Model, msg: Msg, _: *Effects) void {
     }
 }
 
+fn syncTimers(model: *Model, effects: *Effects) void {
+    const engine = model.engine orelse return;
+    for (&model.armed_timers) |*armed| {
+        if (armed.id == 0) continue;
+        var live = false;
+        for (engine.timers()) |timer| {
+            if (timer.active and timer.id == armed.id) {
+                live = true;
+                break;
+            }
+        }
+        if (!live) {
+            effects.cancelTimer(armed.id);
+            armed.* = .{};
+        }
+    }
+    for (engine.timers()) |timer| {
+        if (!timer.active) continue;
+        var slot: ?*ArmedTimer = null;
+        for (&model.armed_timers) |*armed| {
+            if (armed.id == timer.id) {
+                slot = armed;
+                break;
+            }
+            if (slot == null and armed.id == 0) slot = armed;
+        }
+        const armed = slot orelse continue;
+        if (armed.id == timer.id and armed.interval_ms == timer.interval_ms) continue;
+        effects.startTimer(.{
+            .key = timer.id,
+            .interval_ms = timer.interval_ms,
+            .mode = .repeating,
+            .on_fire = Effects.timerMsg(.timer),
+        });
+        armed.* = .{ .id = timer.id, .interval_ms = timer.interval_ms };
+    }
+}
+
 fn onFrame(_: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
-    if (first_present_ns == 0) first_present_ns = frame.timestamp_ns;
-    presented_frames += 1;
-    if (presented_frames % 10 == 0) {
-        const elapsed_ns = frame.timestamp_ns -| first_present_ns;
-        std.log.info("widget present: {d} frames in {d} ms", .{ presented_frames, elapsed_ns / std.time.ns_per_ms });
+    // A present completion produces a second frame event carrying the same
+    // retained-canvas revision. M0 counted both events as presents; revision
+    // edges identify actual newly rendered display lists at this callback.
+    if (frame.canvas_revision == 0 or frame.canvas_revision == last_canvas_revision) return null;
+    last_canvas_revision = frame.canvas_revision;
+    if (first_render_ns == 0) first_render_ns = frame.timestamp_ns;
+    rendered_presents += 1;
+    if (rendered_presents % 10 == 0) {
+        const elapsed_ns = frame.timestamp_ns -| first_render_ns;
+        std.log.info("widget present: {d} rendered frames in {d} ms", .{ rendered_presents, elapsed_ns / std.time.ns_per_ms });
     }
     return null;
 }
@@ -78,20 +119,36 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
         .padding = retained.padding,
         .gap = retained.gap,
         .opacity = retained.opacity,
+        .grow = retained.grow,
+        .width = retained.width,
+        .height = retained.height,
+        .cross = switch (retained.cross_align) {
+            .start => .start,
+            .center => .center,
+            .end, .baseline => .end,
+        },
+        .main = switch (retained.main_align) {
+            .start => .start,
+            .center => .center,
+            .end => .end,
+            .between => .space_between,
+        },
         .style = .{
             .background = retained.background,
+            .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
             .quiet_hover = true,
         },
     };
-    if (retained.kind == .panel) options.grow = 1;
     if (retained.kind == .text) {
+        options.wrap = false;
+        options.overflow = if (retained.truncate) .ellipsis else .clip;
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
             .weight = switch (retained.font_weight) {
-                .regular => .regular,
+                .light, .regular => .regular,
                 .medium => .medium,
-                .bold => .bold,
+                .semibold, .bold => .bold,
             },
             .scale = retained.font_scale,
         }};
@@ -102,8 +159,30 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
         children[index] = buildNode(ui, tree, child_id);
     }
     return switch (retained.kind) {
-        .column => ui.column(options, children),
-        .row => ui.row(options, children),
+        // SDK layout-only rows/columns do not paint their own style. A
+        // styled column is contractually a column-layout box, which is the
+        // builder's panel primitive; unstyled columns keep the lean node.
+        // A styled row gets the same painting panel around its row layout.
+        .column => if (retained.background != null) block: {
+            const column_options: WidgetUi.ElementOptions = .{
+                .gap = retained.gap,
+                .grow = 1,
+                .cross = options.cross,
+                .main = options.main,
+            };
+            options.gap = 0;
+            break :block ui.panel(options, .{ui.column(column_options, children)});
+        } else ui.column(options, children),
+        .row => if (retained.background != null) block: {
+            const row_options: WidgetUi.ElementOptions = .{
+                .gap = retained.gap,
+                .grow = 1,
+                .cross = options.cross,
+                .main = options.main,
+            };
+            options.gap = 0;
+            break :block ui.panel(options, .{ui.row(row_options, children)});
+        } else ui.row(options, children),
         .panel => ui.panel(options, children),
         .text => unreachable,
     };
@@ -142,8 +221,8 @@ pub fn main(init: std.process.Init) !void {
         .restore_state = false,
         .titlebar = .chromeless,
         .transparent = true,
-        .layer = .bottom,
-        .click_through = false,
+        .layer = if (std.mem.eql(u8, loaded.manifest.layer, "desktop")) .bottom else if (std.mem.eql(u8, loaded.manifest.layer, "topmost")) .topmost else .normal,
+        .click_through = loaded.manifest.clickThrough,
         .no_activate = true,
         .views = &shell_views,
     }};

@@ -8,12 +8,14 @@ const win = @cImport({
 pub const Manifest = struct {
     name: []const u8,
     size: [2]f32,
-    anchor: struct {
+    anchor: ?struct {
+        monitor: []const u8 = "primary",
         corner: []const u8,
-        offset: [2]f32,
-    },
-    layer: []const u8,
-    transparent: bool,
+        offset: [2]f32 = .{ 24, 24 },
+    } = null,
+    layer: []const u8 = "desktop",
+    clickThrough: bool = false,
+    transparent: bool = true,
 };
 
 pub const Loaded = struct {
@@ -31,8 +33,11 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     const bundle = try std.Io.Dir.cwd().readFileAlloc(io, bundle_path, allocator, .limited(1024 * 1024));
     const parsed = try std.json.parseFromSliceLeaky(Manifest, allocator, manifest_bytes, .{ .ignore_unknown_fields = false });
     if (parsed.size[0] <= 0 or parsed.size[1] <= 0) return error.InvalidWidgetSize;
-    if (!std.mem.eql(u8, parsed.anchor.corner, "top-right")) return error.UnsupportedAnchor;
-    if (!std.mem.eql(u8, parsed.layer, "desktop")) return error.UnsupportedLayer;
+    if (parsed.anchor) |anchor| {
+        if (!std.mem.eql(u8, anchor.monitor, "primary")) return error.UnsupportedMonitor;
+        if (!std.mem.eql(u8, anchor.corner, "top-left") and !std.mem.eql(u8, anchor.corner, "top-right") and !std.mem.eql(u8, anchor.corner, "bottom-left") and !std.mem.eql(u8, anchor.corner, "bottom-right")) return error.UnsupportedAnchor;
+    }
+    if (!std.mem.eql(u8, parsed.layer, "desktop") and !std.mem.eql(u8, parsed.layer, "normal") and !std.mem.eql(u8, parsed.layer, "topmost")) return error.UnsupportedLayer;
     if (!parsed.transparent) return error.UnsupportedOpaqueWidget;
     return .{ .manifest = parsed, .bundle = bundle };
 }
@@ -47,8 +52,22 @@ pub fn desktopFrame(value: Manifest) native_sdk.geometry.RectF {
             .bottom = win.GetSystemMetrics(win.SM_CYSCREEN),
         };
     }
-    const x = @as(f32, @floatFromInt(work_area.right)) - value.size[0] - value.anchor.offset[0];
-    const y = @as(f32, @floatFromInt(work_area.top)) + value.anchor.offset[1];
+    const anchor = value.anchor orelse return native_sdk.geometry.RectF.init(
+        @as(f32, @floatFromInt(work_area.right)) - value.size[0] - 24,
+        @as(f32, @floatFromInt(work_area.top)) + 24,
+        value.size[0],
+        value.size[1],
+    );
+    const on_right = std.mem.endsWith(u8, anchor.corner, "right");
+    const on_bottom = std.mem.startsWith(u8, anchor.corner, "bottom");
+    const x = if (on_right)
+        @as(f32, @floatFromInt(work_area.right)) - value.size[0] - anchor.offset[0]
+    else
+        @as(f32, @floatFromInt(work_area.left)) + anchor.offset[0];
+    const y = if (on_bottom)
+        @as(f32, @floatFromInt(work_area.bottom)) - value.size[1] - anchor.offset[1]
+    else
+        @as(f32, @floatFromInt(work_area.top)) + anchor.offset[1];
     return native_sdk.geometry.RectF.init(x, y, value.size[0], value.size[1]);
 }
 
