@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "weaver": "dist/index.js"
+    "weaver": "bin/weaver.js"
   },
   "dependencies": {
     "esbuild": "0.25.6",
