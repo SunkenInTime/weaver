@@ -1,4 +1,4 @@
-# @weaver/sdk — public API contract (v0, frozen for M1)
+# @weaver/sdk — public API contract (v0.2 — M1 surface + the M2 amendment at the end)
 
 This is the authoring contract for Weaver widgets. It is the product's face:
 agents learn Weaver from this file. Implementation must match it exactly;
@@ -146,3 +146,74 @@ and the M1 boundaries (no providers beyond time, no input elements yet).
 On a machine that has never seen this repo: `weaver init clock` + one agent
 prompt editing widget.tsx + `weaver dev clock` → ticking translucent clock on
 the desktop.
+
+---
+
+# M2 amendment (v0.2)
+
+Everything above stands. M2 turns on the following.
+
+## Interactive elements (were "arrives in M2")
+
+```ts
+<button onPress={() => …} class="…">{children}</button>   // pressable box
+<slider value={n} max={n} onChange={(v: number) => …} />  // horizontal, drag+click
+<image src="./assets/foo.png" class="…" />                // LOCAL widget assets only in M2;
+                                                          // remote images arrive in M3
+```
+
+Handlers run in the widget's JS context; events route through the retained
+tree (node id → handler). No hover/focus styling in M2 (arrives with state
+variants, unscheduled).
+
+## `weaver.fetch` — the declared-origins network (ADR 0002)
+
+```ts
+// Global in widget context (also exported from @weaver/sdk for typing):
+function wfetch(url: string, init?: {
+  method?: "GET" | "POST";
+  headers?: Record<string, string>;
+  body?: string;
+}): Promise<{ status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }>;
+```
+
+- HTTPS only. The URL's host must exactly match an entry in `config.origins`;
+  otherwise the promise rejects with
+  `OriginNotDeclared: add "api.example.com" to origins in your widget config`.
+- `weaver check` statically flags string-literal fetch URLs whose host is not
+  declared. Runtime enforcement is authoritative.
+- Timeout 15s. No cookies, no redirects across hosts, response cap 5 MB.
+
+## `useStorage` — scoped persistence (quiet standard surface)
+
+```ts
+function useStorage<T>(key: string, initial: T): [T, (next: T | ((prev: T) => T)) => void];
+```
+
+JSON-serializable values only; persisted per widget (survives restarts and
+`weaver dev` reloads); 64 KB total quota per widget, over-quota writes throw.
+
+## Providers: `cpu` and `memory` (host-fed)
+
+```ts
+useProvider("cpu")    // { percent: number, perCore: number[] }      1 Hz
+useProvider("memory") // { usedMb: number, totalMb: number, percent: number }  1 Hz
+```
+
+Delivered by `weaverd` (the host). `time` remains SDK-local. Subscribing
+without the host running is a runtime error that names the fix (`weaver up`);
+`weaver dev` auto-starts the host.
+
+## The host and its CLI verbs
+
+```
+weaver up | down            start/stop weaverd (singleton, tray-less in M2)
+weaver install <dir>        register a widget (by source path — ADR 0004) and run it
+weaver uninstall <name>     stop + unregister
+weaver status               table: name · pid · private-MB · cpu% · uptime (ADR 0005 billing)
+```
+
+weaverd supervises widget processes (crash → restart with backoff, 3 strikes
+→ stopped + noted in status), fans out providers over local IPC, and samples
+per-widget cost. Registrations persist across host restarts.
+
