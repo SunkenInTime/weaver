@@ -1,0 +1,34 @@
+.{
+    .name = "weaver-widget",
+    .display_name = "Weaver Widget",
+    .version = "0.0.1",
+    .bundle_id = "com.weaver.widget",
+    .theme = "geist",
+    .shell = .{
+        .windows = .{
+            .{
+                .label = "main",
+                .title = "Weaver Widget",
+                .width = 240,
+                .height = 110,
+                .resizable = false,
+                .restore_state = false,
+                .titlebar = "chromeless",
+                .transparent = true,
+                .layer = "bottom",
+                .no_activate = true,
+                .views = .{
+                    .{
+                        .label = "widget-canvas",
+                        .kind = "gpu_surface",
+                        .fill = true,
+                        .gpu_backend = "software",
+                        .gpu_pixel_format = "bgra8_unorm",
+                        .gpu_present_mode = "timer",
+                        .gpu_alpha_mode = "premultiplied",
+                    },
+                },
+            },
+        },
+    },
+}

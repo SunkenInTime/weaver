@@ -1,0 +1,16 @@
+.{
+    .name = .weaver_widget,
+    .fingerprint = 0xb28ef4ad5dd8be8,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0-dev.1484+e41e8e808",
+    .dependencies = .{
+        .native_sdk = .{ .path = ".native-sdk" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "app.zon",
+        "src",
+        "vendor",
+    },
+}
