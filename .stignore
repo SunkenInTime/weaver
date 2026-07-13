@@ -1,0 +1,13 @@
+// Version-control internals and machine-local generated files.
+(?d).git
+(?d)**/node_modules
+(?d)**/.dart_tool
+(?d)**/.fvm
+(?d)**/.next
+(?d)**/out
+(?d)**/build
+(?d)**/dist
+(?d)**/coverage
+(?d)**/tmp
+(?d)**/*.log
+

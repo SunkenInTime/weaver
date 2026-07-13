@@ -1,0 +1,5 @@
+# This directory is a Syncthing folder marker.
+# Do not delete.
+
+folderID: weaver
+created: 2026-07-12T17:17:47-07:00

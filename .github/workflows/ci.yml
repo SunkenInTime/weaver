@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install workspaces
+        run: npm ci
+
+      - name: Typecheck + unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
+          Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
+          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+
+      - name: Build runtime (ReleaseFast)
+        working-directory: runtime
+        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+      - name: Runtime tests
+        working-directory: runtime
+        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+      - name: Scaffold + check + bundle (headless slice of the v0 gate)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory ci-scratch | Out-Null
+          Set-Location ci-scratch
+          node ..\cli\bin\weaver.js init ciclock
+          node ..\cli\bin\weaver.js check ciclock
+          node ..\cli\bin\weaver.js bundle ciclock
+          if (-not (Test-Path ciclock\dist\bundle.js)) { throw "bundle missing" }
+          if (-not (Test-Path ciclock\dist\widget.json)) { throw "manifest missing" }
