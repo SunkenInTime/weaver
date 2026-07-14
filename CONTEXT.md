@@ -43,6 +43,12 @@ Creating a widget by prompting your own agent, prompt-to-desktop in under a
 minute. The primary authoring act in Weaver; hand-writing widget code is the
 special case, not the norm.
 
+## .weave file
+
+The packed, shareable form of a Widget: its source folder (TSX + manifest +
+assets) plus provenance/lineage, zipped. Never a compiled artifact — opening
+a .weave IS reading the widget (ADR 0004).
+
 ## Remix
 
 The act of personalizing someone else's Widget by having your agent patch its
