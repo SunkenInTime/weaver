@@ -27,7 +27,7 @@ export default widget({
         ctx.clear();
         const gap = 3;
         const width = (ctx.width - gap * (barCount - 1)) / barCount;
-        const step = Math.floor(frame.t * 30);
+        const step = Math.floor(frame.t * 60);
         for (let index = 0; index < barCount; index += 1) {
           const phase = ((step * 7 + index * 37) % 97) / 96;
           const height = 8 + phase * (ctx.height - 8);

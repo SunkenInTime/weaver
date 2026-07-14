@@ -357,20 +357,29 @@ fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 2) return fail(js, "setCanvasCommands expects id and Float64Array");
     const id = idArg(js, argv[0]) catch return fail(js, "invalid canvas node id");
-    const length_value = c.JS_GetPropertyStr(js, argv[1], "length");
-    defer c.JS_FreeValue(js, length_value);
-    var length: u32 = 0;
-    if (c.JS_IsException(length_value) or c.JS_ToUint32(js, &length, length_value) < 0 or length > tree_mod.max_canvas_wire_values) {
+    if (c.JS_GetTypedArrayType(argv[1]) != c.JS_TYPED_ARRAY_FLOAT64) {
+        return fail(js, "setCanvasCommands expects id and Float64Array");
+    }
+    var byte_offset: usize = 0;
+    var byte_length: usize = 0;
+    var bytes_per_element: usize = 0;
+    const array_buffer = c.JS_GetTypedArrayBuffer(js, argv[1], &byte_offset, &byte_length, &bytes_per_element);
+    if (c.JS_IsException(array_buffer)) return qjs.exceptionValue();
+    defer c.JS_FreeValue(js, array_buffer);
+    var buffer_length: usize = 0;
+    const buffer = c.JS_GetArrayBuffer(js, &buffer_length, array_buffer) orelse return fail(js, "canvas command buffer is detached");
+    if (bytes_per_element != @sizeOf(f64) or byte_length % @sizeOf(f64) != 0 or
+        byte_offset > buffer_length or byte_length > buffer_length - byte_offset)
+    {
+        return fail(js, "canvas command batch must be a valid Float64Array");
+    }
+    const length = byte_length / @sizeOf(f64);
+    if (length > tree_mod.max_canvas_wire_values) {
         return fail(js, "canvas command batch exceeds the native limit");
     }
     var values: [tree_mod.max_canvas_wire_values]f64 = undefined;
-    for (0..length) |index| {
-        const value = c.JS_GetPropertyUint32(js, argv[1], @intCast(index));
-        defer c.JS_FreeValue(js, value);
-        if (c.JS_IsException(value) or c.JS_ToFloat64(js, &values[index], value) < 0) {
-            return fail(js, "canvas command batch must contain only numbers");
-        }
-    }
+    const source: [*]const f64 = @ptrCast(@alignCast(buffer + byte_offset));
+    @memcpy(values[0..length], source[0..length]);
     state(js).tree.setCanvasCommands(id, values[0..length]) catch return fail(js, "invalid canvas command batch");
     return qjs.undefinedValue();
 }
