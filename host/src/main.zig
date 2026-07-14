@@ -1,5 +1,7 @@
 const std = @import("std");
+const audio = @import("audio.zig");
 const backoff = @import("backoff.zig");
+const media = @import("media.zig");
 const providers = @import("providers.zig");
 const registry = @import("registry.zig");
 
@@ -33,8 +35,11 @@ const Slot = struct {
     pipe: c.HANDLE = invalid_handle,
     wants_cpu: bool = false,
     wants_memory: bool = false,
+    wants_audio: bool = false,
+    wants_media: bool = false,
     cpu_sent: bool = false,
     memory_sent: bool = false,
+    media_sent: bool = false,
     artifact_mtime: i128 = 0,
     started_ms: u64 = 0,
     next_restart_ms: u64 = 0,
@@ -94,10 +99,16 @@ const Host = struct {
     cli_script: []const u8,
     slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
     sampler: providers.Sampler = .{},
+    audio_provider: audio.Provider = .{},
+    media_provider: media.Provider = .{},
     previous_cpu: [8192]u8 = undefined,
     previous_cpu_len: usize = 0,
     previous_memory: [512]u8 = undefined,
     previous_memory_len: usize = 0,
+    previous_media: [2048]u8 = undefined,
+    previous_media_len: usize = 0,
+    audio_pipe_frames: u64 = 0,
+    media_pipe_frames: u64 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -161,13 +172,17 @@ const Host = struct {
         defer manifest.deinit();
         slot.wants_cpu = false;
         slot.wants_memory = false;
+        slot.wants_audio = false;
+        slot.wants_media = false;
         for (manifest.value.subscribe) |name| {
             if (std.mem.eql(u8, name, "cpu")) slot.wants_cpu = true;
             if (std.mem.eql(u8, name, "memory")) slot.wants_memory = true;
+            if (std.mem.eql(u8, name, "audio")) slot.wants_audio = true;
+            if (std.mem.eql(u8, name, "media")) slot.wants_media = true;
         }
         var pipe_name_buffer: [256]u8 = undefined;
         var pipe_name: []const u8 = &.{};
-        if (slot.wants_cpu or slot.wants_memory) {
+        if (slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media) {
             pipe_name = try std.fmt.bufPrint(&pipe_name_buffer, "\\\\.\\pipe\\weaver-{d}-{x}", .{ c.GetCurrentProcessId(), std.hash.Wyhash.hash(now_ms, slot.name()) });
             const pipe_name_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, pipe_name);
             defer self.allocator.free(pipe_name_w);
@@ -212,6 +227,7 @@ const Host = struct {
         slot.sample_cursor = 0;
         slot.cpu_sent = false;
         slot.memory_sent = false;
+        slot.media_sent = false;
     }
 
     fn handleExit(self: *Host, slot: *Slot, now_ms: u64) void {
@@ -300,6 +316,52 @@ const Host = struct {
         self.previous_memory_len = memory.len;
     }
 
+    fn hasAudioSubscribers(self: *const Host) bool {
+        for (&self.slots) |slot| if (slot.process != null and slot.wants_audio) return true;
+        return false;
+    }
+
+    fn hasMediaSubscribers(self: *const Host) bool {
+        for (&self.slots) |slot| if (slot.process != null and slot.wants_media) return true;
+        return false;
+    }
+
+    fn sampleAudio(self: *Host, now_ms: u64) void {
+        const active = self.hasAudioSubscribers();
+        self.audio_provider.setActive(active, now_ms);
+        if (!active) return;
+        const frame = self.audio_provider.poll(now_ms) orelse return;
+        var buffer: [512]u8 = undefined;
+        const encoded = audio.formatFrame(frame, &buffer) catch return;
+        var delivered = false;
+        for (&self.slots) |*slot| {
+            if (slot.pipe == invalid_handle or !slot.wants_audio) continue;
+            if (writePipe(slot.pipe, encoded)) delivered = true;
+        }
+        if (delivered) self.audio_pipe_frames += 1;
+    }
+
+    fn sampleMedia(self: *Host, now_ms: u64) void {
+        const active = self.hasMediaSubscribers();
+        self.media_provider.setActive(active, now_ms);
+        if (!active) return;
+        const frame = self.media_provider.poll(now_ms) orelse return;
+        var buffer: [2048]u8 = undefined;
+        const encoded = media.formatFrame(&frame, &buffer) catch return;
+        const changed = !std.mem.eql(u8, encoded, self.previous_media[0..self.previous_media_len]);
+        var delivered = false;
+        for (&self.slots) |*slot| {
+            if (slot.pipe == invalid_handle or !slot.wants_media) continue;
+            if ((!slot.media_sent or changed) and writePipe(slot.pipe, encoded)) {
+                slot.media_sent = true;
+                delivered = true;
+            }
+        }
+        if (delivered) self.media_pipe_frames += 1;
+        @memcpy(self.previous_media[0..encoded.len], encoded);
+        self.previous_media_len = encoded.len;
+    }
+
     fn writeStatus(self: *Host, now_ms: u64) void {
         var output: std.Io.Writer.Allocating = .init(self.allocator);
         defer output.deinit();
@@ -307,6 +369,17 @@ const Host = struct {
         json.beginObject() catch return;
         json.objectField("hostPid") catch return;
         json.write(c.GetCurrentProcessId()) catch return;
+        json.objectField("providers") catch return;
+        json.beginObject() catch return;
+        json.objectField("audioCaptureActive") catch return;
+        json.write(self.audio_provider.capture != null) catch return;
+        json.objectField("audioSilent") catch return;
+        json.write(self.audio_provider.silent) catch return;
+        json.objectField("audioPipeFrames") catch return;
+        json.write(self.audio_pipe_frames) catch return;
+        json.objectField("mediaPipeFrames") catch return;
+        json.write(self.media_pipe_frames) catch return;
+        json.endObject() catch return;
         json.objectField("widgets") catch return;
         json.beginArray() catch return;
         for (&self.slots) |*slot| {
@@ -413,16 +486,21 @@ pub fn main(init: std.process.Init) !void {
         .runtime_exe = runtime_exe,
         .cli_script = cli_script,
     };
+    defer host.audio_provider.deinit();
+    defer host.media_provider.deinit();
     try host.loadRegistry();
     var next_provider_ms: u64 = 0;
     var next_cost_ms: u64 = 0;
     while (true) {
         const handles = [_]c.HANDLE{ shutdown_event, reload_event };
-        const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, 250);
+        const wait_ms: c.DWORD = if (host.hasAudioSubscribers()) 10 else 250;
+        const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, wait_ms);
         if (wait == c.WAIT_OBJECT_0) break;
         if (wait == c.WAIT_OBJECT_0 + 1) host.loadRegistry() catch {};
         const now = c.GetTickCount64();
         host.supervise(now);
+        host.sampleAudio(now);
+        host.sampleMedia(now);
         if (now >= next_provider_ms) {
             host.sampleProviders();
             next_provider_ms = now + 1000;
@@ -510,7 +588,9 @@ fn closeWindowsForProcess(pid: u32) void {
 }
 
 test {
+    _ = audio;
     _ = registry;
     _ = backoff;
+    _ = media;
     _ = providers;
 }
