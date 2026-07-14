@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-export interface Registration { name: string; sourcePath: string; enabled: boolean }
+export interface Registration { name: string; sourcePath: string; enabled: boolean; dev?: boolean }
 export interface RegistryDocument { widgets: Registration[] }
 export interface WidgetStatus {
   name: string;
@@ -31,7 +31,7 @@ export function readRegistry(path = registryPath()): RegistryDocument {
   const parsed = JSON.parse(readFileSync(path, "utf8")) as RegistryDocument;
   if (!parsed || !Array.isArray(parsed.widgets)) throw new Error(`Invalid Weaver registry at ${path}`);
   return { widgets: parsed.widgets.map((widget) => ({
-    name: String(widget.name), sourcePath: resolve(String(widget.sourcePath)), enabled: Boolean(widget.enabled),
+    name: String(widget.name), sourcePath: resolve(String(widget.sourcePath)), enabled: Boolean(widget.enabled), dev: Boolean(widget.dev),
   })) };
 }
 

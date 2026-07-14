@@ -24,11 +24,11 @@ pub const Engine = struct {
     runtime: *c.JSRuntime,
     context: *c.JSContext,
     bridge_state: bridge.State,
-    provider: provider_mod.Client = .{},
+    provider: *provider_mod.Client,
     deadline_ms: u64 = 0,
     executing: bool = false,
 
-    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8, host_pipe: ?[]const u8) !*Engine {
+    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8, provider: *provider_mod.Client) !*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
         const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
@@ -39,10 +39,9 @@ pub const Engine = struct {
             .runtime = runtime,
             .context = context,
             .bridge_state = undefined,
+            .provider = provider,
         };
-        try self.provider.init(host_pipe);
-        errdefer self.provider.deinit();
-        self.bridge_state = .{ .tree = tree, .storage = storage, .provider = &self.provider, .origins = origins };
+        self.bridge_state = .{ .tree = tree, .storage = storage, .provider = provider, .origins = origins };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
@@ -52,7 +51,6 @@ pub const Engine = struct {
     pub fn destroy(self: *Engine, allocator: std.mem.Allocator) void {
         self.flushStorage();
         bridge.deinit(self.context, &self.bridge_state);
-        self.provider.deinit();
         c.JS_FreeContext(self.context);
         c.JS_FreeRuntime(self.runtime);
         allocator.destroy(self);
@@ -74,6 +72,33 @@ pub const Engine = struct {
 
     pub fn timers(self: *const Engine) []const bridge.TimerSlot {
         return &self.bridge_state.timers;
+    }
+
+    pub fn setTree(self: *Engine, tree: *tree_mod.Tree) void {
+        self.bridge_state.tree = tree;
+    }
+
+    pub fn setHotSwapSeed(self: *Engine, seed: []const u8) Error!void {
+        const global = c.JS_GetGlobalObject(self.context);
+        defer c.JS_FreeValue(self.context, global);
+        const value = c.JS_NewStringLen(self.context, seed.ptr, seed.len);
+        if (c.JS_IsException(value) or c.JS_SetPropertyStr(self.context, global, "__weaverHotSwapSeed", value) < 0) return error.QuickJs;
+    }
+
+    pub fn captureHotSwap(self: *Engine, allocator: std.mem.Allocator) ?[]u8 {
+        const result = self.callGlobal("__weaverCaptureHotSwap") catch return null;
+        defer c.JS_FreeValue(self.context, result);
+        if (!c.JS_IsString(result)) return null;
+        var len: usize = 0;
+        const raw = c.JS_ToCStringLen2(self.context, &len, result, false) orelse return null;
+        defer c.JS_FreeCString(self.context, raw);
+        return allocator.dupe(u8, raw[0..len]) catch null;
+    }
+
+    pub fn hotSwapAccepted(self: *Engine) bool {
+        const result = self.callGlobal("__weaverHotSwapAccepted") catch return false;
+        defer c.JS_FreeValue(self.context, result);
+        return c.JS_ToBool(self.context, result) == 1;
     }
 
     pub fn fireTimer(self: *Engine, timer_id: u64, timestamp_ns: u64) Error!void {
@@ -142,6 +167,22 @@ pub const Engine = struct {
             if (result == 0) return;
             if (result < 0) return self.reportExceptionFrom(job_context orelse self.context);
         }
+    }
+
+    fn callGlobal(self: *Engine, name: [*:0]const u8) Error!c.JSValue {
+        self.beginTurn();
+        defer self.endTurn();
+        const global = c.JS_GetGlobalObject(self.context);
+        defer c.JS_FreeValue(self.context, global);
+        const callback = c.JS_GetPropertyStr(self.context, global, name);
+        defer c.JS_FreeValue(self.context, callback);
+        if (!c.JS_IsFunction(self.context, callback)) return error.QuickJs;
+        const result = c.JS_Call(self.context, callback, qjs.undefinedValue(), 0, null);
+        if (c.JS_IsException(result)) {
+            c.JS_FreeValue(self.context, result);
+            return self.reportException();
+        }
+        return result;
     }
 
     fn beginTurn(self: *Engine) void {

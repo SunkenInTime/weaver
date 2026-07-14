@@ -78,6 +78,13 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "storageWrite", storageWrite, 1);
     try setFunction(ctx, native, "log", log, 1);
     if (c.JS_SetPropertyStr(ctx, global, "native", native) < 0) return error.QuickJs;
+    const console = c.JS_NewObject(ctx);
+    if (c.JS_IsException(console)) return error.QuickJs;
+    errdefer c.JS_FreeValue(ctx, console);
+    try setFunction(ctx, console, "log", consoleLog, 1);
+    try setFunction(ctx, console, "warn", consoleLog, 1);
+    try setFunction(ctx, console, "error", consoleLog, 1);
+    if (c.JS_SetPropertyStr(ctx, global, "console", console) < 0) return error.QuickJs;
 }
 
 pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
@@ -616,6 +623,22 @@ fn log(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueCo
     const value = stringArg(js, argv[0]) catch return fail(js, "log expects one string");
     defer c.JS_FreeCString(js, value.raw);
     std.log.info("widget: {s}", .{value.bytes});
+    return qjs.undefinedValue();
+}
+
+fn consoleLog(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    var index: usize = 0;
+    while (index < @as(usize, @intCast(argc))) : (index += 1) {
+        if (index > 0) writer.writeByte(' ') catch break;
+        var len: usize = 0;
+        const raw = c.JS_ToCStringLen2(js, &len, argv[index], false) orelse continue;
+        defer c.JS_FreeCString(js, raw);
+        writer.writeAll(raw[0..len]) catch break;
+    }
+    std.log.info("widget console: {s}", .{writer.buffered()});
     return qjs.undefinedValue();
 }
 

@@ -102,6 +102,13 @@ interface StateHook<T> { kind: "state"; value: T }
 interface RefHook<T> { kind: "ref"; value: { current: T } }
 interface EffectHook { kind: "effect"; deps?: unknown[]; cleanup?: () => void; effect?: () => void | (() => void) }
 
+type HotSwapValueType = "undefined" | "null" | "boolean" | "number" | "string" | "bigint" | "symbol" | "function" | "array" | "object";
+interface HotSwapSlot { kind: Hook["kind"]; valueType?: HotSwapValueType; value?: unknown; transferable?: boolean }
+
+const encodedHotSwapSeed = (globalThis as typeof globalThis & { __weaverHotSwapSeed?: unknown }).__weaverHotSwapSeed;
+let hotSwapSeed: HotSwapSlot[] | null = parseHotSwapSeed(encodedHotSwapSeed);
+let hotSwapCompatible = hotSwapSeed !== null;
+
 export const Fragment = Symbol("weaver.fragment");
 
 let rootComponent: Component | null = null;
@@ -163,7 +170,8 @@ export function useState<T>(initial: T | (() => T)): [T, (next: T | ((previous: 
   const index = component.hookIndex++;
   let hook = component.hooks[index] as StateHook<T> | undefined;
   if (!hook) {
-    hook = { kind: "state", value: typeof initial === "function" ? (initial as () => T)() : initial };
+    const fresh = typeof initial === "function" ? (initial as () => T)() : initial;
+    hook = { kind: "state", value: seedHookValue(component, index, "state", fresh) };
     component.hooks[index] = hook as StateHook<unknown>;
   } else if (hook.kind !== "state") {
     throw hookOrderError("useState", index);
@@ -181,7 +189,7 @@ export function useRef<T>(initial: T): { current: T } {
   const index = component.hookIndex++;
   let hook = component.hooks[index] as RefHook<T> | undefined;
   if (!hook) {
-    hook = { kind: "ref", value: { current: initial } };
+    hook = { kind: "ref", value: { current: seedHookValue(component, index, "ref", initial) } };
     component.hooks[index] = hook as RefHook<unknown>;
   } else if (hook.kind !== "ref") {
     throw hookOrderError("useRef", index);
@@ -196,6 +204,7 @@ export function useEffect(effect: () => void | (() => void), deps?: unknown[]): 
   if (!hook) {
     hook = { kind: "effect" };
     component.hooks[index] = hook;
+    matchEffectSeed(component, index);
   } else if (hook.kind !== "effect") {
     throw hookOrderError("useEffect", index);
   }
@@ -719,6 +728,59 @@ function validateRuntimeConfig(config: WidgetConfig, component: Component): void
   if (config.capabilities && config.capabilities.length > 0) throw new Error("Widget capabilities are not exposed in M2a; capabilities must be empty");
 }
 
+function parseHotSwapSeed(value: unknown): HotSwapSlot[] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((slot) => !slot || typeof slot !== "object" || !["state", "ref", "effect"].includes(String((slot as HotSwapSlot).kind)))) return null;
+    return parsed as HotSwapSlot[];
+  } catch {
+    return null;
+  }
+}
+
+function hotSwapValueType(value: unknown): HotSwapValueType {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function seedHookValue<T>(component: ComponentInstance, index: number, kind: "state" | "ref", fresh: T): T {
+  if (component.type !== rootComponent || !hotSwapSeed) return fresh;
+  const slot = hotSwapSeed[index];
+  const freshType = hotSwapValueType(fresh);
+  if (!slot || slot.kind !== kind || slot.valueType !== freshType || (slot.transferable !== false && hotSwapValueType(slot.value) !== slot.valueType)) {
+    hotSwapCompatible = false;
+    return fresh;
+  }
+  return slot.transferable === false ? fresh : slot.value as T;
+}
+
+function matchEffectSeed(component: ComponentInstance, index: number): void {
+  if (component.type !== rootComponent || !hotSwapSeed) return;
+  if (hotSwapSeed[index]?.kind !== "effect") hotSwapCompatible = false;
+}
+
+function captureHotSwap(): string | null {
+  if (rootInstance?.kind !== "component" || rootInstance.type !== rootComponent) return null;
+  try {
+    return JSON.stringify(rootInstance.hooks.map((hook): HotSwapSlot => {
+      if (hook.kind === "effect") return { kind: "effect" };
+      const value = hook.kind === "ref" ? hook.value.current : hook.value;
+      const valueType = hotSwapValueType(value);
+      if (["undefined", "bigint", "symbol", "function"].includes(valueType)) return { kind: hook.kind, valueType, transferable: false };
+      return { kind: hook.kind, valueType, value };
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function hotSwapAccepted(): boolean {
+  if (!hotSwapSeed) return true;
+  return hotSwapCompatible && rootInstance?.kind === "component" && rootInstance.type === rootComponent && rootInstance.hooks.length === hotSwapSeed.length;
+}
+
 function readStorage(): Record<string, unknown> {
   if (storageValues) return storageValues;
   const raw = native.storageRead();
@@ -771,6 +833,8 @@ native.onEvent((id, kind, payload) => {
 });
 Object.defineProperty(globalThis, "wfetch", { value: wfetch, configurable: false, writable: false });
 Object.defineProperty(globalThis, "__weaverFlushStorage", { value: flushStorage, configurable: false, writable: false });
+Object.defineProperty(globalThis, "__weaverCaptureHotSwap", { value: captureHotSwap, configurable: false, writable: false });
+Object.defineProperty(globalThis, "__weaverHotSwapAccepted", { value: hotSwapAccepted, configurable: false, writable: false });
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
