@@ -40,11 +40,11 @@ test("origin matching is HTTPS-only and exact-host", () => {
 
 test("status table is aligned and includes crash reasons", () => {
   const table = hostTools.formatStatus({ hostPid: 1, widgets: [
-    { name: "Clock", pid: 42, privateMb: 9.55, cpuPercent: 0.2, uptimeSeconds: 65, state: "running", reason: "" },
-    { name: "Broken", pid: 0, privateMb: 0, cpuPercent: 0, uptimeSeconds: 0, state: "stopped", reason: "crashed 3 times" },
+    { name: "Clock", pid: 42, backend: "software", privateMb: 9.55, cpuPercent: 0.2, uptimeSeconds: 65, state: "running", reason: "" },
+    { name: "Broken", pid: 0, backend: "-", privateMb: 0, cpuPercent: 0, uptimeSeconds: 0, state: "stopped", reason: "crashed 3 times" },
   ] });
-  assert.match(table, /^NAME\s+PID\s+PRIVATE\s+CPU\s+UPTIME\s+STATE/m);
-  assert.match(table, /Broken\s+-\s+0\.0 MB\s+0\.0%\s+0s\s+stopped: crashed 3 times/);
+  assert.match(table, /^NAME\s+PID\s+BACKEND\s+PRIVATE\s+CPU\s+UPTIME\s+STATE/m);
+  assert.match(table, /Broken\s+-\s+-\s+0\.0 MB\s+0\.0%\s+0s\s+stopped: crashed 3 times/);
 });
 
 test("bundle manifest is the subscription origin of truth", () => {
@@ -64,7 +64,9 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
     writeFileSync(sourcePath, source, "utf8");
     const result = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8")).subscribe, ["cpu", "memory", "audio", "media"]);
+    const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
+    assert.deepEqual(manifest.subscribe, ["cpu", "memory", "audio", "media"]);
+    assert.equal(manifest.renderBackend, "software");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

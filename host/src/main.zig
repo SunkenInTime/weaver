@@ -15,6 +15,7 @@ const mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostSing
 const shutdown_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostShutdownV2");
 const reload_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadV2");
 const env_pipe_name = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_HOST_PIPE");
+const env_backend_file = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_BACKEND_FILE");
 const max_widgets: usize = 32;
 const max_name_bytes: usize = 128;
 const max_path_bytes: usize = 2048;
@@ -53,10 +54,13 @@ const Slot = struct {
     cpu_samples: [15]f64 = [_]f64{0} ** 15,
     sample_count: usize = 0,
     sample_cursor: usize = 0,
+    backend_path_buffer: [max_path_bytes]u8 = undefined,
+    backend_path_len: usize = 0,
 
     fn name(self: *const Slot) []const u8 { return self.name_buffer[0..self.name_len]; }
     fn source(self: *const Slot) []const u8 { return self.source_buffer[0..self.source_len]; }
     fn reason(self: *const Slot) []const u8 { return self.reason_buffer[0..self.reason_len]; }
+    fn backendPath(self: *const Slot) []const u8 { return self.backend_path_buffer[0..self.backend_path_len]; }
 
     fn setRegistration(self: *Slot, value: registry.Registration) !void {
         if (value.name.len > self.name_buffer.len or value.sourcePath.len > self.source_buffer.len) return error.RegistrationTooLong;
@@ -201,8 +205,16 @@ const Host = struct {
             defer self.allocator.free(value_w);
             if (c.SetEnvironmentVariableW(env_pipe_name, value_w.ptr) == 0) return error.SetEnvironmentFailed;
         }
+        const backend_hash = std.hash.Wyhash.hash(0, slot.name());
+        const backend_path = try std.fmt.bufPrint(&slot.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
+        slot.backend_path_len = backend_path.len;
+        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch {};
+        const backend_path_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, backend_path);
+        defer self.allocator.free(backend_path_w);
+        if (c.SetEnvironmentVariableW(env_backend_file, backend_path_w.ptr) == 0) return error.SetEnvironmentFailed;
         defer {
             if (pipe_name.len > 0) _ = c.SetEnvironmentVariableW(env_pipe_name, null);
+            _ = c.SetEnvironmentVariableW(env_backend_file, null);
         }
         var startup: c.STARTUPINFOW = std.mem.zeroes(c.STARTUPINFOW);
         startup.cb = @sizeOf(c.STARTUPINFOW);
@@ -394,6 +406,14 @@ const Host = struct {
             json.write(average.private_mb) catch return;
             json.objectField("cpuPercent") catch return;
             json.write(average.cpu) catch return;
+            json.objectField("backend") catch return;
+            if (slot.process != null and slot.backend_path_len > 0) {
+                const backend = std.Io.Dir.cwd().readFileAlloc(self.io, slot.backendPath(), self.allocator, .limited(16)) catch null;
+                if (backend) |value| {
+                    json.write(value) catch { self.allocator.free(value); return; };
+                    self.allocator.free(value);
+                } else json.write("-") catch return;
+            } else json.write("-") catch return;
             json.objectField("uptimeSeconds") catch return;
             json.write(if (slot.process != null) (now_ms -| slot.started_ms) / 1000 else 0) catch return;
             json.objectField("state") catch return;

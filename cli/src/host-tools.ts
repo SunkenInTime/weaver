@@ -8,6 +8,7 @@ export interface WidgetStatus {
   pid: number;
   privateMb: number;
   cpuPercent: number;
+  backend: "gpu" | "software" | "-";
   uptimeSeconds: number;
   state: "disabled" | "starting" | "running" | "backoff" | "stopped";
   reason: string;
@@ -45,10 +46,11 @@ export function readStatus(path = statusPath()): StatusDocument {
 }
 
 export function formatStatus(document: StatusDocument): string {
-  const headings = ["NAME", "PID", "PRIVATE", "CPU", "UPTIME", "STATE"];
+  const headings = ["NAME", "PID", "BACKEND", "PRIVATE", "CPU", "UPTIME", "STATE"];
   const rows = document.widgets.map((widget) => [
     widget.name,
     widget.pid === 0 ? "-" : String(widget.pid),
+    widget.backend ?? "-",
     `${widget.privateMb.toFixed(1)} MB`,
     `${widget.cpuPercent.toFixed(1)}%`,
     formatUptime(widget.uptimeSeconds),

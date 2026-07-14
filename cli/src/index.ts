@@ -163,8 +163,21 @@ async function bundleWidget(directory: string): Promise<void> {
     transparent: true,
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
+    renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
   };
   writeFileSync(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (node.tagName.getText(sourceFile) === "canvas") found = true;
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
 }
 
 /// `dist` is the runtime artifact, so local image paths must mean the same

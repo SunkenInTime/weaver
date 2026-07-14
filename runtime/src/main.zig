@@ -41,6 +41,7 @@ const Effects = WidgetApp.Effects;
 var rendered_presents: u64 = 0;
 var first_render_ns: u64 = 0;
 var last_canvas_revision: u64 = 0;
+var logged_backend: bool = false;
 
 fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
@@ -202,6 +203,10 @@ fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) vo
 }
 
 fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
+    if (!logged_backend) {
+        logged_backend = true;
+        std.log.info("widget renderer backend={s}", .{@tagName(frame.backend)});
+    }
     // A present completion produces a second frame event carrying the same
     // retained-canvas revision. M0 counted both events as presents; revision
     // edges identify actual newly rendered display lists at this callback.
@@ -350,7 +355,7 @@ pub fn main(init: std.process.Init) !void {
         .fill = true,
         .role = "Weaver widget canvas",
         .accessibility_label = loaded.manifest.name,
-        .gpu_backend = .software,
+        .gpu_backend = if (std.mem.eql(u8, loaded.manifest.renderBackend, "gpu")) .d3d11 else .software,
         .gpu_pixel_format = .bgra8_unorm,
         .gpu_present_mode = .timer,
         .gpu_alpha_mode = .premultiplied,

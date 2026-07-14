@@ -18,6 +18,7 @@ pub const Manifest = struct {
     transparent: bool = true,
     origins: []const []const u8 = &.{},
     subscribe: []const []const u8 = &.{},
+    renderBackend: []const u8 = "software",
 };
 
 pub const Loaded = struct {
@@ -41,6 +42,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     }
     if (!std.mem.eql(u8, parsed.layer, "desktop") and !std.mem.eql(u8, parsed.layer, "normal") and !std.mem.eql(u8, parsed.layer, "topmost")) return error.UnsupportedLayer;
     if (!parsed.transparent) return error.UnsupportedOpaqueWidget;
+    if (!std.mem.eql(u8, parsed.renderBackend, "gpu") and !std.mem.eql(u8, parsed.renderBackend, "software")) return error.InvalidRenderBackend;
     for (parsed.origins) |origin| {
         if (origin.len == 0 or std.mem.indexOf(u8, origin, "://") != null or std.mem.indexOfAny(u8, origin, "/?#@") != null) return error.InvalidOrigin;
     }
