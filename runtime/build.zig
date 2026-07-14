@@ -2,8 +2,11 @@ const std = @import("std");
 const native_sdk = @import("native_sdk");
 
 pub fn build(b: *std.Build) void {
-    const artifacts = native_sdk.addAppArtifacts(b, b.dependency("native_sdk", .{}), .{
+    const artifacts = native_sdk.addAppArtifacts(b, b.dependency("native_sdk", .{
+        .@"widget-profile" = true,
+    }), .{
         .name = "weaver-widget",
+        .widget_profile = true,
     });
     const c_flags = &.{
         "-std=c11",

@@ -6,6 +6,18 @@ const manifest_mod = @import("manifest.zig");
 const storage_mod = @import("storage.zig");
 const tree_mod = @import("tree.zig");
 
+comptime {
+    if (native_sdk.platform.max_windows != 1 or
+        native_sdk.platform.max_views != 1 or
+        native_sdk.platform.max_webviews != 1 or
+        native_sdk.runtime.max_canvas_commands_per_view != 128 or
+        native_sdk.runtime.max_canvas_path_elements_per_view != 256 or
+        native_sdk.runtime.max_canvas_widget_nodes_per_view != 128)
+    {
+        @compileError("Weaver runtime must be built with the Native SDK widget profile");
+    }
+}
+
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
 pub const Model = struct {

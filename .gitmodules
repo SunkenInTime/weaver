@@ -1,4 +1,4 @@
 [submodule "runtime/native-sdk"]
 	path = runtime/native-sdk
 	url = https://github.com/SunkenInTime/native.git
-	branch = weaver-fork
+	branch = weaver-main
