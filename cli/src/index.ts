@@ -1,10 +1,11 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
+import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
@@ -35,7 +36,7 @@ interface WidgetConfigData {
   };
   layer?: "desktop" | "normal" | "topmost";
   clickThrough?: boolean;
-  subscribe?: "time"[];
+  subscribe?: ("time" | "cpu" | "memory")[];
   origins?: string[];
   capabilities?: never[];
 }
@@ -129,6 +130,7 @@ async function bundleWidget(directory: string): Promise<void> {
   const project = checkWidget(directory);
   const outputDirectory = join(directory, "dist");
   mkdirSync(outputDirectory, { recursive: true });
+  copyWidgetAssets(directory, outputDirectory);
   await build({
     entryPoints: [project.sourcePath],
     outfile: join(outputDirectory, "bundle.js"),
@@ -150,8 +152,30 @@ async function bundleWidget(directory: string): Promise<void> {
     layer: project.config.layer ?? "desktop",
     clickThrough: project.config.clickThrough ?? false,
     transparent: true,
+    origins: project.config.origins ?? [],
   };
   writeFileSync(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+/// `dist` is the runtime artifact, so local image paths must mean the same
+/// thing after install as they did beside widget.tsx. Copy every ordinary
+/// widget-owned file recursively while excluding authoring/build outputs;
+/// dynamic local `src` expressions then remain valid without a magic asset
+/// directory or source-tree dependency.
+function copyWidgetAssets(sourceDirectory: string, outputDirectory: string): void {
+  for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
+    if (["dist", "widget.tsx", "tsconfig.json"].includes(entry.name)) continue;
+    const source = join(sourceDirectory, entry.name);
+    const destination = join(outputDirectory, entry.name);
+    if (entry.isDirectory()) {
+      mkdirSync(destination, { recursive: true });
+      copyWidgetAssets(source, destination);
+    } else if (entry.isFile()) {
+      copyFileSync(source, destination);
+    } else {
+      throw new WeaverFailure([`Local widget asset ${source} must be a regular file or directory; links are not bundled.`]);
+    }
+  }
 }
 
 function weaverResolutionPlugin(): import("esbuild").Plugin {
@@ -161,7 +185,7 @@ function weaverResolutionPlugin(): import("esbuild").Plugin {
       pluginBuild.onResolve({ filter: /^@weaver\/sdk$/ }, () => ({ path: join(sdkRoot, "index.ts") }));
       pluginBuild.onResolve({ filter: /^@weaver\/sdk\/jsx-runtime$/ }, () => ({ path: join(sdkRoot, "jsx-runtime.ts") }));
       pluginBuild.onResolve({ filter: /^[^./]|^\.[^./]|^\.\.$/ }, (args) => args.kind === "entry-point" ? null : ({
-        errors: [{ text: `External import "${args.path}" is not allowed in a widget. M1 bundles only @weaver/sdk.` }],
+        errors: [{ text: `External import "${args.path}" is not allowed in a widget. Only @weaver/sdk imports are bundled.` }],
       }));
     },
   };
@@ -306,10 +330,10 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   }
   if (value.layer !== undefined && !["desktop", "normal", "topmost"].includes(String(value.layer))) errors.push(locationMessage(sourceFile, node, "config.layer must be desktop, normal, or topmost"));
   if (value.clickThrough !== undefined && typeof value.clickThrough !== "boolean") errors.push(locationMessage(sourceFile, node, "config.clickThrough must be boolean"));
-  if (value.subscribe !== undefined && (!Array.isArray(value.subscribe) || value.subscribe.some((item) => item !== "time"))) errors.push(locationMessage(sourceFile, node, 'M1 supports only subscribe: ["time"]'));
-  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities) || value.capabilities.length > 0)) errors.push(locationMessage(sourceFile, node, "Widget capabilities arrive in M2; capabilities must be empty in M1"));
+  if (value.subscribe !== undefined && (!Array.isArray(value.subscribe) || value.subscribe.some((item) => !["time", "cpu", "memory"].includes(String(item))))) errors.push(locationMessage(sourceFile, node, 'config.subscribe supports only "time", "cpu", and "memory"'));
+  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities) || value.capabilities.length > 0)) errors.push(locationMessage(sourceFile, node, "Widget capabilities are not exposed in M2a; capabilities must be empty"));
   if (value.origins !== undefined) {
-    if (!Array.isArray(value.origins) || value.origins.some((origin) => !validOrigin(origin))) errors.push(locationMessage(sourceFile, node, "config.origins entries must be literal http(s) origins such as https://api.example.com; fetch arrives in M2"));
+    if (!Array.isArray(value.origins) || value.origins.some((origin) => !validOriginHost(origin))) errors.push(locationMessage(sourceFile, node, 'config.origins entries must be exact hosts such as "api.example.com"'));
   }
   if (errors.length > 0) return null;
   return value as unknown as WidgetConfigData;
@@ -317,12 +341,11 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
 
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
-  let usesTime = false;
+  const usedProviders = new Set<"time" | "cpu" | "memory">();
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(project.sourceFile);
-      const schedule = tag === "canvas" ? "M3" : ["image", "button", "slider"].includes(tag) ? "M2" : null;
-      if (schedule) errors.push(locationMessage(project.sourceFile, node, `<${tag}> arrives in ${schedule}`));
+      if (tag === "canvas") errors.push(locationMessage(project.sourceFile, node, "<canvas> arrives in M3"));
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "class");
       if (classAttribute) {
         const classText = jsxStringValue(classAttribute.initializer);
@@ -332,15 +355,32 @@ function validateSource(project: SourceProject): string[] {
           catch (error) { errors.push(locationMessage(project.sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
         }
       }
+      if (tag === "image") {
+        const sourceAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "src");
+        const source = sourceAttribute ? jsxStringValue(sourceAttribute.initializer) : null;
+        if (source !== null && (/^[a-z][a-z0-9+.-]*:/i.test(source) || source.startsWith("//"))) {
+          errors.push(locationMessage(project.sourceFile, sourceAttribute ?? node, "RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path"));
+        }
+      }
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "useProvider") {
       const argument = node.arguments[0];
-      if (argument && ts.isStringLiteral(argument) && argument.text === "time") usesTime = true;
+      if (argument && ts.isStringLiteral(argument) && ["time", "cpu", "memory"].includes(argument.text)) usedProviders.add(argument.text as "time" | "cpu" | "memory");
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "wfetch") {
+      const argument = node.arguments[0];
+      if (argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) {
+        const host = originHost(argument.text);
+        if (host === null) errors.push(locationMessage(project.sourceFile, argument, "wfetch requires an https:// URL"));
+        else if (!originDeclared(project.config.origins ?? [], host)) errors.push(locationMessage(project.sourceFile, argument, originNotDeclaredMessage(host)));
+      }
     }
     ts.forEachChild(node, visit);
   };
   visit(project.sourceFile);
-  if (usesTime && !project.config.subscribe?.includes("time")) errors.push('useProvider("time") requires subscribe: ["time"] in the widget config');
+  for (const provider of usedProviders) {
+    if (!project.config.subscribe?.includes(provider)) errors.push(`useProvider("${provider}") requires subscribe: ["${provider}"] in the widget config`);
+  }
   return errors;
 }
 
@@ -361,14 +401,6 @@ function jsxStringValue(initializer: ts.JsxAttributeValue | undefined): string |
 function locationMessage(sourceFile: ts.SourceFile, node: ts.Node, message: string): string {
   const point = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   return `${sourceFile.fileName}:${point.line + 1}:${point.character + 1}: ${message}`;
-}
-
-function validOrigin(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  try {
-    const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && value.replace(/\/$/, "") === url.origin;
-  } catch { return false; }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
