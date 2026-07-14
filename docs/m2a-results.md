@@ -50,7 +50,9 @@ after a future install.
 
 - WinHTTP is the Windows TLS implementation. Four request workers may run at
   once; QuickJS is touched only when the Native main loop drains a completed
-  slot. The worker timer exists only while a request is active.
+  slot. Request buffers and the worker timer exist only while a request is
+  active, so the network capability adds no fixed multi-megabyte allocation
+  to an idle widget.
 - Runtime policy is authoritative: HTTPS only, case-insensitive exact host
   match against manifest `origins`, a whole-exchange 15 second deadline,
   5 MiB response cap, and no cookies shared between requests.
@@ -116,19 +118,18 @@ failed with `<canvas> arrives in M3`.
 
 Windows 11, ReleaseFast, 320x210 transparent desktop-layer pomodoro. CPU is
 `TotalProcessorTime` delta over 15 seconds expressed as percent of one core.
-The production row excludes `-Dautomation=true`; the automation rows show the
-overhead present during interaction proof.
+These are final production measurements without `-Dautomation=true`; the
+automation build was used only for the interaction proof above.
 
 | Build/state | Private WS | Total WS | Private bytes | Threads | CPU / one core |
 |---|---:|---:|---:|---:|---:|
-| Production, paused | 14.24 MiB | 32.74 MiB | 22.45 MiB | 8 | 0.62% |
-| Production, running | 13.22 MiB | 31.87 MiB | 21.40 MiB | 7 | 1.14% |
-| Automation, paused | 13.59 MiB | 32.24 MiB | 37.34 MiB | 7 | 1.87% |
-| Automation, running | 13.66 MiB | 32.46 MiB | 37.40 MiB | 7 | 2.50% |
+| Production, paused | 9.59 MiB | 27.90 MiB | 17.73 MiB | 4 | 0.52% |
+| Production, running | 9.66 MiB | 28.03 MiB | 17.79 MiB | 4 | 0.62% |
 
-The production binary is 6,774,784 bytes (6.46 MiB). Private working-set
-variation is Windows trimming noise; the CPU delta is the meaningful
-running-versus-paused signal.
+The production binary is 6,397,952 bytes (6.10 MiB). The running state adds
+about 68 KiB of private working set and 0.10 percentage points of one-core CPU
+in this sample; both figures are small enough that normal Windows scheduling
+and working-set trimming remain relevant noise.
 
 ## Honest caveats
 
