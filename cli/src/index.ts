@@ -38,7 +38,7 @@ interface WidgetConfigData {
   };
   layer?: "desktop" | "normal" | "topmost";
   clickThrough?: boolean;
-  subscribe?: ("time" | "cpu" | "memory")[];
+  subscribe?: ("time" | "cpu" | "memory" | "audio" | "media")[];
   origins?: string[];
   capabilities?: never[];
 }
@@ -416,7 +416,7 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   }
   if (value.layer !== undefined && !["desktop", "normal", "topmost"].includes(String(value.layer))) errors.push(locationMessage(sourceFile, node, "config.layer must be desktop, normal, or topmost"));
   if (value.clickThrough !== undefined && typeof value.clickThrough !== "boolean") errors.push(locationMessage(sourceFile, node, "config.clickThrough must be boolean"));
-  if (value.subscribe !== undefined && (!Array.isArray(value.subscribe) || value.subscribe.some((item) => !["time", "cpu", "memory"].includes(String(item))))) errors.push(locationMessage(sourceFile, node, 'config.subscribe supports only "time", "cpu", and "memory"'));
+  if (value.subscribe !== undefined && (!Array.isArray(value.subscribe) || value.subscribe.some((item) => !["time", "cpu", "memory", "audio", "media"].includes(String(item))))) errors.push(locationMessage(sourceFile, node, 'config.subscribe supports only "time", "cpu", "memory", "audio", and "media"'));
   if (value.capabilities !== undefined && (!Array.isArray(value.capabilities) || value.capabilities.length > 0)) errors.push(locationMessage(sourceFile, node, "Widget capabilities are not exposed in M2a; capabilities must be empty"));
   if (value.origins !== undefined) {
     if (!Array.isArray(value.origins) || value.origins.some((origin) => !validOriginHost(origin))) errors.push(locationMessage(sourceFile, node, 'config.origins entries must be exact hosts such as "api.example.com"'));
@@ -427,7 +427,7 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
 
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
-  const usedProviders = new Set<"time" | "cpu" | "memory">();
+  const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(project.sourceFile);
@@ -450,7 +450,7 @@ function validateSource(project: SourceProject): string[] {
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "useProvider") {
       const argument = node.arguments[0];
-      if (argument && ts.isStringLiteral(argument) && ["time", "cpu", "memory"].includes(argument.text)) usedProviders.add(argument.text as "time" | "cpu" | "memory");
+      if (argument && ts.isStringLiteral(argument) && ["time", "cpu", "memory", "audio", "media"].includes(argument.text)) usedProviders.add(argument.text as "time" | "cpu" | "memory" | "audio" | "media");
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "wfetch") {
       const argument = node.arguments[0];

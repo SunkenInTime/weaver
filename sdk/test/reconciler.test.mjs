@@ -55,9 +55,11 @@ test("widget renders one native generation and providers use native timers", asy
   let presses = 0;
   let sliderValue = 0;
   let retainedCanvasContext;
-  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu"] }, () => {
+  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu", "audio", "media"] }, () => {
     const time = sdk.useProvider("time");
     const cpu = sdk.useProvider("cpu");
+    const audio = sdk.useProvider("audio");
+    const media = sdk.useProvider("media");
     sdk.useInterval(() => {}, 2500);
     const [reversed, setReversed] = sdk.useState(false);
     const [minutes, setMinutes] = sdk.useStorage("minutes", 25);
@@ -67,6 +69,8 @@ test("widget renders one native generation and providers use native timers", asy
     return sdk.h("column", { class: "p-2" },
       sdk.h("text", null, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
+      sdk.h("text", null, audio.bands[0].toFixed(2)),
+      sdk.h("text", null, media.title),
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
@@ -111,8 +115,12 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(JSON.parse(storageDocument).minutes, 30);
   assert.equal(typeof providerCallback, "function");
   providerCallback('{"provider":"cpu","value":{"percent":37.5,"perCore":[30,45]}}');
+  providerCallback('{"provider":"audio","value":{"rms":0.25,"bands":[0.75]}}');
+  providerCallback('{"provider":"media","value":{"title":"Test Song","artist":"Artist","album":"Album","playing":true,"positionMs":10,"durationMs":20}}');
   await Promise.resolve();
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "37.5"));
+  assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "0.75"));
+  assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "Test Song"));
   const canvasNode = operations.findLast((operation) => operation[0] === "createNode" && operation[1] === "canvas")[2];
   const submit = operations.findLast((operation) => operation[0] === "setCanvasCommands" && operation[1] === canvasNode);
   assert.deepEqual(submit[2].slice(0, 2), [0, 0]);

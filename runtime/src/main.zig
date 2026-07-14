@@ -15,6 +15,7 @@ pub const Model = struct {
     armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
     fetch_poll_armed: bool = false,
     provider_poll_armed: bool = false,
+    provider_poll_interval_ms: u64 = 1000,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
@@ -72,6 +73,11 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 };
                 return;
             }
+            if (model.provider_poll_interval_ms <= 33) {
+                (model.engine orelse return).drainProviders() catch |err| {
+                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
+                };
+            }
             const before = model.tree.generation;
             (model.engine orelse return).fireTimer(timer.key, timer.timestamp_ns) catch |err| {
                 std.log.err("widget timer callback failed: {s}", .{@errorName(err)});
@@ -97,6 +103,11 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             syncTimers(model, effects);
         },
         .canvas_frame => |timestamp_ns| {
+            if (model.provider_poll_interval_ms <= 33) {
+                (model.engine orelse return).drainProviders() catch |err| {
+                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
+                };
+            }
             (model.engine orelse return).fireCanvasFrames(timestamp_ns) catch |err| {
                 std.log.err("widget canvas frame callback failed: {s}", .{@errorName(err)});
             };
@@ -152,14 +163,25 @@ fn syncTimers(model: *Model, effects: *Effects) void {
         effects.cancelTimer(fetch_poll_key);
         model.fetch_poll_armed = false;
     }
-    if (engine.hasHostProvider() and !model.provider_poll_armed) {
+    var has_fast_clock = engine.hasCanvasFrames();
+    if (!has_fast_clock) for (engine.timers()) |timer| {
+        if (timer.active and timer.interval_ms <= 40) {
+            has_fast_clock = true;
+            break;
+        }
+    };
+    const needs_provider_timer = engine.hasHostProvider() and !(model.provider_poll_interval_ms <= 33 and has_fast_clock);
+    if (needs_provider_timer and !model.provider_poll_armed) {
         effects.startTimer(.{
             .key = provider_poll_key,
-            .interval_ms = 1000,
+            .interval_ms = model.provider_poll_interval_ms,
             .mode = .repeating,
             .on_fire = Effects.timerMsg(.timer),
         });
         model.provider_poll_armed = true;
+    } else if (!needs_provider_timer and model.provider_poll_armed) {
+        effects.cancelTimer(provider_poll_key);
+        model.provider_poll_armed = false;
     }
 }
 
@@ -370,6 +392,9 @@ pub fn main(init: std.process.Init) !void {
     const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, init.environ_map.get("WEAVER_HOST_PIPE"));
     defer engine.destroy(std.heap.page_allocator);
     app_state.model.engine = engine;
+    for (loaded.manifest.subscribe) |provider| {
+        if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
+    }
     try engine.evaluate(loaded.bundle, "bundle.js");
     try loadLocalImages(init.io, allocator, args[1], &app_state.model);
 

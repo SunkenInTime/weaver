@@ -3,7 +3,7 @@ import { compileClass, type ClassProps } from "./class-compiler.js";
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
 export type NodeType = "column" | "row" | "panel" | "text" | "button" | "slider" | "image" | "canvas";
-export type ProviderName = "time" | "cpu" | "memory";
+export type ProviderName = "time" | "cpu" | "memory" | "audio" | "media";
 
 export interface WidgetConfig {
   name: string;
@@ -37,6 +37,8 @@ export interface TimeData {
 
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
+export interface AudioData { rms: number; bands: number[] }
+export interface MediaData { title: string; artist: string; album: string; playing: boolean; positionMs: number; durationMs: number }
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
 export interface CanvasFrame { t: number; dt: number }
@@ -213,7 +215,9 @@ export function useInterval(callback: () => void, milliseconds: number): void {
 export function useProvider(name: "time"): TimeData;
 export function useProvider(name: "cpu"): CpuData;
 export function useProvider(name: "memory"): MemoryData;
-export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData {
+export function useProvider(name: "audio"): AudioData;
+export function useProvider(name: "media"): MediaData;
+export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData | AudioData | MediaData {
   if (!activeConfig?.subscribe?.includes(name)) {
     throw new Error(`useProvider("${name}") requires subscribe: ["${name}"] in the widget config`);
   }
@@ -228,8 +232,18 @@ export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData
     useEffect(() => hostProviders.subscribeCpu(setValue), []);
     return value;
   }
-  const [value, setValue] = useState<MemoryData>(() => ({ usedMb: 0, totalMb: 0, percent: 0 }));
-  useEffect(() => hostProviders.subscribeMemory(setValue), []);
+  if (name === "memory") {
+    const [value, setValue] = useState<MemoryData>(() => ({ usedMb: 0, totalMb: 0, percent: 0 }));
+    useEffect(() => hostProviders.subscribeMemory(setValue), []);
+    return value;
+  }
+  if (name === "audio") {
+    const [value, setValue] = useState<AudioData>(() => ({ rms: 0, bands: Array.from({ length: 32 }, () => 0) }));
+    useEffect(() => hostProviders.subscribeAudio(setValue), []);
+    return value;
+  }
+  const [value, setValue] = useState<MediaData>(() => ({ title: "", artist: "", album: "", playing: false, positionMs: 0, durationMs: 0 }));
+  useEffect(() => hostProviders.subscribeMedia(setValue), []);
   return value;
 }
 
@@ -749,6 +763,8 @@ const timeProvider = (() => {
 const hostProviders = (() => {
   const cpuListeners = new Set<(value: CpuData) => void>();
   const memoryListeners = new Set<(value: MemoryData) => void>();
+  const audioListeners = new Set<(value: AudioData) => void>();
+  const mediaListeners = new Set<(value: MediaData) => void>();
   let installed = false;
   const install = (): void => {
     if (installed) return;
@@ -761,6 +777,12 @@ const hostProviders = (() => {
       } else if (frame.provider === "memory") {
         const value = frame.value as MemoryData;
         for (const listener of memoryListeners) listener(value);
+      } else if (frame.provider === "audio") {
+        const value = frame.value as AudioData;
+        for (const listener of audioListeners) listener(value);
+      } else if (frame.provider === "media") {
+        const value = frame.value as MediaData;
+        for (const listener of mediaListeners) listener(value);
       }
     });
   };
@@ -774,6 +796,16 @@ const hostProviders = (() => {
       install();
       memoryListeners.add(listener);
       return () => memoryListeners.delete(listener);
+    },
+    subscribeAudio(listener: (value: AudioData) => void): () => void {
+      install();
+      audioListeners.add(listener);
+      return () => audioListeners.delete(listener);
+    },
+    subscribeMedia(listener: (value: MediaData) => void): () => void {
+      install();
+      mediaListeners.add(listener);
+      return () => mediaListeners.delete(listener);
     },
   };
 })();

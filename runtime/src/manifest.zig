@@ -45,7 +45,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
         if (origin.len == 0 or std.mem.indexOf(u8, origin, "://") != null or std.mem.indexOfAny(u8, origin, "/?#@") != null) return error.InvalidOrigin;
     }
     for (parsed.subscribe) |provider| {
-        if (!std.mem.eql(u8, provider, "time") and !std.mem.eql(u8, provider, "cpu") and !std.mem.eql(u8, provider, "memory")) return error.InvalidProvider;
+        if (!std.mem.eql(u8, provider, "time") and !std.mem.eql(u8, provider, "cpu") and !std.mem.eql(u8, provider, "memory") and !std.mem.eql(u8, provider, "audio") and !std.mem.eql(u8, provider, "media")) return error.InvalidProvider;
     }
     return .{ .manifest = parsed, .bundle = bundle };
 }

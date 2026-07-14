@@ -10,7 +10,7 @@ export interface WidgetConfig {
   };
   layer?: "desktop" | "normal" | "topmost";
   clickThrough?: boolean;
-  subscribe?: ("time" | "cpu" | "memory")[];
+  subscribe?: ("time" | "cpu" | "memory" | "audio" | "media")[];
   origins?: string[];
   capabilities?: never[];
 }
@@ -32,6 +32,8 @@ export interface TimeData {
 
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
+export interface AudioData { rms: number; bands: number[] }
+export interface MediaData { title: string; artist: string; album: string; playing: boolean; positionMs: number; durationMs: number }
 
 export interface WFetchInit {
   method?: "GET" | "POST";
@@ -66,6 +68,8 @@ export function useInterval(fn: () => void, ms: number): void;
 export function useProvider(name: "time"): TimeData;
 export function useProvider(name: "cpu"): CpuData;
 export function useProvider(name: "memory"): MemoryData;
+export function useProvider(name: "audio"): AudioData;
+export function useProvider(name: "media"): MediaData;
 export function useStorage<T>(key: string, initial: T): [T, (next: T | ((prev: T) => T)) => void];
 export function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
 

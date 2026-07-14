@@ -55,15 +55,16 @@ test("bundle manifest is the subscription origin of truth", () => {
     assert.equal(spawnSync(process.execPath, [cli, "init", "system-card"], { cwd: root, encoding: "utf8" }).status, 0);
     const sourcePath = join(widget, "widget.tsx");
     const source = `import { useProvider, widget } from "@weaver/sdk";
-export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu", "memory"] }, () => {
+export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu", "memory", "audio", "media"] }, () => {
   const cpu = useProvider("cpu");
-  return <text>{cpu.percent}</text>;
+  const audio = useProvider("audio");
+  return <text>{cpu.percent + audio.rms}</text>;
 });
 `;
     writeFileSync(sourcePath, source, "utf8");
     const result = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8")).subscribe, ["cpu", "memory"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8")).subscribe, ["cpu", "memory", "audio", "media"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
