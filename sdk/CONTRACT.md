@@ -80,6 +80,12 @@ Rules: hooks follow React's rules (top level, stable order). `useProvider`
 requires the provider in `config.subscribe` — checked at `weaver check`,
 error: `useProvider("time") requires subscribe: ["time"] in the widget config`.
 
+## Hot swap
+`weaver dev` evaluates a valid changed bundle in a fresh JS context before replacing the running one.
+Root hook slots are seeded by position when slot kind and value type all match; refs keep `current`, while effects restart.
+Any slot-count, kind, or type mismatch remounts every root hook; non-serializable values alone initialize fresh.
+Evaluation failure leaves the prior context, window, and state running; window-config changes restart the process.
+
 ## Elements (JSX intrinsics)
 
 | Element | M1 renders | Props beyond `class`/`children` |

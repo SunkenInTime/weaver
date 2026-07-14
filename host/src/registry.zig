@@ -4,6 +4,7 @@ pub const Registration = struct {
     name: []const u8,
     sourcePath: []const u8,
     enabled: bool = true,
+    dev: bool = false,
 };
 
 pub const Document = struct {

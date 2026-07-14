@@ -3,8 +3,10 @@ const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
+const provider_mod = @import("provider.zig");
 const storage_mod = @import("storage.zig");
 const tree_mod = @import("tree.zig");
+const widget_log = @import("widget_log.zig");
 
 comptime {
     if (native_sdk.platform.max_windows != 1 or
@@ -19,10 +21,18 @@ comptime {
 }
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
+pub const std_options: std.Options = .{ .logFn = widget_log.logFn };
 
 pub const Model = struct {
     tree: tree_mod.Tree = .{},
     engine: ?*js_engine.Engine = null,
+    provider: provider_mod.Client = .{},
+    io: ?std.Io = null,
+    storage: ?*storage_mod.Store = null,
+    origins: []const []const u8 = &.{},
+    bundle_path: []const u8 = &.{},
+    dev: bool = false,
+    dev_seen_mtime: i128 = 0,
     timer_fires: u64 = 0,
     armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
     fetch_poll_armed: bool = false,
@@ -40,6 +50,7 @@ fn bridgeTimerCapacity() usize {
 const max_images: usize = 16;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
+const dev_reload_key: u64 = 0x7764_6576_726c;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
 pub const Msg = union(enum) {
@@ -55,6 +66,7 @@ const Effects = WidgetApp.Effects;
 var rendered_presents: u64 = 0;
 var first_render_ns: u64 = 0;
 var logged_backend: bool = false;
+var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
 
 fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
@@ -62,6 +74,12 @@ fn initEffects(model: *Model, effects: *Effects) void {
             std.log.err("widget image {d} failed to decode/register: {s}", .{ image.id, @errorName(err) });
         };
     }
+    if (model.dev) effects.startTimer(.{
+        .key = dev_reload_key,
+        .interval_ms = 100,
+        .mode = .repeating,
+        .on_fire = Effects.timerMsg(.timer),
+    });
     syncTimers(model, effects);
 }
 
@@ -72,6 +90,12 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         .timer => |timer| {
             if (timer.outcome != .fired) {
                 std.log.err("widget timer was rejected", .{});
+                return;
+            }
+            if (timer.key == dev_reload_key) {
+                reloadIfChanged(model, effects) catch |err| {
+                    std.log.err("dev hot swap failed; keeping previous bundle: {s}", .{@errorName(err)});
+                };
                 return;
             }
             if (timer.key == fetch_poll_key) {
@@ -129,6 +153,48 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             syncTimers(model, effects);
         },
     }
+}
+
+fn reloadIfChanged(model: *Model, effects: *Effects) !void {
+    const io = model.io orelse return;
+    const stat = try std.Io.Dir.cwd().statFile(io, model.bundle_path, .{});
+    const mtime = stat.mtime.nanoseconds;
+    if (mtime == model.dev_seen_mtime) return;
+    model.dev_seen_mtime = mtime;
+
+    const source = try std.Io.Dir.cwd().readFileAlloc(io, model.bundle_path, std.heap.page_allocator, .limited(1024 * 1024));
+    defer std.heap.page_allocator.free(source);
+    const old_engine = model.engine orelse return error.MissingEngine;
+    const snapshot = old_engine.captureHotSwap(std.heap.page_allocator);
+    defer if (snapshot) |bytes| std.heap.page_allocator.free(bytes);
+
+    var candidate_tree: tree_mod.Tree = .{};
+    var preserved = snapshot != null;
+    const candidate = evaluateCandidate(model, &candidate_tree, source, snapshot) catch |err| switch (err) {
+        error.HotSwapMismatch => block: {
+            preserved = false;
+            candidate_tree = .{};
+            break :block try evaluateCandidate(model, &candidate_tree, source, null);
+        },
+        else => return err,
+    };
+    candidate_tree.generation = model.tree.generation +% 1;
+    model.tree = candidate_tree;
+    candidate.setTree(&model.tree);
+    model.engine = candidate;
+    old_engine.destroy(std.heap.page_allocator);
+    syncTimers(model, effects);
+    std.log.info("dev hot swap applied ({s} root hook state)", .{if (preserved) "preserved" else "fresh"});
+}
+
+fn evaluateCandidate(model: *Model, tree: *tree_mod.Tree, source: []const u8, seed: ?[]const u8) !*js_engine.Engine {
+    const storage = model.storage orelse return error.MissingStorage;
+    const candidate = try js_engine.Engine.create(std.heap.page_allocator, tree, storage, model.origins, &model.provider);
+    errdefer candidate.destroy(std.heap.page_allocator);
+    if (seed) |value| try candidate.setHotSwapSeed(value);
+    try candidate.evaluate(source, "bundle.js");
+    if (seed != null and !candidate.hotSwapAccepted()) return error.HotSwapMismatch;
+    return candidate;
 }
 
 fn syncTimers(model: *Model, effects: *Effects) void {
@@ -227,7 +293,16 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
     if (!logged_backend) {
         logged_backend = true;
         std.log.info("widget renderer backend={s}", .{@tagName(frame.backend)});
+    } else if (frame.backend != last_backend) {
+        if (last_backend == .d3d11 and frame.backend == .software) {
+            std.log.warn("widget renderer demoted d3d11 -> software", .{});
+        } else if (last_backend == .software and frame.backend == .d3d11) {
+            std.log.info("widget renderer promoted software -> d3d11", .{});
+        } else {
+            std.log.info("widget renderer backend changed {s} -> {s}", .{ @tagName(last_backend), @tagName(frame.backend) });
+        }
     }
+    last_backend = frame.backend;
     const engine = model.engine orelse return null;
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
@@ -364,12 +439,23 @@ fn isLocalAssetPath(source: []const u8) bool {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
-    if (args.len != 2) {
-        std.debug.print("usage: weaver-widget.exe <widget-directory>\n", .{});
+    const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
+    if ((!dev and args.len != 2) or (dev and args.len != 3)) {
+        std.debug.print("usage: weaver-widget.exe [--dev] <widget-directory>\n", .{});
         return error.InvalidArguments;
     }
-    const loaded = try manifest_mod.load(init.io, allocator, args[1]);
+    const directory = args[if (dev) 2 else 1];
+    const loaded = try manifest_mod.load(init.io, allocator, directory);
+    const local_app_data = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
+    const log_directory = try std.fs.path.join(allocator, &.{ local_app_data, "weaver", "logs" });
+    try std.Io.Dir.cwd().createDirPath(init.io, log_directory);
+    const log_name = try safeLogName(allocator, loaded.manifest.name);
+    const log_path = try std.fs.path.join(allocator, &.{ log_directory, log_name });
+    try widget_log.init(log_path);
+    std.log.info("widget runtime starting pid={d}{s}", .{ std.os.windows.GetCurrentProcessId(), if (dev) " dev=true" else "" });
     var storage = try storage_mod.Store.init(init.io, allocator, init.environ_map.get("LOCALAPPDATA"), loaded.manifest.name);
+    const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
+    const bundle_stat = try std.Io.Dir.cwd().statFile(init.io, bundle_path, .{});
     const frame = manifest_mod.desktopFrame(loaded.manifest);
     const shell_views = [_]native_sdk.ShellView{.{
         .label = "widget-canvas",
@@ -416,14 +502,22 @@ pub fn main(init: std.process.Init) !void {
         .on_frame = onFrame,
     });
     defer app_state.destroy();
-    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, init.environ_map.get("WEAVER_HOST_PIPE"));
-    defer engine.destroy(std.heap.page_allocator);
+    try app_state.model.provider.init(init.environ_map.get("WEAVER_HOST_PIPE"));
+    defer app_state.model.provider.deinit();
+    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, &app_state.model.provider);
     app_state.model.engine = engine;
+    defer if (app_state.model.engine) |current| current.destroy(std.heap.page_allocator);
+    app_state.model.io = init.io;
+    app_state.model.storage = &storage;
+    app_state.model.origins = loaded.manifest.origins;
+    app_state.model.bundle_path = bundle_path;
+    app_state.model.dev = dev;
+    app_state.model.dev_seen_mtime = bundle_stat.mtime.nanoseconds;
     for (loaded.manifest.subscribe) |provider| {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
-    try loadLocalImages(init.io, allocator, args[1], &app_state.model);
+    try loadLocalImages(init.io, allocator, directory, &app_state.model);
 
     try runner.runWithOptions(app_state.app(), .{
         .app_name = "weaver-widget",
@@ -435,10 +529,28 @@ pub fn main(init: std.process.Init) !void {
     }, init);
 }
 
+fn safeLogName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    const base_len = @max(name.len, 6);
+    const output = try allocator.alloc(u8, base_len + 4);
+    for (name, 0..) |byte, index| {
+        output[index] = if (byte < 32 or std.mem.indexOfScalar(u8, "<>:\"/\\|?*", byte) != null) '_' else byte;
+    }
+    var cursor = name.len;
+    while (cursor > 0 and (output[cursor - 1] == '.' or output[cursor - 1] == ' ')) : (cursor -= 1) output[cursor - 1] = '_';
+    var end = name.len;
+    if (name.len == 0) {
+        @memcpy(output[0..6], "widget");
+        end = 6;
+    }
+    @memcpy(output[end .. end + 4], ".log");
+    return output[0 .. end + 4];
+}
+
 test {
     _ = @import("tree.zig");
     _ = @import("manifest.zig");
     _ = @import("network.zig");
     _ = @import("storage.zig");
     _ = @import("provider.zig");
+    _ = @import("widget_log.zig");
 }

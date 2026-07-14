@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const operations = [];
 const callbacks = new Map();
@@ -135,4 +136,56 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(submit[2][2], 1);
   assert.ok(operations.some((operation) => operation[0] === "onCanvasFrame" && operation[1] === canvasNode));
   assert.throws(() => retainedCanvasContext.clear(), /only be called inside onFrame/);
+});
+
+function isolatedNative() {
+  let id = 0;
+  return {
+    createNode() { return ++id; }, setProp() {}, setText() {}, appendChild() {}, insertBefore() {}, removeNode() {}, setRoot() {},
+    beginBatch() {}, endBatch() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, onProvider() {},
+    setInterval() { return 1; }, clearInterval() {}, onTimer() {}, setCanvasCommands() {}, onCanvasFrame() {}, clearCanvasFrame() {},
+    fetch: async () => ({ status: 200, body: "{}" }), storageRead() { return null; }, storageWrite() {}, log() {},
+  };
+}
+
+async function runHotSwapFixture({ seed, initial = "0", addedHook = false }) {
+  const source = `
+    import { h, useEffect, useRef, useState, widget } from "./src/index.ts";
+    widget({ name: "Hot swap fixture", size: [100, 50] }, () => {
+      ${addedHook ? "useState(\"new slot\");" : ""}
+      const [count] = useState(${initial});
+      const marker = useRef("kept");
+      useEffect(() => {}, []);
+      globalThis.fixtureRendered = { count, marker: marker.current };
+      return h("text", null, String(count));
+    });
+    globalThis.fixtureAccepted = globalThis.__weaverHotSwapAccepted();
+    globalThis.fixtureSnapshot = globalThis.__weaverCaptureHotSwap();
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "hot-swap-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const context = { native: isolatedNative(), __weaverHotSwapSeed: seed };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+  return context;
+}
+
+test("hot swap captures and seeds root hook slots only when every slot type matches", async () => {
+  const original = await runHotSwapFixture({});
+  const snapshot = JSON.parse(original.fixtureSnapshot);
+  assert.deepEqual(snapshot.map(({ kind, valueType }) => [kind, valueType]), [
+    ["state", "number"], ["ref", "string"], ["effect", undefined],
+  ]);
+
+  snapshot[0].value = 42;
+  snapshot[1].value = "preserved ref";
+  const compatible = await runHotSwapFixture({ seed: JSON.stringify(snapshot) });
+  assert.equal(compatible.fixtureAccepted, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(compatible.fixtureRendered)), { count: 42, marker: "preserved ref" });
+
+  const changedType = await runHotSwapFixture({ seed: JSON.stringify(snapshot), initial: "\"fresh\"" });
+  assert.equal(changedType.fixtureAccepted, false);
+  const changedOrder = await runHotSwapFixture({ seed: JSON.stringify(snapshot), addedHook: true });
+  assert.equal(changedOrder.fixtureAccepted, false);
 });

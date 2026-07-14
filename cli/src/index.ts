@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -43,12 +43,30 @@ interface WidgetConfigData {
   capabilities?: never[];
 }
 
+interface RuntimeManifest {
+  name: string;
+  size: [number, number];
+  anchor: NonNullable<WidgetConfigData["anchor"]>;
+  layer: "desktop" | "normal" | "topmost";
+  clickThrough: boolean;
+  transparent: true;
+  origins: string[];
+  subscribe: ("time" | "cpu" | "memory" | "audio" | "media")[];
+  renderBackend: "gpu" | "software";
+}
+
+interface BundleResult { project: SourceProject; manifest: RuntimeManifest }
+
 async function main(argv: string[]): Promise<void> {
   const [command, argument, ...rest] = argv;
   const directoryCommands = ["init", "check", "bundle", "dev", "install"];
   const noArgumentCommands = ["up", "down"];
+  if (command === "logs") {
+    if (!argument || rest.length > 1 || (rest.length === 1 && rest[0] !== "--follow")) throw new WeaverFailure(["Usage: weaver logs <name> [--follow]"]);
+    return showLogs(argument, rest[0] === "--follow");
+  }
   if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "uninstall", "status"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|install> <name-or-directory> | uninstall <name> | up | down | status [--json]"]);
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|install> <name-or-directory> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
   }
   if (command === "up") return upHost(true);
   if (command === "down") return downHost();
@@ -135,12 +153,12 @@ function checkWidget(directory: string): SourceProject {
   return project;
 }
 
-async function bundleWidget(directory: string): Promise<void> {
+async function bundleWidget(directory: string): Promise<BundleResult> {
   const project = checkWidget(directory);
   const outputDirectory = join(directory, "dist");
   mkdirSync(outputDirectory, { recursive: true });
   copyWidgetAssets(directory, outputDirectory);
-  await build({
+  const built = await build({
     entryPoints: [project.sourcePath],
     outfile: join(outputDirectory, "bundle.js"),
     bundle: true,
@@ -153,8 +171,11 @@ async function bundleWidget(directory: string): Promise<void> {
     minify: true,
     plugins: [weaverResolutionPlugin()],
     logLevel: "silent",
+    write: false,
   });
-  const manifest = {
+  const bundle = built.outputFiles[0];
+  writeAtomic(join(outputDirectory, "bundle.js"), bundle.contents);
+  const manifest: RuntimeManifest = {
     name: project.config.name,
     size: project.config.size,
     anchor: project.config.anchor ?? { monitor: "primary", corner: "top-right", offset: [24, 24] },
@@ -165,7 +186,14 @@ async function bundleWidget(directory: string): Promise<void> {
     subscribe: project.config.subscribe ?? [],
     renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
   };
-  writeFileSync(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  return { project, manifest };
+}
+
+function writeAtomic(path: string, data: string | Uint8Array): void {
+  const temporary = `${path}.tmp`;
+  writeFileSync(temporary, data);
+  renameSync(temporary, path);
 }
 
 function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
@@ -217,16 +245,18 @@ function weaverResolutionPlugin(): import("esbuild").Plugin {
 async function devWidget(directory: string): Promise<void> {
   assertRuntimeBuilt();
   await upHost(false);
-  await bundleWidget(directory);
-  const project = loadProject(directory);
+  const initial = await bundleWidget(directory);
+  const project = initial.project;
+  let activeManifest = initial.manifest;
   const before = readRegistry();
   const existing = before.widgets.find((widget) => widget.name === project.config.name);
   if (existing && resolve(existing.sourcePath) !== directory) {
     throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${existing.sourcePath}`]);
   }
   const temporaryRegistration = !existing;
+  const logFollower = followLogFile(project.config.name, true);
   writeRegistry({ widgets: [...before.widgets.filter((widget) => widget.name !== project.config.name), {
-    name: project.config.name, sourcePath: directory, enabled: true,
+    name: project.config.name, sourcePath: directory, enabled: true, dev: true,
   }] });
   signalHost("--signal-reload");
   let rebuilding = false;
@@ -239,9 +269,15 @@ async function devWidget(directory: string): Promise<void> {
     }
     rebuilding = true;
     try {
-      await bundleWidget(directory);
-      signalHost("--signal-reload");
-      process.stdout.write("weaver dev restarted widget\n");
+      const next = await bundleWidget(directory);
+      const configChanged = JSON.stringify(next.manifest) !== JSON.stringify(activeManifest);
+      activeManifest = next.manifest;
+      if (configChanged) {
+        signalHost("--signal-reload");
+        process.stdout.write("weaver dev restarted widget: window config changed\n");
+      } else {
+        process.stdout.write("weaver dev bundle ready for in-place hot swap\n");
+      }
     } catch (error) {
       printFailure(error);
     } finally {
@@ -260,17 +296,60 @@ async function devWidget(directory: string): Promise<void> {
   await new Promise<void>((resolvePromise) => {
     const stop = (): void => {
       watcher.close();
+      logFollower.stop();
       clearTimeout(debounce);
-      if (temporaryRegistration) {
-        const current = readRegistry();
-        writeRegistry({ widgets: current.widgets.filter((widget) => widget.name !== project.config.name) });
-        signalHost("--signal-reload");
-      }
+      const current = readRegistry();
+      const widgets = current.widgets.filter((widget) => widget.name !== project.config.name);
+      if (!temporaryRegistration && existing) widgets.push(existing);
+      writeRegistry({ widgets });
+      signalHost("--signal-reload");
       resolvePromise();
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
+}
+
+function logPath(name: string): string {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) throw new WeaverFailure(["LOCALAPPDATA is not available"]);
+  const safe = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "_") || "widget";
+  return join(localAppData, "weaver", "logs", `${safe}.log`);
+}
+
+function showLogs(name: string, follow: boolean): Promise<void> | void {
+  const path = logPath(name);
+  const oldPath = `${path}.old`;
+  const text = [oldPath, path].filter(existsSync).map((file) => readFileSync(file, "utf8")).join("");
+  const lines = text.split(/\r?\n/).filter((line) => line.length > 0).slice(-200);
+  if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
+  if (!follow) return;
+  const follower = followLogFile(name, true);
+  return new Promise<void>((resolvePromise) => {
+    const stop = (): void => { follower.stop(); resolvePromise(); };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+}
+
+function followLogFile(name: string, startAtEnd: boolean): { stop(): void } {
+  const path = logPath(name);
+  let offset = startAtEnd && existsSync(path) ? statSync(path).size : 0;
+  const poll = (): void => {
+    if (!existsSync(path)) return;
+    const size = statSync(path).size;
+    if (size < offset) offset = 0;
+    if (size === offset) return;
+    const length = size - offset;
+    const bytes = Buffer.alloc(length);
+    const descriptor = openSync(path, "r");
+    try { readSync(descriptor, bytes, 0, length, offset); }
+    finally { closeSync(descriptor); }
+    offset = size;
+    process.stdout.write(bytes);
+  };
+  const timer = setInterval(poll, 100);
+  return { stop(): void { clearInterval(timer); poll(); } };
 }
 
 async function installWidget(directory: string): Promise<void> {

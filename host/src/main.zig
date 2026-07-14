@@ -33,6 +33,7 @@ fn runStateLabel(state: RunState) []const u8 {
 const Slot = struct {
     used: bool = false,
     enabled: bool = false,
+    dev: bool = false,
     name_buffer: [max_name_bytes]u8 = undefined,
     name_len: usize = 0,
     source_buffer: [max_path_bytes]u8 = undefined,
@@ -77,6 +78,7 @@ const Slot = struct {
         self.name_len = value.name.len;
         self.source_len = value.sourcePath.len;
         self.enabled = value.enabled;
+        self.dev = value.dev;
         self.used = true;
         if (!value.enabled) self.state = .disabled;
     }
@@ -171,7 +173,8 @@ const Host = struct {
             seen[index] = true;
             const slot = &self.slots[index];
             const source_changed = slot.used and !std.mem.eql(u8, slot.source(), registration.sourcePath);
-            if (source_changed) self.stopSlot(slot, true);
+            const dev_changed = slot.used and slot.dev != registration.dev;
+            if (source_changed or dev_changed) self.stopSlot(slot, true);
             try slot.setRegistration(registration);
             if (!registration.enabled and slot.process != null) self.stopSlot(slot, true);
             if (!registration.enabled) slot.state = .disabled;
@@ -255,7 +258,10 @@ const Host = struct {
             if (slot.pipe == invalid_handle) return error.CreatePipeFailed;
         }
         errdefer self.closePipe(slot);
-        const command = try std.fmt.allocPrint(self.allocator, "\"{s}\" \"{s}\"", .{ self.runtime_exe, dist });
+        const command = if (slot.dev)
+            try std.fmt.allocPrint(self.allocator, "\"{s}\" --dev \"{s}\"", .{ self.runtime_exe, dist })
+        else
+            try std.fmt.allocPrint(self.allocator, "\"{s}\" \"{s}\"", .{ self.runtime_exe, dist });
         defer self.allocator.free(command);
         const command_w_const = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, command);
         defer self.allocator.free(command_w_const);
