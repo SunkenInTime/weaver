@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weaver — Manager & Consent design mockups</title>
+<style>
+  :root {
+    --bg: #0a0a0c; --panel: #131316; --panel-2: #1a1a1f; --border: #26262c;
+    --text: #ececf1; --muted: #9a9aa5; --faint: #5c5c66;
+    --accent: #7dd3a8; --accent-2: #8ab4f8; --warn: #fdd663; --danger: #f28b82;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.6 "Segoe UI", system-ui, sans-serif; padding: 56px 28px 120px; }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  .kicker { color: var(--accent); font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  h1 { font-size: 34px; font-weight: 650; letter-spacing: -.02em; margin: 8px 0 6px; }
+  .lede { color: var(--muted); max-width: 640px; margin-bottom: 40px; }
+  h2 { font-size: 21px; font-weight: 650; margin: 56px 0 4px; }
+  .sub { color: var(--muted); margin-bottom: 20px; max-width: 640px; font-size: 14px; }
+  .stage { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+  .notes { flex: 1; min-width: 260px; font-size: 14px; color: #c9c9d1; }
+  .notes li { margin: 8px 0 8px 18px; }
+  .notes b { color: var(--text); }
+
+  /* ============ consent dialog ============ */
+  .dialog {
+    width: 420px; background: #141419; border: 1px solid var(--border);
+    border-radius: 16px; box-shadow: 0 24px 80px rgba(0,0,0,.6); overflow: hidden; flex: none;
+  }
+  .dlg-head { padding: 22px 24px 16px; display: flex; gap: 14px; align-items: center; }
+  .dlg-icon { width: 44px; height: 44px; border-radius: 11px; background: linear-gradient(135deg, #7c3aed, #4db6ac); flex: none; }
+  .dlg-title { font-size: 17px; font-weight: 650; }
+  .dlg-byline { font-size: 12.5px; color: var(--muted); }
+  .dlg-byline .lineage { color: var(--accent-2); }
+  .dlg-section { padding: 14px 24px; border-top: 1px solid var(--border); }
+  .dlg-label { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+  .cap { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: 13.5px; }
+  .cap .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; }
+  .cap .what { color: #dcdce2; }
+  .cap .why { color: var(--faint); font-size: 12.5px; }
+  .quiet .dot { background: var(--accent); }
+  .mild .dot { background: var(--warn); }
+  .loud { background: rgba(242,139,130,.06); margin: 0 -24px; padding: 10px 24px; border-left: 3px solid var(--danger); }
+  .loud .dot { background: var(--danger); }
+  .loud .what b { color: var(--danger); }
+  .dlg-actions { display: flex; gap: 10px; padding: 18px 24px 22px; border-top: 1px solid var(--border); }
+  .btn { flex: 1; border-radius: 10px; padding: 10px 0; text-align: center; font-size: 14px; font-weight: 600; cursor: default; border: 1px solid var(--border); color: var(--muted); }
+  .btn.primary { background: var(--accent); color: #06130c; border-color: transparent; }
+  .btn.danger-armed { background: transparent; color: var(--danger); border-color: rgba(242,139,130,.4); }
+  .dlg-fineprint { font-size: 11.5px; color: var(--faint); padding: 0 24px 18px; }
+
+  /* ============ manager popover ============ */
+  .tray-scene { position: relative; width: 460px; flex: none; }
+  .manager {
+    width: 420px; background: #141419; border: 1px solid var(--border);
+    border-radius: 16px; box-shadow: 0 24px 80px rgba(0,0,0,.6); overflow: hidden;
+  }
+  .mgr-head { display: flex; align-items: baseline; gap: 10px; padding: 18px 20px 12px; }
+  .mgr-head h3 { font-size: 15px; font-weight: 650; }
+  .mgr-total { margin-left: auto; font: 12px Consolas, monospace; color: var(--muted); }
+  .mgr-total b { color: var(--accent); }
+  .mrow { display: flex; align-items: center; gap: 12px; padding: 11px 20px; border-top: 1px solid #1d1d23; }
+  .mrow:hover { background: var(--panel-2); }
+  .sw { width: 30px; height: 17px; border-radius: 10px; background: var(--accent); position: relative; flex: none; }
+  .sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #06130c; }
+  .sw.off { background: #2c2c34; } .sw.off::after { left: 2px; right: auto; background: #55555f; }
+  .mname { font-size: 14px; font-weight: 600; min-width: 0; }
+  .msub { font-size: 11.5px; color: var(--faint); }
+  .msub .warn-badge { color: var(--danger); }
+  .mcost { margin-left: auto; text-align: right; font: 11.5px Consolas, monospace; color: var(--muted); flex: none; }
+  .spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 12px; margin-right: 6px; }
+  .spark i { width: 3px; background: #3a4c44; border-radius: 1px; }
+  .spark i.hot { background: var(--accent); }
+  .mgr-foot { display: flex; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+  .chip { font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; color: var(--muted); }
+  .chip.primary { color: var(--accent); border-color: rgba(125,211,168,.3); }
+  .backend-chip { font-size: 10px; font-weight: 700; letter-spacing: .05em; border-radius: 4px; padding: 1px 5px; vertical-align: 1px; margin-left: 6px; }
+  .backend-chip.gpu { color: var(--accent-2); background: rgba(138,180,248,.12); }
+  .backend-chip.sw { color: var(--faint); background: rgba(255,255,255,.05); }
+  .term {
+    background: #0d0d10; border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; font: 12.5px/1.7 "Cascadia Code", Consolas, monospace; color: #c9c9d1;
+    margin-top: 20px; max-width: 640px;
+  }
+  .term .g { color: var(--accent); } .term .y { color: var(--warn); } .term .r { color: var(--danger); } .term .d { color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Weaver · design review</div>
+  <h1>Consent & the Manager</h1>
+  <p class="lede">Two taste-gated surfaces from roadmap items 3 and 5, for your review before implementation. Both follow the spec page's visual language.</p>
+
+  <h2>1 · Install consent — the loud wall gets its dialog</h2>
+  <p class="sub">Appears on <code>weaver install something.weave</code> when a GUI is present. The quiet surface is <em>shown but not asked about</em> — visibility is the point; consent friction is reserved for the ladder.</p>
+  <div class="stage">
+    <div class="dialog">
+      <div class="dlg-head">
+        <div class="dlg-icon"></div>
+        <div>
+          <div class="dlg-title">Install "GPU Monitor Pro"?</div>
+          <div class="dlg-byline">by @rice-king · <span class="lineage">remixed from @kae/gpu-mon</span> · source readable</div>
+        </div>
+      </div>
+      <div class="dlg-section">
+        <div class="dlg-label">Does quietly</div>
+        <div class="cap quiet"><span class="dot"></span><div><div class="what">Reads system stats (cpu, memory)</div></div></div>
+        <div class="cap quiet"><span class="dot"></span><div><div class="what">Talks to <b>api.nvidia-stats.io</b></div><div class="why">the only network host it may contact</div></div></div>
+        <div class="cap quiet"><span class="dot"></span><div><div class="what">Keeps its own settings (up to 64 KB)</div></div></div>
+      </div>
+      <div class="dlg-section">
+        <div class="dlg-label">Asks permission for</div>
+        <div class="cap mild"><span class="dot"></span><div><div class="what">Send notifications</div><div class="why">"alerts when GPU temp exceeds your limit"</div></div></div>
+        <div class="cap loud"><span class="dot"></span><div><div class="what"><b>Run commands on your PC</b></div><div class="why">"launches nvidia-smi to read fan curves" — treat like installing a program. Weaver shows every command the first time it runs.</div></div></div>
+      </div>
+      <div class="dlg-actions">
+        <div class="btn">Cancel</div>
+        <div class="btn">Install without command access</div>
+        <div class="btn primary">Install</div>
+      </div>
+      <div class="dlg-fineprint">You can revoke any of this later from the Manager. The widget's full source is one click away.</div>
+    </div>
+    <div class="notes">
+      <b>Decisions embedded here, for your veto:</b>
+      <li><b>Quiet ≠ hidden.</b> Origins/providers/storage are always listed — the audit IS the trust story — but have no checkbox. Asking consent for "shows the time" trains people to click through.</li>
+      <li><b>The middle button is the design.</b> "Install without command access" makes degraded install the easy safe choice — the widget runs, the loud capability stays off, the widget sees it as permission-denied. No all-or-nothing dark pattern.</li>
+      <li><b>Author must justify.</b> The quoted "why" strings come from the manifest (<code>capabilities: [{ id: "run-commands", reason: "…" }]</code>). No reason string → check error. Agents will write honest reasons; humans will read them.</li>
+      <li><b>First-run disclosure</b> for commands: the first actual command a widget runs is surfaced as a notification with the literal command line. Loud at grant, loud at first use.</li>
+      <li>Lineage is a first-class line under the title — remix culture starts in the install dialog.</li>
+    </div>
+  </div>
+
+  <div class="term">
+<span class="d"># the same wall in the terminal (agent/SSH path) — identical information, same defaults</span><br>
+$ weaver install gpu-monitor-pro.weave<br>
+<span class="g">✓</span> source readable · by @rice-king · remixed from @kae/gpu-mon<br>
+<span class="g">quiet:</span> system stats (cpu, memory) · net: api.nvidia-stats.io · settings ≤64KB<br>
+<span class="y">asks:</span>  notifications — "alerts when GPU temp exceeds your limit"<br>
+<span class="r">LOUD:</span>  run commands — "launches nvidia-smi to read fan curves"<br>
+Install? [i]nstall / [s]afe install (no command access) / [N]o:
+  </div>
+
+  <h2>2 · The Manager — a tray popover, honest bills on every row</h2>
+  <p class="sub">Left-click the tray icon. Candidate to be the first Weaver-built-with-Weaver surface. ADR 0005 made cost visible in a CLI table; this is where non-CLI users live with it.</p>
+  <div class="stage">
+    <div class="tray-scene">
+      <div class="manager">
+        <div class="mgr-head"><h3>Weaver</h3><span class="mgr-total">desktop total <b>1.8% cpu</b> · <b>142 MB</b></span></div>
+        <div class="mrow">
+          <div class="sw"></div>
+          <div><div class="mname">Spectrum <span class="backend-chip gpu">GPU</span></div><div class="msub">dancing to: Spotify</div></div>
+          <div class="mcost"><span class="spark"><i style="height:4px"></i><i style="height:7px" class="hot"></i><i style="height:10px" class="hot"></i><i style="height:6px"></i><i style="height:11px" class="hot"></i><i style="height:8px"></i></span>1.2% · 24 MB</div>
+        </div>
+        <div class="mrow">
+          <div class="sw"></div>
+          <div><div class="mname">Now Playing <span class="backend-chip gpu">GPU</span></div><div class="msub">by dara · remixed from @kae</div></div>
+          <div class="mcost"><span class="spark"><i style="height:3px"></i><i style="height:3px"></i><i style="height:4px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i></span>0.1% · 18 MB</div>
+        </div>
+        <div class="mrow">
+          <div class="sw"></div>
+          <div><div class="mname">Pomodoro <span class="backend-chip sw">SW</span></div><div class="msub">focusing · 21:14 left</div></div>
+          <div class="mcost"><span class="spark"><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i><i style="height:3px"></i></span>0.2% · 10 MB</div>
+        </div>
+        <div class="mrow">
+          <div class="sw off"></div>
+          <div><div class="mname">GPU Monitor Pro</div><div class="msub"><span class="warn-badge">⚠ runs commands</span> · paused by you</div></div>
+          <div class="mcost">— · —</div>
+        </div>
+        <div class="mgr-foot">
+          <span class="chip primary">+ Conjure…</span>
+          <span class="chip">Install .weave</span>
+          <span class="chip" style="margin-left:auto">Settings</span>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <b>Decisions embedded here:</b>
+      <li><b>Rows lead with identity and liveness</b> ("dancing to: Spotify", "21:14 left") — the manager should feel like the desktop's pulse, not Task Manager.</li>
+      <li><b>Cost is ambient, not shouty:</b> a 60s sparkline + current figures per row, one desktop total in the header. Sorting/red-flagging only when something is an outlier.</li>
+      <li><b>Toggles pause, never uninstall.</b> Uninstall/permissions/source/remix live one right-click deep per row.</li>
+      <li><b>"+ Conjure…" is the primary action</b> — it opens a prompt box that hands off to your agent. The manager sells the Loop, not a file picker. ("Install .weave" is the secondary path.)</li>
+      <li><b>⚠ badges persist</b> on any widget holding a loud grant — the wall stays visible after install day.</li>
+    </div>
+  </div>
+</div>
+</body>
+</html>
