@@ -9,7 +9,7 @@ interface PomodoroState {
 export default widget({
   name: "Pomodoro",
   size: [320, 210],
-  anchor: { corner: "top-right", offset: [24, 24] },
+  anchor: { corner: "top-right", offset: [24, 158] },
 }, () => {
   const [timer, setTimer] = useStorage<PomodoroState>("timer", {
     minutes: 25,

@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,10 +6,12 @@ import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
+import { formatStatus, readRegistry, readStatus, statusPath, writeRegistry } from "./host-tools.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
 const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", "weaver-widget.exe");
+const hostExecutable = join(repoRoot, "host", "zig-out", "bin", "weaverd.exe");
 
 class WeaverFailure extends Error {
   constructor(readonly details: string[]) {
@@ -43,11 +45,17 @@ interface WidgetConfigData {
 
 async function main(argv: string[]): Promise<void> {
   const [command, argument, ...rest] = argv;
-  if (rest.length > 0 || !command || !argument || !["init", "check", "bundle", "dev"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev> <name-or-directory>"]);
+  const directoryCommands = ["init", "check", "bundle", "dev", "install"];
+  const noArgumentCommands = ["up", "down"];
+  if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "uninstall", "status"].includes(command)) {
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|install> <name-or-directory> | uninstall <name> | up | down | status [--json]"]);
   }
-  if (command === "init") return initWidget(argument);
-  const directory = resolve(argument);
+  if (command === "up") return upHost(true);
+  if (command === "down") return downHost();
+  if (command === "status") return showStatus(argument === "--json");
+  if (command === "uninstall") return uninstallWidget(argument!);
+  if (command === "init") return initWidget(argument!);
+  const directory = resolve(argument!);
   if (command === "check") {
     checkWidget(directory);
     process.stdout.write(`weaver check passed: ${directory}\n`);
@@ -58,6 +66,7 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(`weaver bundle wrote ${join(directory, "dist")}\n`);
     return;
   }
+  if (command === "install") return installWidget(directory);
   await devWidget(directory);
 }
 
@@ -153,6 +162,7 @@ async function bundleWidget(directory: string): Promise<void> {
     clickThrough: project.config.clickThrough ?? false,
     transparent: true,
     origins: project.config.origins ?? [],
+    subscribe: project.config.subscribe ?? [],
   };
   writeFileSync(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }
@@ -192,11 +202,20 @@ function weaverResolutionPlugin(): import("esbuild").Plugin {
 }
 
 async function devWidget(directory: string): Promise<void> {
-  if (!existsSync(runtimeExecutable)) {
-    throw new WeaverFailure([`Runtime not found at ${runtimeExecutable}`, "Build it first with the ReleaseFast command in docs/m1-results.md."]);
-  }
+  assertRuntimeBuilt();
+  await upHost(false);
   await bundleWidget(directory);
-  let child = launchWidget(directory);
+  const project = loadProject(directory);
+  const before = readRegistry();
+  const existing = before.widgets.find((widget) => widget.name === project.config.name);
+  if (existing && resolve(existing.sourcePath) !== directory) {
+    throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${existing.sourcePath}`]);
+  }
+  const temporaryRegistration = !existing;
+  writeRegistry({ widgets: [...before.widgets.filter((widget) => widget.name !== project.config.name), {
+    name: project.config.name, sourcePath: directory, enabled: true,
+  }] });
+  signalHost("--signal-reload");
   let rebuilding = false;
   let pending = false;
   let debounce: NodeJS.Timeout | undefined;
@@ -208,8 +227,7 @@ async function devWidget(directory: string): Promise<void> {
     rebuilding = true;
     try {
       await bundleWidget(directory);
-      await stopChild(child);
-      child = launchWidget(directory);
+      signalHost("--signal-reload");
       process.stdout.write("weaver dev restarted widget\n");
     } catch (error) {
       printFailure(error);
@@ -230,30 +248,98 @@ async function devWidget(directory: string): Promise<void> {
     const stop = (): void => {
       watcher.close();
       clearTimeout(debounce);
-      void stopChild(child).finally(resolvePromise);
+      if (temporaryRegistration) {
+        const current = readRegistry();
+        writeRegistry({ widgets: current.widgets.filter((widget) => widget.name !== project.config.name) });
+        signalHost("--signal-reload");
+      }
+      resolvePromise();
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   });
 }
 
-function launchWidget(directory: string): ChildProcess {
-  return spawn(runtimeExecutable, [join(directory, "dist")], { cwd: repoRoot, stdio: "inherit", windowsHide: true });
+async function installWidget(directory: string): Promise<void> {
+  assertRuntimeBuilt();
+  const project = checkWidget(directory);
+  await bundleWidget(directory);
+  const document = readRegistry();
+  const conflicting = document.widgets.find((widget) => widget.name === project.config.name && resolve(widget.sourcePath) !== directory);
+  if (conflicting) throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${conflicting.sourcePath}`]);
+  writeRegistry({ widgets: [...document.widgets.filter((widget) => widget.name !== project.config.name), {
+    name: project.config.name, sourcePath: directory, enabled: true,
+  }] });
+  await upHost(false);
+  signalHost("--signal-reload");
+  process.stdout.write(`Installed ${project.config.name} from ${directory}\n`);
 }
 
-async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolvePromise) => {
-    const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolvePromise();
-    }, 1000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolvePromise();
-    });
-    child.kill();
-  });
+function uninstallWidget(name: string): void {
+  const document = readRegistry();
+  if (!document.widgets.some((widget) => widget.name === name)) throw new WeaverFailure([`Widget "${name}" is not installed.`]);
+  writeRegistry({ widgets: document.widgets.filter((widget) => widget.name !== name) });
+  if (hostRunning()) signalHost("--signal-reload");
+  process.stdout.write(`Uninstalled ${name}\n`);
+}
+
+async function upHost(announce: boolean): Promise<void> {
+  assertHostBuilt();
+  if (hostRunning()) {
+    if (announce) process.stdout.write("weaverd is already running\n");
+    return;
+  }
+  const child = spawn(hostExecutable, [], { cwd: repoRoot, detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+  const deadline = Date.now() + 5000;
+  while (!hostRunning() && Date.now() < deadline) await delay(50);
+  if (!hostRunning()) throw new WeaverFailure(["weaverd did not start"]);
+  if (announce) process.stdout.write("weaverd started\n");
+}
+
+async function downHost(): Promise<void> {
+  assertHostBuilt();
+  if (!hostRunning()) {
+    process.stdout.write("weaverd is not running\n");
+    return;
+  }
+  signalHost("--signal-down");
+  const deadline = Date.now() + 5000;
+  while (hostRunning() && Date.now() < deadline) await delay(50);
+  if (hostRunning()) throw new WeaverFailure(["weaverd did not stop cleanly"]);
+  process.stdout.write("weaverd stopped\n");
+}
+
+function showStatus(json: boolean): void {
+  if (!hostRunning()) throw new WeaverFailure(['weaverd is not running; run "weaver up"']);
+  try {
+    const document = readStatus();
+    process.stdout.write(`${json ? JSON.stringify(document, null, 2) : formatStatus(document)}\n`);
+  } catch {
+    throw new WeaverFailure([`weaverd has not published status yet at ${statusPath()}`]);
+  }
+}
+
+function hostRunning(): boolean {
+  if (!existsSync(hostExecutable)) return false;
+  return spawnSync(hostExecutable, ["--probe"], { stdio: "ignore", windowsHide: true }).status === 0;
+}
+
+function signalHost(signal: "--signal-down" | "--signal-reload"): void {
+  const result = spawnSync(hostExecutable, [signal], { stdio: "ignore", windowsHide: true });
+  if (result.status !== 0) throw new WeaverFailure([`weaverd rejected ${signal}`]);
+}
+
+function assertHostBuilt(): void {
+  if (!existsSync(hostExecutable)) throw new WeaverFailure([`Host not found at ${hostExecutable}`, "Build host/ with zig build -Doptimize=ReleaseFast."]);
+}
+
+function assertRuntimeBuilt(): void {
+  if (!existsSync(runtimeExecutable)) throw new WeaverFailure([`Runtime not found at ${runtimeExecutable}`, "Build runtime/ with the ReleaseFast command in docs/m2a-results.md."]);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 function loadProject(directory: string): SourceProject {
