@@ -20,8 +20,10 @@ pub fn build(b: *std.Build) void {
         "vendor/quickjs-ng/quickjs.c",
     };
     addQuickJs(b, artifacts.exe, sources, c_flags);
+    artifacts.exe.root_module.linkSystemLibrary("winhttp", .{});
     if (artifacts.tests.root_module != artifacts.exe.root_module) {
         addQuickJs(b, artifacts.tests, sources, c_flags);
+        artifacts.tests.root_module.linkSystemLibrary("winhttp", .{});
     }
 }
 

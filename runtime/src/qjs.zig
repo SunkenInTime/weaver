@@ -11,3 +11,7 @@ pub fn undefinedValue() c.JSValue {
 pub fn exceptionValue() c.JSValue {
     return .{ .u = .{ .int32 = 0 }, .tag = c.JS_TAG_EXCEPTION };
 }
+
+pub fn nullValue() c.JSValue {
+    return .{ .u = .{ .int32 = 0 }, .tag = c.JS_TAG_NULL };
+}

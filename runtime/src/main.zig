@@ -3,6 +3,7 @@ const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
+const storage_mod = @import("storage.zig");
 const tree_mod = @import("tree.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
@@ -12,13 +13,22 @@ pub const Model = struct {
     engine: ?*js_engine.Engine = null,
     timer_fires: u64 = 0,
     armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
+    fetch_poll_armed: bool = false,
+    slider_values: [tree_mod.max_nodes]f32 = @splat(0),
+    images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
+    image_count: usize = 0,
 };
 
 const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
 fn bridgeTimerCapacity() usize { return @import("bridge.zig").max_timers; }
+const max_images: usize = 16;
+const fetch_poll_key: u64 = 0x7766_6574_6368;
+const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
 pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
+    press: tree_mod.NodeId,
+    slider: tree_mod.NodeId,
 };
 
 const WidgetApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = false });
@@ -29,6 +39,11 @@ var first_render_ns: u64 = 0;
 var last_canvas_revision: u64 = 0;
 
 fn initEffects(model: *Model, effects: *Effects) void {
+    for (model.images[0..model.image_count]) |image| {
+        _ = effects.registerImageBytes(image.id, image.bytes) catch |err| {
+            std.log.err("widget image {d} failed to decode/register: {s}", .{ image.id, @errorName(err) });
+        };
+    }
     syncTimers(model, effects);
 }
 
@@ -41,6 +56,13 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 std.log.err("widget timer was rejected", .{});
                 return;
             }
+            if (timer.key == fetch_poll_key) {
+                (model.engine orelse return).drainFetches() catch |err| {
+                    std.log.err("widget fetch completion failed: {s}", .{@errorName(err)});
+                };
+                syncTimers(model, effects);
+                return;
+            }
             const before = model.tree.generation;
             (model.engine orelse return).fireTimer(timer.key) catch |err| {
                 std.log.err("widget timer callback failed: {s}", .{@errorName(err)});
@@ -51,6 +73,19 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             if (model.timer_fires % 10 == 0) {
                 std.log.info("widget timer: {d} callbacks, generation {d}, changed={}", .{ model.timer_fires, model.tree.generation, before != model.tree.generation });
             }
+        },
+        .press => |id| {
+            (model.engine orelse return).fireEvent(id, "press", null) catch |err| {
+                std.log.err("widget press callback failed: {s}", .{@errorName(err)});
+            };
+            syncTimers(model, effects);
+        },
+        .slider => |id| {
+            const value = model.slider_values[id - 1];
+            (model.engine orelse return).fireEvent(id, "change", value) catch |err| {
+                std.log.err("widget slider callback failed: {s}", .{@errorName(err)});
+            };
+            syncTimers(model, effects);
         },
     }
 }
@@ -91,6 +126,34 @@ fn syncTimers(model: *Model, effects: *Effects) void {
         });
         armed.* = .{ .id = timer.id, .interval_ms = timer.interval_ms };
     }
+    if (engine.hasActiveFetches() and !model.fetch_poll_armed) {
+        effects.startTimer(.{
+            .key = fetch_poll_key,
+            .interval_ms = 25,
+            .mode = .repeating,
+            .on_fire = Effects.timerMsg(.timer),
+        });
+        model.fetch_poll_armed = true;
+    } else if (!engine.hasActiveFetches() and model.fetch_poll_armed) {
+        effects.cancelTimer(fetch_poll_key);
+        model.fetch_poll_armed = false;
+    }
+}
+
+/// The fork owns a slider's optimistic drag value until dispatch. Stable
+/// global keys make its layout id computable from the retained node id, so the
+/// sync hook maps every concurrent slider back without closures or fork code.
+fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) void {
+    for (&model.tree.nodes, 0..) |*node, index| {
+        if (!node.alive or node.kind != .slider) continue;
+        const id: tree_mod.NodeId = @intCast(index + 1);
+        const widget_id = native_sdk.canvas.globalWidgetId(.slider, .{ .int = id });
+        for (layout.nodes) |layout_node| {
+            if (layout_node.widget.id != widget_id) continue;
+            model.slider_values[index] = layout_node.widget.value * node.max;
+            break;
+        }
+    }
 }
 
 fn onFrame(_: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
@@ -116,6 +179,7 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
 fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) WidgetUi.Node {
     const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
     var options: WidgetUi.ElementOptions = .{
+        .global_key = .{ .int = id },
         .padding = retained.padding,
         .gap = retained.gap,
         .opacity = retained.opacity,
@@ -139,6 +203,8 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
             .radius = if (retained.radius > 0) retained.radius else null,
             .quiet_hover = true,
         },
+        .on_press = if (retained.handles_press) Msg{ .press = id } else null,
+        .on_change = if (retained.handles_change) Msg{ .slider = id } else null,
     };
     if (retained.kind == .text) {
         options.wrap = false;
@@ -184,8 +250,41 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
             break :block ui.panel(options, .{ui.row(row_options, children)});
         } else ui.row(options, children),
         .panel => ui.panel(options, children),
+        .button => ui.panel(options, children),
+        .slider => ui.el(.slider, block: {
+            options.value = std.math.clamp(retained.value / retained.max, 0, 1);
+            break :block options;
+        }, .{}),
+        .image => block: {
+            options.image = id;
+            break :block ui.image(options);
+        },
         .text => unreachable,
     };
+}
+
+fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
+    for (&model.tree.nodes, 0..) |*node, index| {
+        if (!node.alive or node.kind != .image) continue;
+        const source = node.sourceSlice();
+        if (!isLocalAssetPath(source)) {
+            std.log.err("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path", .{});
+            return error.RemoteImageUnsupported;
+        }
+        if (model.image_count == max_images) return error.TooManyImages;
+        const relative = if (std.mem.startsWith(u8, source, "./") or std.mem.startsWith(u8, source, ".\\")) source[2..] else source;
+        const path = try std.fs.path.join(allocator, &.{ directory, relative });
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+        model.images[model.image_count] = .{ .id = @intCast(index + 1), .bytes = bytes };
+        model.image_count += 1;
+    }
+}
+
+fn isLocalAssetPath(source: []const u8) bool {
+    if (source.len == 0 or std.fs.path.isAbsolute(source) or std.mem.indexOf(u8, source, "://") != null) return false;
+    var components = std.mem.tokenizeAny(u8, source, "/\\");
+    while (components.next()) |component| if (std.mem.eql(u8, component, "..")) return false;
+    return true;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -196,6 +295,7 @@ pub fn main(init: std.process.Init) !void {
         return error.InvalidArguments;
     }
     const loaded = try manifest_mod.load(init.io, allocator, args[1]);
+    var storage = try storage_mod.Store.init(init.io, allocator, init.environ_map.get("LOCALAPPDATA"), loaded.manifest.name);
     const frame = manifest_mod.desktopFrame(loaded.manifest);
     const shell_views = [_]native_sdk.ShellView{.{
         .label = "widget-canvas",
@@ -238,13 +338,15 @@ pub fn main(init: std.process.Init) !void {
         .update_fx = update,
         .init_fx = initEffects,
         .view = view,
+        .sync = syncNativeState,
         .on_frame = onFrame,
     });
     defer app_state.destroy();
-    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree);
+    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins);
     defer engine.destroy(std.heap.page_allocator);
     app_state.model.engine = engine;
     try engine.evaluate(loaded.bundle, "bundle.js");
+    try loadLocalImages(init.io, allocator, args[1], &app_state.model);
 
     try runner.runWithOptions(app_state.app(), .{
         .app_name = "weaver-widget",
@@ -259,4 +361,6 @@ pub fn main(init: std.process.Init) !void {
 test {
     _ = @import("tree.zig");
     _ = @import("manifest.zig");
+    _ = @import("network.zig");
+    _ = @import("storage.zig");
 }

@@ -16,6 +16,7 @@ pub const Manifest = struct {
     layer: []const u8 = "desktop",
     clickThrough: bool = false,
     transparent: bool = true,
+    origins: []const []const u8 = &.{},
 };
 
 pub const Loaded = struct {
@@ -39,6 +40,9 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     }
     if (!std.mem.eql(u8, parsed.layer, "desktop") and !std.mem.eql(u8, parsed.layer, "normal") and !std.mem.eql(u8, parsed.layer, "topmost")) return error.UnsupportedLayer;
     if (!parsed.transparent) return error.UnsupportedOpaqueWidget;
+    for (parsed.origins) |origin| {
+        if (origin.len == 0 or std.mem.indexOf(u8, origin, "://") != null or std.mem.indexOfAny(u8, origin, "/?#@") != null) return error.InvalidOrigin;
+    }
     return .{ .manifest = parsed, .bundle = bundle };
 }
 

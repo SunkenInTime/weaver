@@ -1,21 +1,38 @@
 const std = @import("std");
 const tree_mod = @import("tree.zig");
+const network = @import("network.zig");
 const qjs = @import("qjs.zig");
+const storage_mod = @import("storage.zig");
 const c = qjs.c;
 
 pub const State = struct {
     tree: *tree_mod.Tree,
+    storage: *storage_mod.Store,
+    origins: []const []const u8,
     timers: [max_timers]TimerSlot = [_]TimerSlot{.{}} ** max_timers,
     next_timer_id: u64 = 1,
+    event_callback: c.JSValue = qjs.undefinedValue(),
+    fetches: [max_fetches]FetchSlot = [_]FetchSlot{.{}} ** max_fetches,
 };
 
 pub const max_timers: usize = 16;
+pub const max_fetches: usize = 4;
 
 pub const TimerSlot = struct {
     id: u64 = 0,
     interval_ms: u64 = 0,
     active: bool = false,
     callback: c.JSValue = qjs.undefinedValue(),
+};
+
+pub const FetchSlot = struct {
+    active: bool = false,
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    thread: ?std.Thread = null,
+    resolve: c.JSValue = qjs.undefinedValue(),
+    reject: c.JSValue = qjs.undefinedValue(),
+    request: network.Request = .{},
+    result: network.Result = .{},
 };
 
 /// Install the complete M0 capability surface. QuickJS's libc helpers are not
@@ -36,9 +53,14 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "setRoot", setRoot, 1);
     try setFunction(ctx, native, "beginBatch", beginBatch, 0);
     try setFunction(ctx, native, "endBatch", endBatch, 0);
+    try setFunction(ctx, native, "setHandler", setHandler, 3);
+    try setFunction(ctx, native, "onEvent", onEvent, 1);
     try setFunction(ctx, native, "setInterval", setInterval, 1);
     try setFunction(ctx, native, "clearInterval", clearInterval, 1);
     try setFunction(ctx, native, "onTimer", onTimer, 2);
+    try setFunction(ctx, native, "fetch", fetch, 4);
+    try setFunction(ctx, native, "storageRead", storageRead, 0);
+    try setFunction(ctx, native, "storageWrite", storageWrite, 1);
     try setFunction(ctx, native, "log", log, 1);
     if (c.JS_SetPropertyStr(ctx, global, "native", native) < 0) return error.QuickJs;
 }
@@ -47,6 +69,15 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
     for (&bridge_state.timers) |*timer| {
         c.JS_FreeValue(ctx, timer.callback);
         timer.* = .{};
+    }
+    c.JS_FreeValue(ctx, bridge_state.event_callback);
+    for (&bridge_state.fetches) |*slot| {
+        if (slot.thread) |thread| thread.join();
+        c.JS_FreeValue(ctx, slot.resolve);
+        c.JS_FreeValue(ctx, slot.reject);
+        slot.request.deinit(std.heap.page_allocator);
+        slot.result.deinit(std.heap.page_allocator);
+        slot.* = .{};
     }
 }
 
@@ -142,6 +173,50 @@ fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValue
     return qjs.undefinedValue();
 }
 
+fn setHandler(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 3) return fail(js, "setHandler expects id, event kind, and enabled");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
+    const kind = stringArg(js, argv[1]) catch return fail(js, "event kind must be a string");
+    defer c.JS_FreeCString(js, kind.raw);
+    const enabled = c.JS_ToBool(js, argv[2]);
+    if (enabled < 0) return fail(js, "handler enabled must be boolean");
+    state(js).tree.setHandler(id, kind.bytes, enabled != 0) catch return fail(js, "unsupported event handler");
+    return qjs.undefinedValue();
+}
+
+/// The SDK installs exactly one event dispatcher. Native nodes retain only
+/// handler-presence bits; typed closures stay in the JS reconciler, and every
+/// press/change returns through this `(nodeId, kind, payload)` choke point.
+fn onEvent(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 1 or !c.JS_IsFunction(js, argv[0])) return fail(js, "onEvent expects one function");
+    const bridge_state = state(js);
+    c.JS_FreeValue(js, bridge_state.event_callback);
+    bridge_state.event_callback = c.JS_DupValue(js, argv[0]);
+    return qjs.undefinedValue();
+}
+
+fn storageRead(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 0) return fail(js, "storageRead expects no arguments");
+    const bytes = state(js).storage.read() catch return fail(js, "storageRead failed");
+    if (bytes) |value| return c.JS_NewStringLen(js, value.ptr, value.len);
+    return qjs.nullValue();
+}
+
+fn storageWrite(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 1) return fail(js, "storageWrite expects one JSON string");
+    const value = stringArg(js, argv[0]) catch return fail(js, "storageWrite expects one JSON string");
+    defer c.JS_FreeCString(js, value.raw);
+    state(js).storage.write(value.bytes) catch |err| return if (err == error.StorageQuotaExceeded)
+        fail(js, "StorageQuotaExceeded: widget storage exceeds 64 KB")
+    else
+        fail(js, "storageWrite failed");
+    return qjs.undefinedValue();
+}
+
 fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 3) return fail(js, "setProp expects id, key, and value");
@@ -157,6 +232,10 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setTextColor(id, color) catch return fail(js, "setProp failed");
         }
+    } else if (std.mem.eql(u8, key.bytes, "source")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setSource(id, value.bytes) catch return fail(js, "image source is too long");
     } else if (std.mem.eql(u8, key.bytes, "fontWeight")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);
@@ -176,7 +255,11 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     } else {
         var value: f64 = 0;
         if (c.JS_ToFloat64(js, &value, argv[2]) < 0) return fail(js, "property value must be numeric");
-        state(js).tree.setNumberProp(id, key.bytes, @floatCast(value)) catch return fail(js, "unsupported property");
+        if (std.mem.eql(u8, key.bytes, "value") or std.mem.eql(u8, key.bytes, "max")) {
+            state(js).tree.setControlValue(id, key.bytes, @floatCast(value)) catch return fail(js, "unsupported control property");
+        } else {
+            state(js).tree.setNumberProp(id, key.bytes, @floatCast(value)) catch return fail(js, "unsupported property");
+        }
     }
     return qjs.undefinedValue();
 }
@@ -226,6 +309,166 @@ fn onTimer(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         return qjs.undefinedValue();
     }
     return fail(js, "unknown timer id");
+}
+
+/// `wfetch` uses WinHTTP because it is the fork's already-proven Windows TLS
+/// path. The bridge copies a bounded request into one of four slots and runs
+/// the blocking exchange on a worker; only `drainFetches` touches QuickJS,
+/// from the Native main loop. Redirects are disabled at WinHTTP so no request
+/// can escape the exact manifest host after this check.
+fn fetch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 4) return fail(js, "fetch expects url, method, headers JSON, and body");
+    const url = stringArg(js, argv[0]) catch return fail(js, "fetch url must be a string");
+    defer c.JS_FreeCString(js, url.raw);
+    const method = stringArg(js, argv[1]) catch return fail(js, "fetch method must be a string");
+    defer c.JS_FreeCString(js, method.raw);
+    const headers_json = stringArg(js, argv[2]) catch return fail(js, "fetch headers must be JSON");
+    defer c.JS_FreeCString(js, headers_json.raw);
+    const body = stringArg(js, argv[3]) catch return fail(js, "fetch body must be a string");
+    defer c.JS_FreeCString(js, body.raw);
+
+    var resolving: [2]c.JSValue = undefined;
+    const promise = c.JS_NewPromiseCapability(js, &resolving);
+    if (c.JS_IsException(promise)) return promise;
+    const parsed_url = network.parseHttpsUrl(url.bytes) catch {
+        rejectPromise(js, resolving[1], "HttpsRequired: wfetch accepts only https:// URLs");
+        c.JS_FreeValue(js, resolving[0]);
+        c.JS_FreeValue(js, resolving[1]);
+        return promise;
+    };
+    if (!network.originDeclared(state(js).origins, parsed_url.declared_host)) {
+        var message_buffer: [320]u8 = undefined;
+        const message = std.fmt.bufPrint(&message_buffer, "OriginNotDeclared: add \"{s}\" to origins in your widget config", .{parsed_url.declared_host}) catch "OriginNotDeclared";
+        rejectPromise(js, resolving[1], message);
+        c.JS_FreeValue(js, resolving[0]);
+        c.JS_FreeValue(js, resolving[1]);
+        return promise;
+    }
+    const bridge_state = state(js);
+    const slot = for (&bridge_state.fetches) |*candidate| {
+        if (!candidate.active) break candidate;
+    } else {
+        rejectPromise(js, resolving[1], "FetchCapacityExceeded: at most 4 requests may run concurrently");
+        c.JS_FreeValue(js, resolving[0]);
+        c.JS_FreeValue(js, resolving[1]);
+        return promise;
+    };
+    slot.* = .{ .active = true, .resolve = resolving[0], .reject = resolving[1] };
+    slot.request.method = if (std.ascii.eqlIgnoreCase(method.bytes, "GET")) .get else if (std.ascii.eqlIgnoreCase(method.bytes, "POST")) .post else {
+        rejectAndResetFetch(js, slot, "wfetch method must be GET or POST");
+        return promise;
+    };
+    slot.request.url = std.heap.page_allocator.dupe(u8, url.bytes) catch {
+        rejectAndResetFetch(js, slot, "FetchFailed: request allocation failed");
+        return promise;
+    };
+    slot.request.body = std.heap.page_allocator.dupe(u8, body.bytes) catch {
+        rejectAndResetFetch(js, slot, "FetchFailed: request allocation failed");
+        return promise;
+    };
+    slot.request.headers = copyHeadersJson(headers_json.bytes) orelse {
+        rejectAndResetFetch(js, slot, "wfetch headers must be string values without CR/LF");
+        return promise;
+    };
+    slot.thread = std.Thread.spawn(.{}, fetchWorker, .{slot}) catch {
+        rejectAndResetFetch(js, slot, "FetchFailed: could not start request worker");
+        return promise;
+    };
+    return promise;
+}
+
+fn copyHeadersJson(source: []const u8) ?[]const u8 {
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, source, .{}) catch return null;
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(std.heap.page_allocator);
+    var iterator = parsed.value.object.iterator();
+    while (iterator.next()) |entry| {
+        if (entry.value_ptr.* != .string) return null;
+        const name = entry.key_ptr.*;
+        const value = entry.value_ptr.string;
+        if (name.len == 0 or std.mem.indexOfAny(u8, name, ":\r\n") != null or std.mem.indexOfAny(u8, value, "\r\n") != null) return null;
+        const line = std.fmt.allocPrint(std.heap.page_allocator, "{s}: {s}\r\n", .{ name, value }) catch return null;
+        defer std.heap.page_allocator.free(line);
+        output.appendSlice(std.heap.page_allocator, line) catch return null;
+    }
+    return output.toOwnedSlice(std.heap.page_allocator) catch null;
+}
+
+fn fetchWorker(slot: *FetchSlot) void {
+    slot.result = network.perform(&slot.request, std.heap.page_allocator);
+    slot.done.store(true, .release);
+}
+
+fn rejectPromise(ctx: *c.JSContext, reject: c.JSValue, message: []const u8) void {
+    const reason = c.JS_NewStringLen(ctx, message.ptr, message.len);
+    defer c.JS_FreeValue(ctx, reason);
+    var arguments = [_]c.JSValue{reason};
+    const result = c.JS_Call(ctx, reject, qjs.undefinedValue(), 1, &arguments);
+    c.JS_FreeValue(ctx, result);
+}
+
+fn rejectAndResetFetch(ctx: *c.JSContext, slot: *FetchSlot, message: []const u8) void {
+    rejectPromise(ctx, slot.reject, message);
+    c.JS_FreeValue(ctx, slot.resolve);
+    c.JS_FreeValue(ctx, slot.reject);
+    slot.request.deinit(std.heap.page_allocator);
+    slot.* = .{};
+}
+
+pub fn hasActiveFetches(bridge_state: *const State) bool {
+    for (&bridge_state.fetches) |*slot| if (slot.active) return true;
+    return false;
+}
+
+/// Resolve completed worker slots on the QuickJS/main-loop thread. The SDK's
+/// promise continuation enters the ordinary pending-job queue, so its state
+/// update is batched by the same reconciler path as a timer or button event.
+pub fn drainFetches(ctx: *c.JSContext, bridge_state: *State) void {
+    for (&bridge_state.fetches) |*slot| {
+        if (!slot.active or !slot.done.load(.acquire)) continue;
+        if (slot.thread) |thread| thread.join();
+        slot.thread = null;
+        if (slot.result.failure == .none) {
+            const response = c.JS_NewObject(ctx);
+            _ = c.JS_SetPropertyStr(ctx, response, "status", c.JS_NewUint32(ctx, slot.result.status));
+            const body = slot.result.body orelse &.{};
+            _ = c.JS_SetPropertyStr(ctx, response, "body", c.JS_NewStringLen(ctx, body.ptr, body.len));
+            var arguments = [_]c.JSValue{response};
+            const call_result = c.JS_Call(ctx, slot.resolve, qjs.undefinedValue(), 1, &arguments);
+            c.JS_FreeValue(ctx, call_result);
+            c.JS_FreeValue(ctx, response);
+        } else {
+            rejectPromise(ctx, slot.reject, switch (slot.result.failure) {
+                .invalid_url => "HttpsRequired: wfetch accepts only https:// URLs",
+                .timed_out => "FetchTimeout: request exceeded 15 seconds",
+                .response_too_large => "ResponseTooLarge: wfetch response exceeds 5 MB",
+                .request_failed => "FetchFailed: request failed",
+                .none => unreachable,
+            });
+        }
+        c.JS_FreeValue(ctx, slot.resolve);
+        c.JS_FreeValue(ctx, slot.reject);
+        slot.request.deinit(std.heap.page_allocator);
+        slot.result.deinit(std.heap.page_allocator);
+        slot.* = .{};
+    }
+}
+
+pub fn dispatchEvent(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.NodeId, kind: []const u8, payload: ?f64) bool {
+    if (!c.JS_IsFunction(ctx, bridge_state.event_callback)) return true;
+    const kind_value = c.JS_NewStringLen(ctx, kind.ptr, kind.len);
+    defer c.JS_FreeValue(ctx, kind_value);
+    const payload_value = if (payload) |value| c.JS_NewFloat64(ctx, value) else qjs.nullValue();
+    defer c.JS_FreeValue(ctx, payload_value);
+    var arguments = [_]c.JSValue{ c.JS_NewUint32(ctx, node_id), kind_value, payload_value };
+    defer c.JS_FreeValue(ctx, arguments[0]);
+    const result = c.JS_Call(ctx, bridge_state.event_callback, qjs.undefinedValue(), arguments.len, &arguments);
+    const succeeded = !c.JS_IsException(result);
+    c.JS_FreeValue(ctx, result);
+    return succeeded;
 }
 
 fn log(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {

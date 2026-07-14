@@ -4,6 +4,7 @@ const native_sdk = @import("native_sdk");
 pub const max_nodes: usize = 128;
 pub const max_children: usize = 24;
 pub const max_text_bytes: usize = 192;
+pub const max_source_bytes: usize = 260;
 
 pub const NodeId = u32;
 
@@ -12,6 +13,9 @@ pub const Kind = enum {
     row,
     text,
     panel,
+    button,
+    slider,
+    image,
 
     pub fn parse(value: []const u8) ?Kind {
         inline for (@typeInfo(Kind).@"enum".fields) |field| {
@@ -50,9 +54,19 @@ pub const Node = struct {
     width: f32 = 0,
     height: f32 = 0,
     truncate: bool = false,
+    handles_press: bool = false,
+    handles_change: bool = false,
+    value: f32 = 0,
+    max: f32 = 1,
+    source: [max_source_bytes]u8 = @splat(0),
+    source_len: usize = 0,
 
     pub fn textSlice(self: *const Node) []const u8 {
         return self.text[0..self.text_len];
+    }
+
+    pub fn sourceSlice(self: *const Node) []const u8 {
+        return self.source[0..self.source_len];
     }
 };
 
@@ -172,6 +186,32 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (target.truncate == value) return;
         target.truncate = value;
+        self.changed();
+    }
+
+    pub fn setHandler(self: *Tree, id: NodeId, kind: []const u8, enabled: bool) Error!void {
+        const target = try self.node(id);
+        const slot: *bool = if (std.mem.eql(u8, kind, "press")) &target.handles_press else if (std.mem.eql(u8, kind, "change")) &target.handles_change else return error.InvalidProperty;
+        if (slot.* == enabled) return;
+        slot.* = enabled;
+        self.changed();
+    }
+
+    pub fn setControlValue(self: *Tree, id: NodeId, key: []const u8, value: f32) Error!void {
+        const target = try self.node(id);
+        const slot: *f32 = if (std.mem.eql(u8, key, "value")) &target.value else if (std.mem.eql(u8, key, "max")) &target.max else return error.InvalidProperty;
+        const normalized = if (std.mem.eql(u8, key, "max")) @max(value, 0.000001) else @max(value, 0);
+        if (slot.* == normalized) return;
+        slot.* = normalized;
+        self.changed();
+    }
+
+    pub fn setSource(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_source_bytes) return error.TextTooLong;
+        const target = try self.node(id);
+        if (std.mem.eql(u8, target.sourceSlice(), value)) return;
+        @memcpy(target.source[0..value.len], value);
+        target.source_len = value.len;
         self.changed();
     }
 

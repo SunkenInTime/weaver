@@ -2,6 +2,7 @@ const std = @import("std");
 const bridge = @import("bridge.zig");
 const qjs = @import("qjs.zig");
 const tree_mod = @import("tree.zig");
+const storage_mod = @import("storage.zig");
 const c = qjs.c;
 const win = @cImport({
     @cInclude("windows.h");
@@ -25,7 +26,7 @@ pub const Engine = struct {
     deadline_ms: u64 = 0,
     executing: bool = false,
 
-    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree) Error!*Engine {
+    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8) Error!*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
         const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
@@ -35,7 +36,7 @@ pub const Engine = struct {
         self.* = .{
             .runtime = runtime,
             .context = context,
-            .bridge_state = .{ .tree = tree },
+            .bridge_state = .{ .tree = tree, .storage = storage, .origins = origins },
         };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
@@ -44,6 +45,7 @@ pub const Engine = struct {
     }
 
     pub fn destroy(self: *Engine, allocator: std.mem.Allocator) void {
+        self.flushStorage();
         bridge.deinit(self.context, &self.bridge_state);
         c.JS_FreeContext(self.context);
         c.JS_FreeRuntime(self.runtime);
@@ -81,6 +83,24 @@ pub const Engine = struct {
         try self.pumpJobs();
     }
 
+    pub fn fireEvent(self: *Engine, node_id: tree_mod.NodeId, kind: []const u8, payload: ?f64) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        if (!bridge.dispatchEvent(self.context, &self.bridge_state, node_id, kind, payload)) return self.reportException();
+        try self.pumpJobs();
+    }
+
+    pub fn hasActiveFetches(self: *const Engine) bool {
+        return bridge.hasActiveFetches(&self.bridge_state);
+    }
+
+    pub fn drainFetches(self: *Engine) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        bridge.drainFetches(self.context, &self.bridge_state);
+        try self.pumpJobs();
+    }
+
     fn pumpJobs(self: *Engine) Error!void {
         while (true) {
             var job_context: ?*c.JSContext = null;
@@ -99,11 +119,32 @@ pub const Engine = struct {
         self.executing = false;
     }
 
+    /// SDK storage normally flushes on its 200 ms native debounce. A clean
+    /// window close gets one final synchronous hook; Windows force-kills used
+    /// by `weaver dev` cannot run process destructors, so native quota and the
+    /// already-completed debounce remain authoritative there.
+    fn flushStorage(self: *Engine) void {
+        const global = c.JS_GetGlobalObject(self.context);
+        defer c.JS_FreeValue(self.context, global);
+        const callback = c.JS_GetPropertyStr(self.context, global, "__weaverFlushStorage");
+        defer c.JS_FreeValue(self.context, callback);
+        if (!c.JS_IsFunction(self.context, callback)) return;
+        const result = c.JS_Call(self.context, callback, qjs.undefinedValue(), 0, null);
+        defer c.JS_FreeValue(self.context, result);
+        if (c.JS_IsException(result)) logExceptionFrom(self.context);
+    }
+
     fn reportException(self: *Engine) Error {
         return self.reportExceptionFrom(self.context);
     }
 
     fn reportExceptionFrom(_: *Engine, context: *c.JSContext) Error {
+        logExceptionFrom(context);
+        return error.ScriptException;
+    }
+};
+
+fn logExceptionFrom(context: *c.JSContext) void {
         const exception = c.JS_GetException(context);
         defer c.JS_FreeValue(context, exception);
         var len: usize = 0;
@@ -114,9 +155,7 @@ pub const Engine = struct {
         } else {
             std.log.err("widget JavaScript exception", .{});
         }
-        return error.ScriptException;
-    }
-};
+}
 
 fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
     const self: *Engine = @ptrCast(@alignCast(context orelse return 1));
