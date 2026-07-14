@@ -6,7 +6,7 @@ with the Native SDK reference renderer, but it does so only when the retained
 display layer changes. Canvas commands continue to cross the existing NSGP
 pipe every animated frame.
 
-Fork work is committed on `weaver-fork-hybrid` at `2b3959b5`; the parent
+Fork work is committed on `weaver-fork-hybrid` at `5d066a3b`; the parent
 repository pins that exact commit.
 
 The static parity captures are [software](m4b-parity-sw.png) and
@@ -110,16 +110,18 @@ the renderer.
 |---|---:|---:|---:|---|
 | hosted mixed audio visualizer | 21.3 fps vs 30 requested | 9.06% | 17.34 MiB | one retained upload |
 | its shared renderer | same | 1.88% | 12.68 MiB | audio remained live |
+| hosted visualizer after provider silence | no audio frames | **3.75-4.48%** | 16.20 MiB | backend stayed software after its startup race |
 | mixed `fps={0}` widget | one initial present only | **0.104%** | 16.46 MiB | 15-second idle interval |
 | renderer after that initial present | no further presents | **0.000%** | 13.18 MiB | one retained upload |
 
-The machine had continuously audible Spotify/browser sessions during the live
-audio run, so the real provider never entered its two-second silence state.
-The exact pause mechanism was instead measured with the mixed parity widget;
-the visualizer uses the same reconciler path after its decay reaches zero.
-The hosted audio cadence regression (about 21 fps) is honest: 30 Hz provider
-rerenders contend with the sub-60 canvas timer and need a follow-up scheduler
-fix even though CPU stays within the requested class.
+The first live audio run had continuously audible Spotify/browser sessions.
+A later host restart did reach provider silence and stopped its audio frame
+counter at 57, but the hosted widget still consumed 3.75-4.48% of one core.
+The direct mixed `fps={0}` control proves the canvas clock and presents are
+stopped, so this residual belongs to hosted runtime/IPC idle work rather than
+canvas rendering and needs separate profiling. The hosted audio cadence
+regression (about 21 fps) is also honest: 30 Hz provider rerenders contend with
+the sub-60 canvas timer and need a follow-up scheduler fix.
 
 ## Supervision and recovery
 
@@ -141,6 +143,13 @@ instead of visibly repainting through software, and the backend report never
 observed `software`. Promotion uploaded retained generations 2 and 3 after the
 new renderer connected. This fails the requested live-demotion behavior and
 must be fixed before treating renderer crashes as seamless.
+
+A final fork follow-up now detaches the dead DirectComposition visual, restores
+the layered-window style with `SWP_FRAMECHANGED`, and skips the invalid retry of
+the full mixed packet before pixel fallback. Those are the two necessary
+demotion seams and compile/test cleanly. The active hosted recovery run above
+still did not produce an observable software frame, so the result remains
+classified as failing rather than claiming recovery from code inspection.
 
 Win+D also hid the direct hybrid proof windows on this run, unlike the M4a
 result. Ordinary bottom-layer behavior remained correct, but WorkerW parenting
