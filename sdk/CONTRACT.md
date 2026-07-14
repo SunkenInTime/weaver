@@ -170,7 +170,9 @@ interface CanvasCtx {
 }
 ```
 
-- `fps` capped at 60; omitted → draws once per React render.
+- `fps` capped at 60; omitted → draws once per React render. `fps={0}` pauses
+  the frame clock entirely (0% cost) while keeping the last frame on screen —
+  the intended idle pattern for data-driven canvases: `fps={active ? 30 : 0}`.
 - `onFrame` runs on the native frame clock; commands batch into one
   immediate-mode buffer per frame. Colors are `#rgb/#rrggbb/#rrggbbaa`.
 - A canvas with `fps > 0` is an *animated* widget and is billed accordingly
