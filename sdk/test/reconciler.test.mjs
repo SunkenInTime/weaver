@@ -74,6 +74,11 @@ test("widget renders one native generation and providers use native timers", asy
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
+        class: "w-[8px] h-[4px]",
+        fps: 0,
+        onFrame(ctx) { ctx.fillRect(0, 0, 8, 4, "#000"); },
+      }),
+      sdk.h("canvas", {
         class: "w-[80px] h-[40px]",
         fps: 120,
         onFrame(ctx, frame) {
@@ -122,6 +127,9 @@ test("widget renders one native generation and providers use native timers", asy
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "0.75"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "Test Song"));
   const canvasNode = operations.findLast((operation) => operation[0] === "createNode" && operation[1] === "canvas")[2];
+  const pausedCanvasNode = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas")[0][2];
+  assert.ok(operations.some((operation) => operation[0] === "setCanvasCommands" && operation[1] === pausedCanvasNode));
+  assert.ok(!operations.some((operation) => operation[0] === "onCanvasFrame" && operation[1] === pausedCanvasNode));
   const submit = operations.findLast((operation) => operation[0] === "setCanvasCommands" && operation[1] === canvasNode);
   assert.deepEqual(submit[2].slice(0, 2), [0, 0]);
   assert.equal(submit[2][2], 1);

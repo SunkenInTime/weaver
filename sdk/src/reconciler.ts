@@ -436,8 +436,8 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
     next.src = props.src;
   } else if (instance.type === "canvas") {
     if (typeof props.onFrame !== "function") throw new Error("<canvas> requires onFrame={(ctx, frame) => ...}");
-    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps <= 0)) {
-      throw new Error("<canvas> fps must be a positive number when provided");
+    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps < 0)) {
+      throw new Error("<canvas> fps must be zero or a positive number when provided");
     }
     next.onFrame = props.onFrame as (ctx: CanvasCtx, frame: CanvasFrame) => void;
     next.fps = props.fps === undefined ? undefined : Math.min(60, props.fps as number);
@@ -472,6 +472,7 @@ function unmount(instance: Instance): void {
 
 function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: number | undefined, width: number, height: number): void {
   let binding = canvases.get(id);
+  const mounted = binding === undefined;
   const intervalChanged = binding?.fps !== fps;
   if (!binding) {
     binding = { onFrame, fps, timerId: 0, surfaceClock: false, width, height };
@@ -496,6 +497,10 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     binding.nativeTimestampStarted = false;
   }
   binding.fps = fps;
+  if (fps === 0) {
+    if (mounted) drawCanvasFrame(id, Date.now() / 1000);
+    return;
+  }
   if (fps === undefined) {
     drawCanvasFrame(id, Date.now() / 1000);
     return;
@@ -521,7 +526,7 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
 
 function drawTimedCanvasFrame(id: number, timestampSeconds: number): void {
   const binding = canvases.get(id);
-  if (!binding || binding.fps === undefined) return;
+  if (!binding || binding.fps === undefined || binding.fps === 0) return;
   const period = 1 / binding.fps;
   if (binding.nextT === undefined) binding.nextT = timestampSeconds;
   if (timestampSeconds + 0.000_001 < binding.nextT) return;
