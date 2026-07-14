@@ -5,6 +5,10 @@ pub const max_nodes: usize = 128;
 pub const max_children: usize = 24;
 pub const max_text_bytes: usize = 192;
 pub const max_source_bytes: usize = 260;
+pub const max_canvases: usize = 8;
+pub const max_canvas_commands: usize = 256;
+pub const max_canvas_points: usize = 1024;
+pub const max_canvas_wire_values: usize = 4096;
 
 pub const NodeId = u32;
 
@@ -16,6 +20,7 @@ pub const Kind = enum {
     button,
     slider,
     image,
+    canvas,
 
     pub fn parse(value: []const u8) ?Kind {
         inline for (@typeInfo(Kind).@"enum".fields) |field| {
@@ -60,6 +65,7 @@ pub const Node = struct {
     max: f32 = 1,
     source: [max_source_bytes]u8 = @splat(0),
     source_len: usize = 0,
+    canvas_slot: u8 = 0,
 
     pub fn textSlice(self: *const Node) []const u8 {
         return self.text[0..self.text_len];
@@ -77,6 +83,23 @@ pub const Error = error{
     TextTooLong,
     Cycle,
     InvalidProperty,
+    CanvasLimit,
+    CanvasCommandLimit,
+    CanvasPointLimit,
+    InvalidCanvasBatch,
+};
+
+pub const CanvasState = struct {
+    owner: NodeId = 0,
+    commands: [max_canvas_commands]native_sdk.canvas.ImmediateCanvasCommand = undefined,
+    command_count: usize = 0,
+    points: [max_canvas_points]native_sdk.geometry.PointF = undefined,
+    point_count: usize = 0,
+    fingerprint: u64 = 0,
+
+    pub fn slice(self: *const CanvasState) []const native_sdk.canvas.ImmediateCanvasCommand {
+        return self.commands[0..self.command_count];
+    }
 };
 
 /// JS mutates this tree; the Native SDK view is a pure derivation of it.
@@ -84,6 +107,7 @@ pub const Error = error{
 /// loop one cheap batch boundary for future no-op timer callbacks.
 pub const Tree = struct {
     nodes: [max_nodes]Node = [_]Node{.{}} ** max_nodes,
+    canvases: [max_canvases]CanvasState = [_]CanvasState{.{}} ** max_canvases,
     root: ?NodeId = null,
     generation: u64 = 0,
     batch_depth: u8 = 0,
@@ -105,7 +129,18 @@ pub const Tree = struct {
     pub fn createNode(self: *Tree, kind: Kind) Error!NodeId {
         for (&self.nodes, 0..) |*slot, index| {
             if (slot.alive) continue;
+            var canvas_index: ?usize = null;
+            if (kind == .canvas) {
+                canvas_index = for (&self.canvases, 0..) |*canvas, candidate| {
+                    if (canvas.owner == 0) break candidate;
+                } else return error.CanvasLimit;
+            }
             slot.* = .{ .alive = true, .kind = kind };
+            if (canvas_index) |canvas_slot| {
+                const id: NodeId = @intCast(index + 1);
+                self.canvases[canvas_slot] = .{ .owner = id };
+                slot.canvas_slot = @intCast(canvas_slot + 1);
+            }
             self.changed();
             return @intCast(index + 1);
         }
@@ -215,6 +250,83 @@ pub const Tree = struct {
         self.changed();
     }
 
+    pub fn canvasState(self: *Tree, id: NodeId) Error!*CanvasState {
+        const target = try self.node(id);
+        if (target.kind != .canvas or target.canvas_slot == 0) return error.InvalidNode;
+        return &self.canvases[target.canvas_slot - 1];
+    }
+
+    pub fn canvasStateConst(self: *const Tree, id: NodeId) Error!*const CanvasState {
+        const target = try self.nodeConst(id);
+        if (target.kind != .canvas or target.canvas_slot == 0) return error.InvalidNode;
+        return &self.canvases[target.canvas_slot - 1];
+    }
+
+    /// Decode the SDK's bounded Float64 wire batch into fork-native drawing
+    /// commands. Colors arrive as exact packed RGBA integers; geometry is
+    /// narrowed once here, so the frame renderer never parses JS values.
+    pub fn setCanvasCommands(self: *Tree, id: NodeId, wire: []const f64) Error!void {
+        if (wire.len > max_canvas_wire_values) return error.InvalidCanvasBatch;
+        const fingerprint = std.hash.Wyhash.hash(0x6361_6e76_6173, std.mem.sliceAsBytes(wire));
+        const canvas = try self.canvasState(id);
+        if (canvas.fingerprint == fingerprint and canvas.command_count > 0) return;
+        canvas.command_count = 0;
+        canvas.point_count = 0;
+        var cursor: usize = 0;
+        while (cursor < wire.len) {
+            const opcode = finiteInt(wire[cursor]) orelse return error.InvalidCanvasBatch;
+            cursor += 1;
+            switch (opcode) {
+                0 => {
+                    const color = try wireColor(wire, &cursor);
+                    if (color.a > 0) {
+                        const node_value = try self.nodeConst(id);
+                        try appendCanvasCommand(canvas, .{ .fill_rect = .{
+                            .rect = native_sdk.geometry.RectF.init(0, 0, node_value.width, node_value.height),
+                            .color = color,
+                        } });
+                    }
+                },
+                1 => try appendCanvasCommand(canvas, .{ .fill_rect = .{
+                    .rect = native_sdk.geometry.RectF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
+                    .color = try wireColor(wire, &cursor),
+                } }),
+                2 => try appendCanvasCommand(canvas, .{ .fill_rounded_rect = .{
+                    .rect = native_sdk.geometry.RectF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
+                    .radius = try wireFloat(wire, &cursor),
+                    .color = try wireColor(wire, &cursor),
+                } }),
+                3 => try appendCanvasCommand(canvas, .{ .fill_circle = .{
+                    .center = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
+                    .radius = try wireFloat(wire, &cursor),
+                    .color = try wireColor(wire, &cursor),
+                } }),
+                4 => try appendCanvasCommand(canvas, .{ .line = .{
+                    .from = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
+                    .to = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
+                    .width = try wireFloat(wire, &cursor),
+                    .color = try wireColor(wire, &cursor),
+                } }),
+                5 => {
+                    const width = try wireFloat(wire, &cursor);
+                    const color = try wireColor(wire, &cursor);
+                    const count = finiteInt(if (cursor < wire.len) wire[cursor] else return error.InvalidCanvasBatch) orelse return error.InvalidCanvasBatch;
+                    cursor += 1;
+                    if (count < 2 or canvas.point_count + count > max_canvas_points) return error.CanvasPointLimit;
+                    const start = canvas.point_count;
+                    for (0..count) |_| {
+                        canvas.points[canvas.point_count] = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor));
+                        canvas.point_count += 1;
+                    }
+                    try appendCanvasCommand(canvas, .{ .polyline = .{ .points = canvas.points[start..canvas.point_count], .width = width, .color = color } });
+                },
+                else => return error.InvalidCanvasBatch,
+            }
+        }
+        canvas.fingerprint = fingerprint;
+        self.changed();
+    }
+
     pub fn appendChild(self: *Tree, parent_id: NodeId, child_id: NodeId) Error!void {
         if (parent_id == child_id or try self.isAncestor(child_id, parent_id)) return error.Cycle;
         const parent = try self.node(parent_id);
@@ -308,6 +420,7 @@ pub const Tree = struct {
         var children: [max_children]NodeId = undefined;
         @memcpy(children[0..count], target.children[0..count]);
         for (children[0..count]) |child_id| self.removeSubtree(child_id);
+        if (target.canvas_slot > 0) self.canvases[target.canvas_slot - 1] = .{};
         target.* = .{};
     }
 
@@ -329,6 +442,33 @@ pub const Tree = struct {
     }
 };
 
+fn appendCanvasCommand(canvas: *CanvasState, command: native_sdk.canvas.ImmediateCanvasCommand) Error!void {
+    if (canvas.command_count == max_canvas_commands) return error.CanvasCommandLimit;
+    canvas.commands[canvas.command_count] = command;
+    canvas.command_count += 1;
+}
+
+fn wireFloat(wire: []const f64, cursor: *usize) Error!f32 {
+    if (cursor.* >= wire.len or !std.math.isFinite(wire[cursor.*])) return error.InvalidCanvasBatch;
+    const value: f32 = @floatCast(wire[cursor.*]);
+    cursor.* += 1;
+    return value;
+}
+
+fn wireColor(wire: []const f64, cursor: *usize) Error!native_sdk.canvas.Color {
+    if (cursor.* >= wire.len) return error.InvalidCanvasBatch;
+    const packed_value = finiteInt(wire[cursor.*]) orelse return error.InvalidCanvasBatch;
+    cursor.* += 1;
+    if (packed_value > std.math.maxInt(u32)) return error.InvalidCanvasBatch;
+    const rgba: u32 = @intCast(packed_value);
+    return native_sdk.canvas.Color.rgba8(@truncate(rgba >> 24), @truncate(rgba >> 16), @truncate(rgba >> 8), @truncate(rgba));
+}
+
+fn finiteInt(value: f64) ?usize {
+    if (!std.math.isFinite(value) or value < 0 or @floor(value) != value or value > @as(f64, @floatFromInt(std.math.maxInt(u32)))) return null;
+    return @intFromFloat(value);
+}
+
 test "tree owns a bounded hierarchy" {
     var tree: Tree = .{};
     const root = try tree.createNode(.column);
@@ -340,4 +480,22 @@ test "tree owns a bounded hierarchy" {
     try std.testing.expectError(error.Cycle, tree.appendChild(label, root));
     try tree.removeNode(label);
     try std.testing.expectError(error.InvalidNode, tree.node(label));
+}
+
+test "canvas wire decodes packed colors and polyline points" {
+    var tree: Tree = .{};
+    const id = try tree.createNode(.canvas);
+    try tree.setNumberProp(id, "width", 64);
+    try tree.setNumberProp(id, "height", 32);
+    try tree.setCanvasCommands(id, &.{
+        0, 0x11223344,
+        1, 1, 2, 3, 4, 0xff00ffff,
+        5, 2, 0xffffffff, 3, 0, 0, 4, 8, 9, 3,
+    });
+    const canvas = try tree.canvasStateConst(id);
+    try std.testing.expectEqual(@as(usize, 3), canvas.command_count);
+    try std.testing.expectEqual(@as(usize, 3), canvas.point_count);
+    try std.testing.expectEqual(@as(f32, 64), canvas.commands[0].fill_rect.rect.width);
+    try std.testing.expectApproxEqAbs(@as(f32, 0x11) / 255, canvas.commands[0].fill_rect.color.r, 0.0001);
+    try std.testing.expectEqual(@as(usize, 3), canvas.commands[2].polyline.points.len);
 }

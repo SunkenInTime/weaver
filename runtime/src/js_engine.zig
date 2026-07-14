@@ -76,14 +76,17 @@ pub const Engine = struct {
         return &self.bridge_state.timers;
     }
 
-    pub fn fireTimer(self: *Engine, timer_id: u64) Error!void {
+    pub fn fireTimer(self: *Engine, timer_id: u64, timestamp_ns: u64) Error!void {
         const timer = for (&self.bridge_state.timers) |*candidate| {
             if (candidate.active and candidate.id == timer_id) break candidate;
         } else return;
         if (!c.JS_IsFunction(self.context, timer.callback)) return;
         self.beginTurn();
         defer self.endTurn();
-        const result = c.JS_Call(self.context, timer.callback, qjs.undefinedValue(), 0, null);
+        const timestamp = c.JS_NewFloat64(self.context, @as(f64, @floatFromInt(timestamp_ns)) / @as(f64, std.time.ns_per_s));
+        defer c.JS_FreeValue(self.context, timestamp);
+        var arguments = [_]c.JSValue{timestamp};
+        const result = c.JS_Call(self.context, timer.callback, qjs.undefinedValue(), arguments.len, &arguments);
         defer c.JS_FreeValue(self.context, result);
         if (c.JS_IsException(result)) return self.reportException();
         try self.pumpJobs();
@@ -93,6 +96,17 @@ pub const Engine = struct {
         self.beginTurn();
         defer self.endTurn();
         if (!bridge.dispatchEvent(self.context, &self.bridge_state, node_id, kind, payload)) return self.reportException();
+        try self.pumpJobs();
+    }
+
+    pub fn hasCanvasFrames(self: *const Engine) bool {
+        return bridge.hasCanvasFrames(&self.bridge_state);
+    }
+
+    pub fn fireCanvasFrames(self: *Engine, timestamp_ns: u64) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        if (!bridge.dispatchCanvasFrames(self.context, &self.bridge_state, timestamp_ns)) return self.reportException();
         try self.pumpJobs();
     }
 

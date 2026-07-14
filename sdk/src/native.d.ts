@@ -1,7 +1,7 @@
 interface WeaverNativeFetchResponse { status: number; body: string }
 
 interface WeaverNativeBridge {
-  createNode(type: "column" | "row" | "text" | "panel" | "button" | "slider" | "image"): number;
+  createNode(type: "column" | "row" | "text" | "panel" | "button" | "slider" | "image" | "canvas"): number;
   setProp(id: number, key: string, value: string | number | boolean): void;
   setText(id: number, text: string): void;
   appendChild(parentId: number, childId: number): void;
@@ -16,7 +16,10 @@ interface WeaverNativeBridge {
   onProvider(callback: (jsonLine: string) => void): void;
   setInterval(ms: number): number;
   clearInterval(id: number): void;
-  onTimer(id: number, callback: () => void): void;
+  onTimer(id: number, callback: (timestampSeconds?: number) => void): void;
+  setCanvasCommands(id: number, commands: Float64Array): void;
+  onCanvasFrame(id: number, callback: (timestampSeconds: number) => void): void;
+  clearCanvasFrame(id: number): void;
   fetch(url: string, method: "GET" | "POST", headersJson: string, body: string): Promise<WeaverNativeFetchResponse>;
   storageRead(): string | null;
   storageWrite(json: string): void;

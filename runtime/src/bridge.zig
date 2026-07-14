@@ -15,16 +15,23 @@ pub const State = struct {
     next_timer_id: u64 = 1,
     event_callback: c.JSValue = qjs.undefinedValue(),
     provider_callback: c.JSValue = qjs.undefinedValue(),
+    canvas_frames: [max_canvas_frames]CanvasFrameSlot = [_]CanvasFrameSlot{.{}} ** max_canvas_frames,
     fetches: [max_fetches]FetchSlot = [_]FetchSlot{.{}} ** max_fetches,
 };
 
 pub const max_timers: usize = 16;
 pub const max_fetches: usize = 4;
+pub const max_canvas_frames: usize = tree_mod.max_canvases;
 
 pub const TimerSlot = struct {
     id: u64 = 0,
     interval_ms: u64 = 0,
     active: bool = false,
+    callback: c.JSValue = qjs.undefinedValue(),
+};
+
+pub const CanvasFrameSlot = struct {
+    node_id: tree_mod.NodeId = 0,
     callback: c.JSValue = qjs.undefinedValue(),
 };
 
@@ -63,6 +70,9 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "setInterval", setInterval, 1);
     try setFunction(ctx, native, "clearInterval", clearInterval, 1);
     try setFunction(ctx, native, "onTimer", onTimer, 2);
+    try setFunction(ctx, native, "setCanvasCommands", setCanvasCommands, 2);
+    try setFunction(ctx, native, "onCanvasFrame", onCanvasFrame, 2);
+    try setFunction(ctx, native, "clearCanvasFrame", clearCanvasFrame, 1);
     try setFunction(ctx, native, "fetch", fetch, 4);
     try setFunction(ctx, native, "storageRead", storageRead, 0);
     try setFunction(ctx, native, "storageWrite", storageWrite, 1);
@@ -74,6 +84,10 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
     for (&bridge_state.timers) |*timer| {
         c.JS_FreeValue(ctx, timer.callback);
         timer.* = .{};
+    }
+    for (&bridge_state.canvas_frames) |*frame| {
+        c.JS_FreeValue(ctx, frame.callback);
+        frame.* = .{};
     }
     c.JS_FreeValue(ctx, bridge_state.event_callback);
     c.JS_FreeValue(ctx, bridge_state.provider_callback);
@@ -333,6 +347,87 @@ fn onTimer(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         return qjs.undefinedValue();
     }
     return fail(js, "unknown timer id");
+}
+
+/// Copy one Float64Array command batch at the QuickJS boundary. The wire is
+/// intentionally numeric and bounded: JS performs color parsing and command
+/// construction, while Zig validates every value before replacing the node's
+/// prior batch. No JS object graph survives the call.
+fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 2) return fail(js, "setCanvasCommands expects id and Float64Array");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid canvas node id");
+    const length_value = c.JS_GetPropertyStr(js, argv[1], "length");
+    defer c.JS_FreeValue(js, length_value);
+    var length: u32 = 0;
+    if (c.JS_IsException(length_value) or c.JS_ToUint32(js, &length, length_value) < 0 or length > tree_mod.max_canvas_wire_values) {
+        return fail(js, "canvas command batch exceeds the native limit");
+    }
+    var values: [tree_mod.max_canvas_wire_values]f64 = undefined;
+    for (0..length) |index| {
+        const value = c.JS_GetPropertyUint32(js, argv[1], @intCast(index));
+        defer c.JS_FreeValue(js, value);
+        if (c.JS_IsException(value) or c.JS_ToFloat64(js, &values[index], value) < 0) {
+            return fail(js, "canvas command batch must contain only numbers");
+        }
+    }
+    state(js).tree.setCanvasCommands(id, values[0..length]) catch return fail(js, "invalid canvas command batch");
+    return qjs.undefinedValue();
+}
+
+/// Register a max-rate canvas callback. Its clock is the gpu-surface present
+/// completion, not a second OS timer: one visible present produces at most one
+/// next frame, so 60 fps animation follows the surface scheduler without a
+/// free-running render loop.
+fn onCanvasFrame(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 2 or !c.JS_IsFunction(js, argv[1])) return fail(js, "onCanvasFrame expects id and function");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid canvas node id");
+    _ = state(js).tree.canvasState(id) catch return fail(js, "invalid canvas node id");
+    var free: ?*CanvasFrameSlot = null;
+    for (&state(js).canvas_frames) |*slot| {
+        if (slot.node_id == id) {
+            c.JS_FreeValue(js, slot.callback);
+            slot.callback = c.JS_DupValue(js, argv[1]);
+            return qjs.undefinedValue();
+        }
+        if (free == null and slot.node_id == 0) free = slot;
+    }
+    const slot = free orelse return fail(js, "canvas frame callback capacity exhausted");
+    slot.* = .{ .node_id = id, .callback = c.JS_DupValue(js, argv[1]) };
+    return qjs.undefinedValue();
+}
+
+fn clearCanvasFrame(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 1) return fail(js, "clearCanvasFrame expects one id");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid canvas node id");
+    for (&state(js).canvas_frames) |*slot| {
+        if (slot.node_id != id) continue;
+        c.JS_FreeValue(js, slot.callback);
+        slot.* = .{};
+        break;
+    }
+    return qjs.undefinedValue();
+}
+
+pub fn hasCanvasFrames(bridge_state: *const State) bool {
+    for (&bridge_state.canvas_frames) |slot| if (slot.node_id != 0) return true;
+    return false;
+}
+
+pub fn dispatchCanvasFrames(ctx: *c.JSContext, bridge_state: *State, timestamp_ns: u64) bool {
+    const timestamp = c.JS_NewFloat64(ctx, @as(f64, @floatFromInt(timestamp_ns)) / @as(f64, std.time.ns_per_s));
+    defer c.JS_FreeValue(ctx, timestamp);
+    for (&bridge_state.canvas_frames) |*slot| {
+        if (slot.node_id == 0 or !c.JS_IsFunction(ctx, slot.callback)) continue;
+        var arguments = [_]c.JSValue{timestamp};
+        const result = c.JS_Call(ctx, slot.callback, qjs.undefinedValue(), arguments.len, &arguments);
+        const succeeded = !c.JS_IsException(result);
+        c.JS_FreeValue(ctx, result);
+        if (!succeeded) return false;
+    }
+    return true;
 }
 
 /// `wfetch` uses WinHTTP because it is the fork's already-proven Windows TLS

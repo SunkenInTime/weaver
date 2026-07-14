@@ -46,6 +46,18 @@ export interface WFetchResponse {
   json(): Promise<unknown>;
 }
 
+export interface CanvasFrame { t: number; dt: number }
+export interface CanvasCtx {
+  readonly width: number;
+  readonly height: number;
+  clear(color?: string): void;
+  fillRect(x: number, y: number, width: number, height: number, color: string): void;
+  fillRoundRect(x: number, y: number, width: number, height: number, radius: number, color: string): void;
+  fillCircle(cx: number, cy: number, radius: number, color: string): void;
+  line(x1: number, y1: number, x2: number, y2: number, width: number, color: string): void;
+  polyline(points: number[], width: number, color: string): void;
+}
+
 export function widget(config: WidgetConfig, component: () => JSX.Element): WidgetModule;
 export function useState<T>(initial: T | (() => T)): [T, (next: T | ((prev: T) => T)) => void];
 export function useRef<T>(initial: T): { current: T };
@@ -92,7 +104,7 @@ declare global {
       image: BoxProps & { src: string };
       button: BoxProps & { onPress: () => void };
       slider: BoxProps & { value: number; max: number; onChange: (value: number) => void };
-      canvas: BoxProps & { onFrame: (draw: unknown, fps: number) => void };
+      canvas: BoxProps & { fps?: number; onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void };
     }
   }
 }

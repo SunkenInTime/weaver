@@ -2,7 +2,7 @@ import { compileClass, type ClassProps } from "./class-compiler.js";
 
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
-export type NodeType = "column" | "row" | "panel" | "text" | "button" | "slider" | "image";
+export type NodeType = "column" | "row" | "panel" | "text" | "button" | "slider" | "image" | "canvas";
 export type ProviderName = "time" | "cpu" | "memory";
 
 export interface WidgetConfig {
@@ -39,6 +39,17 @@ export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
+export interface CanvasFrame { t: number; dt: number }
+export interface CanvasCtx {
+  readonly width: number;
+  readonly height: number;
+  clear(color?: string): void;
+  fillRect(x: number, y: number, width: number, height: number, color: string): void;
+  fillRoundRect(x: number, y: number, width: number, height: number, radius: number, color: string): void;
+  fillCircle(cx: number, cy: number, radius: number, color: string): void;
+  line(x1: number, y1: number, x2: number, y2: number, width: number, color: string): void;
+  polyline(points: number[], width: number, color: string): void;
+}
 
 interface VNode {
   readonly __weaverElement: true;
@@ -64,6 +75,8 @@ interface HostElementProps {
   value?: number;
   max?: number;
   src?: string;
+  onFrame?: (ctx: CanvasCtx, frame: CanvasFrame) => void;
+  fps?: number;
 }
 
 interface ComponentInstance {
@@ -97,6 +110,19 @@ let renderQueued = false;
 let committedRootId = 0;
 const pendingEffects: EffectHook[] = [];
 const handlers = new Map<number, HostElementProps>();
+interface CanvasBinding {
+  onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void;
+  fps?: number;
+  timerId: number;
+  surfaceClock: boolean;
+  width: number;
+  height: number;
+  lastT?: number;
+  nextT?: number;
+  nativeTimestampStarted?: boolean;
+}
+const canvases = new Map<number, CanvasBinding>();
+const colorCache = new Map<string, number>();
 
 export function h(type: VNode["type"], props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
@@ -319,6 +345,8 @@ function reconcileHost(parentId: number | null, previous: Instance | null, vnode
       return String(child);
     }).join("");
     native.setText(instance.id, text);
+  } else if (type === "canvas") {
+    if (vnode.children.some(isRenderable)) throw new Error("<canvas> does not accept children");
   } else {
     instance.children = reconcileChildren(instance.id, instance.children, vnode.children);
   }
@@ -392,6 +420,13 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
       throw new Error("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path");
     }
     next.src = props.src;
+  } else if (instance.type === "canvas") {
+    if (typeof props.onFrame !== "function") throw new Error("<canvas> requires onFrame={(ctx, frame) => ...}");
+    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps <= 0)) {
+      throw new Error("<canvas> fps must be a positive number when provided");
+    }
+    next.onFrame = props.onFrame as (ctx: CanvasCtx, frame: CanvasFrame) => void;
+    next.fps = props.fps === undefined ? undefined : Math.min(60, props.fps as number);
   }
   if (Boolean(previous.onPress) !== Boolean(next.onPress)) native.setHandler(instance.id, "press", Boolean(next.onPress));
   if (Boolean(previous.onChange) !== Boolean(next.onChange)) native.setHandler(instance.id, "change", Boolean(next.onChange));
@@ -399,6 +434,9 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (!Object.is(previous.max, next.max) && next.max !== undefined) native.setProp(instance.id, "max", next.max);
   if (!Object.is(previous.src, next.src) && next.src !== undefined) native.setProp(instance.id, "source", next.src);
   instance.elementProps = next;
+  if (instance.type === "canvas" && next.onFrame) {
+    updateCanvasBinding(instance.id, next.onFrame, next.fps, instance.props.width ?? 0, instance.props.height ?? 0);
+  }
   if (next.onPress || next.onChange) handlers.set(instance.id, next);
   else handlers.delete(instance.id);
 }
@@ -414,7 +452,152 @@ function unmount(instance: Instance): void {
     return;
   }
   handlers.delete(instance.id);
+  disposeCanvas(instance.id);
   native.removeNode(instance.id);
+}
+
+function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: number | undefined, width: number, height: number): void {
+  let binding = canvases.get(id);
+  const intervalChanged = binding?.fps !== fps;
+  if (!binding) {
+    binding = { onFrame, fps, timerId: 0, surfaceClock: false, width, height };
+    canvases.set(id, binding);
+  } else {
+    binding.onFrame = onFrame;
+    binding.width = width;
+    binding.height = height;
+  }
+  if (intervalChanged && binding.timerId !== 0) {
+    native.clearInterval(binding.timerId);
+    binding.timerId = 0;
+    binding.lastT = undefined;
+    binding.nextT = undefined;
+    binding.nativeTimestampStarted = false;
+  }
+  if (intervalChanged && binding.surfaceClock) {
+    native.clearCanvasFrame(id);
+    binding.surfaceClock = false;
+    binding.lastT = undefined;
+    binding.nextT = undefined;
+    binding.nativeTimestampStarted = false;
+  }
+  binding.fps = fps;
+  if (fps === undefined) {
+    drawCanvasFrame(id, Date.now() / 1000);
+    return;
+  }
+  if (fps >= 60) {
+    if (!binding.surfaceClock) {
+      native.onCanvasFrame(id, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
+      binding.surfaceClock = true;
+      drawCanvasFrame(id, Date.now() / 1000);
+    }
+    return;
+  }
+  if (binding.timerId === 0) {
+    // The native timer requests a surface frame; the surface scheduler then
+    // presents on its 60 Hz grid. A short wake lead keeps sub-60 callbacks on
+    // their requested glass cadence; max-rate canvases use the completion
+    // clock above and need no independent timer.
+    binding.timerId = native.setInterval(Math.max(1, Math.floor(1000 / fps - 1000 / 110)));
+    native.onTimer(binding.timerId, (timestampSeconds) => drawTimedCanvasFrame(id, timestampSeconds ?? Date.now() / 1000));
+    drawCanvasFrame(id, Date.now() / 1000);
+  }
+}
+
+function drawTimedCanvasFrame(id: number, timestampSeconds: number): void {
+  const binding = canvases.get(id);
+  if (!binding || binding.fps === undefined) return;
+  const period = 1 / binding.fps;
+  if (binding.nextT === undefined) binding.nextT = timestampSeconds;
+  if (timestampSeconds + 0.000_001 < binding.nextT) return;
+  do binding.nextT += period;
+  while (binding.nextT <= timestampSeconds);
+  drawCanvasFrame(id, timestampSeconds);
+}
+
+function disposeCanvas(id: number): void {
+  const binding = canvases.get(id);
+  if (!binding) return;
+  if (binding.timerId !== 0) native.clearInterval(binding.timerId);
+  if (binding.surfaceClock) native.clearCanvasFrame(id);
+  canvases.delete(id);
+}
+
+function drawCanvasFrame(id: number, nativeTimestamp?: number): void {
+  const binding = canvases.get(id);
+  if (!binding) return;
+  if (nativeTimestamp !== undefined && !binding.nativeTimestampStarted) {
+    binding.lastT = undefined;
+    binding.nativeTimestampStarted = true;
+  }
+  const t = typeof nativeTimestamp === "number" && Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
+    ? nativeTimestamp
+    : Date.now() / 1000;
+  const dt = binding.lastT === undefined ? 0 : Math.max(0, t - binding.lastT);
+  binding.lastT = t;
+  const batch: number[] = [];
+  let active = true;
+  const ensureActive = (): void => { if (!active) throw new Error("CanvasCtx methods may only be called inside onFrame"); };
+  const number = (value: number, label: string): number => {
+    if (!Number.isFinite(value)) throw new Error(`CanvasCtx ${label} must be finite`);
+    return value;
+  };
+  const ctx: CanvasCtx = Object.freeze({
+    width: binding.width,
+    height: binding.height,
+    clear(color = "#00000000"): void {
+      ensureActive();
+      batch.push(0, packedColor(color));
+    },
+    fillRect(x: number, y: number, rectWidth: number, rectHeight: number, color: string): void {
+      ensureActive();
+      batch.push(1, number(x, "x"), number(y, "y"), number(rectWidth, "width"), number(rectHeight, "height"), packedColor(color));
+    },
+    fillRoundRect(x: number, y: number, rectWidth: number, rectHeight: number, radius: number, color: string): void {
+      ensureActive();
+      batch.push(2, number(x, "x"), number(y, "y"), number(rectWidth, "width"), number(rectHeight, "height"), number(radius, "radius"), packedColor(color));
+    },
+    fillCircle(cx: number, cy: number, radius: number, color: string): void {
+      ensureActive();
+      batch.push(3, number(cx, "cx"), number(cy, "cy"), number(radius, "radius"), packedColor(color));
+    },
+    line(x1: number, y1: number, x2: number, y2: number, lineWidth: number, color: string): void {
+      ensureActive();
+      batch.push(4, number(x1, "x1"), number(y1, "y1"), number(x2, "x2"), number(y2, "y2"), number(lineWidth, "width"), packedColor(color));
+    },
+    polyline(points: number[], lineWidth: number, color: string): void {
+      ensureActive();
+      if (!Array.isArray(points) || points.length < 4 || points.length % 2 !== 0) throw new Error("CanvasCtx polyline points must be a flat [x,y,...] array with at least two points");
+      batch.push(5, number(lineWidth, "width"), packedColor(color), points.length / 2);
+      for (const point of points) batch.push(number(point, "point"));
+    },
+  });
+  try {
+    binding.onFrame(ctx, { t, dt });
+  } finally {
+    active = false;
+  }
+  native.setCanvasCommands(id, Float64Array.from(batch));
+}
+
+function packedColor(source: string): number {
+  const cached = colorCache.get(source);
+  if (cached !== undefined) return cached;
+  if (typeof source !== "string") throw new Error("Canvas colors must be #rgb, #rrggbb, or #rrggbbaa");
+  let hex: string;
+  if (/^#[0-9a-f]{3}$/i.test(source)) {
+    hex = `${source[1]}${source[1]}${source[2]}${source[2]}${source[3]}${source[3]}ff`;
+  } else if (/^#[0-9a-f]{6}$/i.test(source)) {
+    hex = `${source.slice(1)}ff`;
+  } else if (/^#[0-9a-f]{8}$/i.test(source)) {
+    hex = source.slice(1);
+  } else {
+    throw new Error(`Invalid canvas color "${source}": use #rgb, #rrggbb, or #rrggbbaa`);
+  }
+  const packed = Number.parseInt(hex, 16) >>> 0;
+  colorCache.set(source, packed);
+  return packed;
 }
 
 function nativeIds(instance: Instance): number[] {

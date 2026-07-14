@@ -10,6 +10,8 @@ export {
   wfetch,
   widget,
   type CpuData,
+  type CanvasCtx,
+  type CanvasFrame,
   type MemoryData,
   type TimeData,
   type WFetchInit,

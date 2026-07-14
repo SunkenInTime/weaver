@@ -31,6 +31,7 @@ pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
     press: tree_mod.NodeId,
     slider: tree_mod.NodeId,
+    canvas_frame: u64,
 };
 
 const WidgetApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = false });
@@ -72,13 +73,13 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 return;
             }
             const before = model.tree.generation;
-            (model.engine orelse return).fireTimer(timer.key) catch |err| {
+            (model.engine orelse return).fireTimer(timer.key, timer.timestamp_ns) catch |err| {
                 std.log.err("widget timer callback failed: {s}", .{@errorName(err)});
                 return;
             };
             syncTimers(model, effects);
             model.timer_fires += 1;
-            if (model.timer_fires % 10 == 0) {
+            if (model.timer_fires % 300 == 0) {
                 std.log.info("widget timer: {d} callbacks, generation {d}, changed={}", .{ model.timer_fires, model.tree.generation, before != model.tree.generation });
             }
         },
@@ -94,6 +95,11 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 std.log.err("widget slider callback failed: {s}", .{@errorName(err)});
             };
             syncTimers(model, effects);
+        },
+        .canvas_frame => |timestamp_ns| {
+            (model.engine orelse return).fireCanvasFrames(timestamp_ns) catch |err| {
+                std.log.err("widget canvas frame callback failed: {s}", .{@errorName(err)});
+            };
         },
     }
 }
@@ -173,7 +179,7 @@ fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) vo
     }
 }
 
-fn onFrame(_: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
+fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
     // A present completion produces a second frame event carrying the same
     // retained-canvas revision. M0 counted both events as presents; revision
     // edges identify actual newly rendered display lists at this callback.
@@ -181,11 +187,12 @@ fn onFrame(_: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
     last_canvas_revision = frame.canvas_revision;
     if (first_render_ns == 0) first_render_ns = frame.timestamp_ns;
     rendered_presents += 1;
-    if (rendered_presents % 10 == 0) {
+    if (rendered_presents % 300 == 0) {
         const elapsed_ns = frame.timestamp_ns -| first_render_ns;
         std.log.info("widget present: {d} rendered frames in {d} ms", .{ rendered_presents, elapsed_ns / std.time.ns_per_ms });
     }
-    return null;
+    const engine = model.engine orelse return null;
+    return if (engine.hasCanvasFrames()) Msg{ .canvas_frame = frame.timestamp_ns } else null;
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
@@ -276,6 +283,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
             options.image = id;
             break :block ui.image(options);
         },
+        .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
 }

@@ -431,7 +431,6 @@ function validateSource(project: SourceProject): string[] {
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(project.sourceFile);
-      if (tag === "canvas") errors.push(locationMessage(project.sourceFile, node, "<canvas> arrives in M3"));
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "class");
       if (classAttribute) {
         const classText = jsxStringValue(classAttribute.initializer);
