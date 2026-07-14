@@ -33,7 +33,7 @@ The Native SDK fork is on `weaver-fork-m3`:
 
 The fork change is 215 insertions and 48 deletions across six files. The
 parent runtime/SDK/CLI implementation is 513 insertions and 13 deletions
-across eleven existing files, plus the visualizer example and this report.
+across ten existing files, plus the visualizer example and this report.
 No D3D11 presenter or SIMD path was added: damage-aware rasterization and
 removing per-frame GDI allocation produced the certain win first.
 
