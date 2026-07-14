@@ -159,11 +159,11 @@ worktree.
 ## Remaining limitations and risks
 
 - Verification and smoke coverage here are Windows-only.
-- The Visualizer capture showed the shared surface occupying roughly
-  two-thirds of its logical-width window at the current desktop scaling,
-  leaving the right edge transparent. Live bars and the GPU backend were both
-  confirmed, but high-DPI shared-surface sizing remains a follow-up risk and
-  was not changed during this consolidation milestone.
+- The high-DPI Visualizer strip found during consolidation is resolved by the
+  protocol-v3 explicit source/destination geometry contract and child-HWND
+  DirectComposition ownership. GPU and software captures pass every edge at
+  100%, 125%, 150%, 175%, and 200%; see
+  [Windows DPI scaling](dpi-scaling.md).
 - Native SDK's Windows validation scripts require Git's POSIX `test.exe` on
   `PATH`; without it, the full suite fails before reaching implementation
   assertions.

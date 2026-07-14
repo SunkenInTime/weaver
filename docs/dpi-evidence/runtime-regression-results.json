@@ -1,0 +1,179 @@
+{
+    "startedUtc":  "2026-07-14T22:10:39.3112626Z",
+    "commands":  [
+                     {
+                         "name":  "mixed-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\m4b-synthetic",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "mixed-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "clock-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\clock",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "clock-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "visualizer-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\visualizer",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "visualizer-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "idle-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\m4b-parity",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "idle-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "hot-swap-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     }
+                 ],
+    "checks":  [
+                   {
+                       "name":  "mixed-hwnd",
+                       "passed":  true,
+                       "detail":  "pid=52580 hwnd=0x1c004c4"
+                   },
+                   {
+                       "name":  "mixed-transition-identity",
+                       "passed":  true,
+                       "detail":  "pid=52580 hwnd=0x1c004c4"
+                   },
+                   {
+                       "name":  "demotion-process-identity",
+                       "passed":  true,
+                       "detail":  "pid=52580 hwnd=0x1c004c4"
+                   },
+                   {
+                       "name":  "recovery-process-identity",
+                       "passed":  true,
+                       "detail":  "widgetPid=52580 hwnd=0x1c004c4 renderer=28900-\u003e37648"
+                   },
+                   {
+                       "name":  "wind-window-survives",
+                       "passed":  true,
+                       "detail":  "pid=52580 hwnd=0x1c004c4"
+                   },
+                   {
+                       "name":  "clock-hwnd",
+                       "passed":  true,
+                       "detail":  "pid=61768 hwnd=0x2c109de"
+                   },
+                   {
+                       "name":  "clock-software",
+                       "passed":  true,
+                       "detail":  "pid=61768"
+                   },
+                   {
+                       "name":  "visualizer-hwnd",
+                       "passed":  true,
+                       "detail":  "pid=59540 hwnd=0x2c209de"
+                   },
+                   {
+                       "name":  "visualizer-gpu",
+                       "passed":  true,
+                       "detail":  "pid=59540"
+                   },
+                   {
+                       "name":  "idle-hwnd",
+                       "passed":  true,
+                       "detail":  "pid=51620 hwnd=0x2c609de"
+                   },
+                   {
+                       "name":  "fps-zero-idle-log",
+                       "passed":  true,
+                       "detail":  "rendererLogBytes=209-\u003e209"
+                   },
+                   {
+                       "name":  "hot-swap-hwnd",
+                       "passed":  true,
+                       "detail":  "pid=61892 hwnd=0x24d09bc"
+                   },
+                   {
+                       "name":  "hot-swap-identity",
+                       "passed":  true,
+                       "detail":  "pid=61892 hwnd=0x24d09bc"
+                   }
+               ],
+    "performance":  [
+                        {
+                            "label":  "mixed-widget-100",
+                            "pid":  52580,
+                            "seconds":  10.034474399999999,
+                            "cpuOneCorePercent":  5.139,
+                            "privateMb":  17.438,
+                            "handles":  234
+                        },
+                        {
+                            "label":  "shared-renderer-100",
+                            "pid":  28900,
+                            "seconds":  10.0214067,
+                            "cpuOneCorePercent":  2.339,
+                            "privateMb":  54.398,
+                            "handles":  454
+                        },
+                        {
+                            "label":  "mixed-widget-150",
+                            "pid":  52580,
+                            "seconds":  10.0215905,
+                            "cpuOneCorePercent":  9.355,
+                            "privateMb":  21.25,
+                            "handles":  236
+                        },
+                        {
+                            "label":  "shared-renderer-150",
+                            "pid":  28900,
+                            "seconds":  10.0233542,
+                            "cpuOneCorePercent":  2.182,
+                            "privateMb":  57.289,
+                            "handles":  456
+                        },
+                        {
+                            "label":  "visualizer-active",
+                            "pid":  59540,
+                            "seconds":  10.016993099999999,
+                            "cpuOneCorePercent":  9.203,
+                            "privateMb":  19.359,
+                            "handles":  240
+                        },
+                        {
+                            "label":  "fps-zero-widget",
+                            "pid":  51620,
+                            "seconds":  10.0130015,
+                            "cpuOneCorePercent":  0.156,
+                            "privateMb":  17.422,
+                            "handles":  234
+                        },
+                        {
+                            "label":  "fps-zero-renderer",
+                            "pid":  60608,
+                            "seconds":  10.0174316,
+                            "cpuOneCorePercent":  0,
+                            "privateMb":  55.703,
+                            "handles":  446
+                        }
+                    ],
+    "events":  [
+
+               ],
+    "finishedUtc":  "2026-07-14T22:12:19.9582485Z"
+}

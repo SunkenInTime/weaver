@@ -9,7 +9,8 @@ retained-texture layer, fps=0 idle, source-missing status) in flight.
    so stock fork tests pass; prepare the upstream PRs (TLS fix / #114, widget
    windowing fields, damage-aware presenter) while rebasing is cheap.
 2. **Dev polish** — state-preserving hot-swap for `weaver dev`, `weaver logs
-   <widget>`, multi-monitor anchoring + per-monitor DPI audit, better errors.
+   <widget>`, better errors. Multi-monitor anchoring and the per-monitor DPI
+   audit are complete; see [Windows DPI scaling](dpi-scaling.md).
 3. **`weaver pack` / `weaver install`** — the `.weave` file: zipped widget
    source + lineage (source-is-the-artifact, ADR 0004). Includes the
    capability consent UI (the loud wall from ADR 0002 gets its actual dialog)
