@@ -202,21 +202,23 @@ Runtime logs independently reported `awareness=per-monitor-v2`, OS window DPI
 `scripts/verify-runtime-regressions.ps1` passed renderer kill to software
 demotion, renderer recovery/promotion, Win+D survival, state-preserving dev hot
 swap, forced-software Clock, audio-fed shared-GPU Visualizer, true `fps={0}`
-idle, and clean shutdown. The mixed widget stayed PID 52580 / HWND
-`0x1c004c4` across DPI transition, demotion, recovery, and Win+D. Renderer PID
-changed 28900 -> 37648 during forced recovery while widget identity remained
-stable. Hot swap stayed PID 61892 / HWND `0x24d09bc`. The idle renderer log
-stayed exactly 209 bytes before and after the sample.
+idle, and clean shutdown. The mixed widget stayed PID 62176 / HWND
+`0x45309de` across DPI transition, demotion, recovery, and Win+D. Renderer PID
+changed 19216 -> 17888 during forced recovery while widget identity remained
+stable. Hot swap stayed PID 63040 / HWND `0x2a109d2`. The idle renderer log
+stayed exactly 209 bytes before and after the sample. The production renderer's
+300-present samples measured 59.441 fps at 100% (5,047 ms) and 60.000 fps at
+150% (5,000 ms).
 
-| ReleaseFast sample (10 seconds) | CPU, one core | Private working set | Handles |
+| ReleaseFast sample (10 seconds) | CPU, one core | Private bytes | Handles |
 |---|---:|---:|---:|
-| mixed widget, 100% | 5.139% | 17.438 MiB | 234 |
-| shared renderer, 100% | 2.339% | 54.398 MiB | 454 |
-| mixed widget, 150% | 9.355% | 21.250 MiB | 236 |
-| shared renderer, 150% | 2.182% | 57.289 MiB | 456 |
-| active Visualizer | 9.203% | 19.359 MiB | 240 |
-| `fps={0}` widget | 0.156% | 17.422 MiB | 234 |
-| `fps={0}` renderer | 0.000% | 55.703 MiB | 446 |
+| mixed widget, 100% | 5.463% | 17.449 MiB | 234 |
+| shared renderer, 100% | 2.182% | 54.879 MiB | 456 |
+| mixed widget, 150% | 7.795% | 21.258 MiB | 236 |
+| shared renderer, 150% | 2.495% | 57.750 MiB | 458 |
+| active Visualizer | 5.618% | 18.168 MiB | 238 |
+| `fps={0}` widget | 0.000% | 17.426 MiB | 234 |
+| `fps={0}` renderer | 0.000% | 54.148 MiB | 446 |
 
 The 100% control remains in the same or better class than M4b's 8.03% widget
 and 3.27% renderer measurements. At 150%, widget raster work rises with pixel
@@ -258,7 +260,7 @@ Final commands and exit codes:
 | Weaver host | `zig build -Doptimize=ReleaseFast` | 0 |
 | Weaver renderer | `zig build -Doptimize=ReleaseFast` | 0 |
 | Live DPI | `powershell -File scripts/verify-dpi.ps1` | 0 (186/186) |
-| Live regressions | `powershell -File scripts/verify-runtime-regressions.ps1` | 0 (13/13) |
+| Live regressions | `& .\scripts\verify-runtime-regressions.ps1` | 0 (15/15) |
 
 On Windows, the two broad Native SDK commands require Git's POSIX utilities on
 `PATH`; the recorded runs prepended

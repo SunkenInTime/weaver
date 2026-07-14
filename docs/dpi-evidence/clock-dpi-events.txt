@@ -1,1 +1,1 @@
-331877062 window-dpi pid=61768 hwnd=0x2c109de child_hwnd=0x0 awareness=per-monitor-v2 os_window_dpi=96 effective_dpi=96 scale=1.000000 logical_content_dip=240.000000x110.000000 client_px=240x110 child_client_px=0x0 action=created
+332718500 window-dpi pid=54324 hwnd=0x26310520 child_hwnd=0x0 awareness=per-monitor-v2 os_window_dpi=96 effective_dpi=96 scale=1.000000 logical_content_dip=240.000000x110.000000 client_px=240x110 child_client_px=0x0 action=created

@@ -72,7 +72,7 @@ $RepoRoot = [IO.Path]::GetFullPath($RepoRoot)
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 $cli = Join-Path $RepoRoot "cli\dist\index.js"
-$results = [ordered]@{ startedUtc=[DateTime]::UtcNow.ToString("o"); commands=@(); checks=@(); performance=@(); events=@() }
+$results = [ordered]@{ startedUtc=[DateTime]::UtcNow.ToString("o"); commands=@(); checks=@(); performance=@(); cadence=@(); events=@() }
 $script:WeaverRegressionDevProcess=$null
 
 function Check([string]$name, [bool]$passed, [string]$detail) {
@@ -122,6 +122,7 @@ function StopWidget($run) {
 function Geometry([IntPtr]$hwnd){$r=New-Object WeaverRegressionWin32+RECT;[WeaverRegressionWin32]::GetClientRect($hwnd,[ref]$r)|Out-Null;[pscustomobject]@{Width=$r.Right-$r.Left;Height=$r.Bottom-$r.Top}}
 function Capture([IntPtr]$hwnd,[string]$path){$r=New-Object WeaverRegressionWin32+RECT;$p=New-Object WeaverRegressionWin32+POINT;[WeaverRegressionWin32]::GetClientRect($hwnd,[ref]$r)|Out-Null;[WeaverRegressionWin32]::ClientToScreen($hwnd,[ref]$p)|Out-Null;$b=[Drawing.Bitmap]::new($r.Right,$r.Bottom);$g=[Drawing.Graphics]::FromImage($b);try{$g.CopyFromScreen($p.X,$p.Y,0,0,[Drawing.Size]::new($r.Right,$r.Bottom))}finally{$g.Dispose()};$b.Save($path,[Drawing.Imaging.ImageFormat]::Png);$b.Dispose()}
 function SampleCpu([int]$processId,[int]$seconds,[string]$label){$p=Get-Process -Id $processId;$before=$p.TotalProcessorTime.TotalMilliseconds;$watch=[Diagnostics.Stopwatch]::StartNew();Start-Sleep -Seconds $seconds;$p=Get-Process -Id $processId;$watch.Stop();$cpu=100.0*($p.TotalProcessorTime.TotalMilliseconds-$before)/$watch.Elapsed.TotalMilliseconds;$results.performance += [pscustomobject]@{label=$label;pid=$processId;seconds=$watch.Elapsed.TotalSeconds;cpuOneCorePercent=[Math]::Round($cpu,3);privateMb=[Math]::Round($p.PrivateMemorySize64/1MB,3);handles=$p.HandleCount};return $cpu}
+function RecordCadence([string]$state,[int]$widgetPid,[string]$label){$path=Join-Path $state "weaver\status.json.renderer.log";$line=Get-Content $path|Where-Object{$_-match " fps .* widget=$widgetPid frames=300 elapsed_ms=\d+"}|Select-Object -Last 1;if(-not$line-or$line-notmatch'elapsed_ms=(\d+)'){throw "No renderer cadence sample for $label"};$elapsed=[int64]$Matches[1];$fps=[Math]::Round(300000.0/$elapsed,3);$results.cadence += [pscustomobject]@{label=$label;widgetPid=$widgetPid;frames=300;elapsedMs=$elapsed;fps=$fps};Check "$label-frame-cadence" ($fps-ge55-and$fps-le65) "frames=300 elapsedMs=$elapsed fps=$fps"}
 function Click([IntPtr]$child,[int]$x,[int]$y){$lp=[IntPtr]([WeaverRegressionWin32]::LParam($x,$y));[WeaverRegressionWin32]::SendMessage($child,0x0201,[UIntPtr]([uint32]1),$lp)|Out-Null;[WeaverRegressionWin32]::SendMessage($child,0x0202,[UIntPtr]([uint32]0),$lp)|Out-Null;Start-Sleep -Milliseconds 300}
 
 $active=$null
@@ -130,11 +131,11 @@ try {
     $active=StartWidget "mixed" (Join-Path $RepoRoot "examples\m4b-synthetic") $false $true
     $mixedPid=$active.Pid;$mixedHwnd=$active.Hwnd;$child=[WeaverRegressionWin32]::FindGpuChild($mixedHwnd)
     $renderer=(Status $active.State).widgets|Where-Object name -eq "renderer"
-    $null=SampleCpu $mixedPid 10 "mixed-widget-100";$null=SampleCpu ([int]$renderer.pid) 10 "shared-renderer-100"
+    $null=SampleCpu $mixedPid 10 "mixed-widget-100";$null=SampleCpu ([int]$renderer.pid) 10 "shared-renderer-100";RecordCadence $active.State $mixedPid "mixed-100"
     [WeaverRegressionWin32]::SendMessage($mixedHwnd,0x83D1,[UIntPtr]([uint32]144),[IntPtr]::Zero)|Out-Null
     WaitFor {$g=Geometry $mixedHwnd;return($g.Width-eq720-and$g.Height-eq480)} "mixed 150 percent"
     Check "mixed-transition-identity" ($mixedPid-eq$active.Pid-and$mixedHwnd-eq$active.Hwnd) "pid=$mixedPid hwnd=0x$('{0:x}'-f$mixedHwnd.ToInt64())"
-    $null=SampleCpu $mixedPid 10 "mixed-widget-150";$renderer=(Status $active.State).widgets|Where-Object name -eq "renderer";$null=SampleCpu ([int]$renderer.pid) 10 "shared-renderer-150"
+    $null=SampleCpu $mixedPid 10 "mixed-widget-150";$renderer=(Status $active.State).widgets|Where-Object name -eq "renderer";$null=SampleCpu ([int]$renderer.pid) 10 "shared-renderer-150";RecordCadence $active.State $mixedPid "mixed-150"
     $oldRenderer=[int]$renderer.pid;Stop-Process -Id $oldRenderer -Force
     $backendFile=Get-ChildItem (Join-Path $active.State "weaver\status.json.backend-*")|Select-Object -First 1
     WaitFor { (Get-Content $backendFile.FullName -Raw).Trim() -eq "software" } "renderer demotion" 10
