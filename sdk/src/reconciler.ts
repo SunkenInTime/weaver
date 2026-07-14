@@ -2,7 +2,8 @@ import { compileClass, type ClassProps } from "./class-compiler.js";
 
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
-export type NodeType = "column" | "row" | "panel" | "text";
+export type NodeType = "column" | "row" | "panel" | "text" | "button" | "slider" | "image";
+export type ProviderName = "time" | "cpu" | "memory";
 
 export interface WidgetConfig {
   name: string;
@@ -14,7 +15,7 @@ export interface WidgetConfig {
   };
   layer?: "desktop" | "normal" | "topmost";
   clickThrough?: boolean;
-  subscribe?: "time"[];
+  subscribe?: ProviderName[];
   origins?: string[];
   capabilities?: never[];
 }
@@ -34,6 +35,11 @@ export interface TimeData {
   epochMs: number;
 }
 
+export interface CpuData { percent: number; perCore: number[] }
+export interface MemoryData { usedMb: number; totalMb: number; percent: number }
+export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
+export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
+
 interface VNode {
   readonly __weaverElement: true;
   readonly type: NodeType | Component | typeof Fragment;
@@ -48,7 +54,16 @@ interface HostInstance {
   key?: string | number;
   id: number;
   props: ClassProps;
+  elementProps: HostElementProps;
   children: Instance[];
+}
+
+interface HostElementProps {
+  onPress?: () => void;
+  onChange?: (value: number) => void;
+  value?: number;
+  max?: number;
+  src?: string;
 }
 
 interface ComponentInstance {
@@ -81,6 +96,7 @@ let renderingComponent: ComponentInstance | null = null;
 let renderQueued = false;
 let committedRootId = 0;
 const pendingEffects: EffectHook[] = [];
+const handlers = new Map<number, HostElementProps>();
 
 export function h(type: VNode["type"], props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
@@ -168,14 +184,58 @@ export function useInterval(callback: () => void, milliseconds: number): void {
   }, [milliseconds]);
 }
 
-export function useProvider(name: "time"): TimeData {
-  if (name !== "time") throw new Error(`Provider "${String(name)}" arrives in M2`);
-  if (!activeConfig?.subscribe?.includes("time")) {
-    throw new Error('useProvider("time") requires subscribe: ["time"] in the widget config');
+export function useProvider(name: "time"): TimeData;
+export function useProvider(name: "cpu"): CpuData;
+export function useProvider(name: "memory"): MemoryData;
+export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData {
+  if (!activeConfig?.subscribe?.includes(name)) {
+    throw new Error(`useProvider("${name}") requires subscribe: ["${name}"] in the widget config`);
   }
+  // M2b owns the host-fed provider transport. Keeping this branch here makes
+  // the public contract available now while failing with its operational fix
+  // instead of inventing process-local CPU or memory semantics.
+  if (name !== "time") throw new Error(`Provider "${name}" requires weaverd; run "weaver up"`); // TODO(M2b): host provider seam.
   const [value, setValue] = useState<TimeData>(() => currentTime());
   useEffect(() => timeProvider.subscribe(setValue), []);
   return value;
+}
+
+let storageValues: Record<string, unknown> | null = null;
+let storageDirty = false;
+let storageTimerId = 0;
+
+export function useStorage<T>(key: string, initial: T): [T, (next: T | ((previous: T) => T)) => void] {
+  if (typeof key !== "string" || key.length === 0) throw new Error("useStorage requires a non-empty string key");
+  const values = readStorage();
+  const [value, setValue] = useState<T>(() => Object.prototype.hasOwnProperty.call(values, key) ? values[key] as T : initial);
+  return [value, (next) => {
+    setValue((previous) => {
+      const resolved = typeof next === "function" ? (next as (prior: T) => T)(previous) : next;
+      const candidate = { ...readStorage(), [key]: resolved };
+      const encoded = serializeStorage(candidate);
+      storageValues = candidate;
+      storageDirty = true;
+      scheduleStorageWrite(encoded);
+      return resolved;
+    });
+  }];
+}
+
+export function wfetch(url: string, init: WFetchInit = {}): Promise<WFetchResponse> {
+  const method = init.method ?? "GET";
+  const headers = init.headers ?? {};
+  if (method !== "GET" && method !== "POST") return Promise.reject(new Error("wfetch method must be GET or POST"));
+  for (const [name, value] of Object.entries(headers)) {
+    if (!name || /[:\r\n]/.test(name) || typeof value !== "string" || /[\r\n]/.test(value)) {
+      return Promise.reject(new Error("wfetch headers must be string values without CR/LF"));
+    }
+  }
+  return native.fetch(url, method, JSON.stringify(headers), init.body ?? "").then((response) => ({
+    status: response.status,
+    ok: response.status >= 200 && response.status < 300,
+    text: async () => response.body,
+    json: async () => JSON.parse(response.body) as unknown,
+  }));
 }
 
 function renderRoot(): void {
@@ -240,11 +300,12 @@ function reconcileHost(parentId: number | null, previous: Instance | null, vnode
   const reusable = previous?.kind === "host" && previous.type === type && previous.key === vnode.key;
   const instance: HostInstance = reusable
     ? previous
-    : { kind: "host", type, key: vnode.key, id: native.createNode(type), props: {}, children: [] };
+    : { kind: "host", type, key: vnode.key, id: native.createNode(type), props: {}, elementProps: {}, children: [] };
   if (!reusable && previous) unmount(previous);
   const nextProps = compileClass(typeof vnode.props.class === "string" ? vnode.props.class : "");
   applyProps(instance.id, instance.props, nextProps);
   instance.props = nextProps;
+  applyElementProps(instance, vnode.props);
   if (type === "text") {
     const text = vnode.children.map((child) => {
       if (typeof child !== "string" && typeof child !== "number") throw new Error("<text> children must be strings or numbers");
@@ -305,6 +366,36 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
   }
 }
 
+function applyElementProps(instance: HostInstance, props: Record<string, unknown>): void {
+  const previous = instance.elementProps;
+  const next: HostElementProps = {};
+  if (instance.type === "button") {
+    if (typeof props.onPress !== "function") throw new Error("<button> requires onPress={() => ...}");
+    next.onPress = props.onPress as () => void;
+  } else if (instance.type === "slider") {
+    if (typeof props.onChange !== "function") throw new Error("<slider> requires onChange={(value) => ...}");
+    if (typeof props.value !== "number" || !Number.isFinite(props.value)) throw new Error("<slider> value must be a finite number");
+    if (typeof props.max !== "number" || !Number.isFinite(props.max) || props.max <= 0) throw new Error("<slider> max must be positive");
+    next.onChange = props.onChange as (value: number) => void;
+    next.value = Math.max(0, Math.min(props.value, props.max));
+    next.max = props.max;
+  } else if (instance.type === "image") {
+    if (typeof props.src !== "string" || props.src.length === 0) throw new Error("<image> requires a local src string");
+    if (/^[a-z][a-z0-9+.-]*:/i.test(props.src) || props.src.startsWith("//")) {
+      throw new Error("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path");
+    }
+    next.src = props.src;
+  }
+  if (Boolean(previous.onPress) !== Boolean(next.onPress)) native.setHandler(instance.id, "press", Boolean(next.onPress));
+  if (Boolean(previous.onChange) !== Boolean(next.onChange)) native.setHandler(instance.id, "change", Boolean(next.onChange));
+  if (!Object.is(previous.value, next.value) && next.value !== undefined) native.setProp(instance.id, "value", next.value);
+  if (!Object.is(previous.max, next.max) && next.max !== undefined) native.setProp(instance.id, "max", next.max);
+  if (!Object.is(previous.src, next.src) && next.src !== undefined) native.setProp(instance.id, "source", next.src);
+  instance.elementProps = next;
+  if (next.onPress || next.onChange) handlers.set(instance.id, next);
+  else handlers.delete(instance.id);
+}
+
 function unmount(instance: Instance): void {
   if (instance.kind === "component") {
     for (const hook of instance.hooks) if (hook.kind === "effect") hook.cleanup?.();
@@ -315,6 +406,7 @@ function unmount(instance: Instance): void {
     for (const child of instance.children) unmount(child);
     return;
   }
+  handlers.delete(instance.id);
   native.removeNode(instance.id);
 }
 
@@ -371,8 +463,61 @@ function validateRuntimeConfig(config: WidgetConfig, component: Component): void
     throw new Error("widget config.size must contain two positive numbers");
   }
   if (typeof component !== "function") throw new Error("widget component must be a function");
-  if (config.capabilities && config.capabilities.length > 0) throw new Error("Widget capabilities arrive in M2; capabilities must be empty in M1");
+  if (config.capabilities && config.capabilities.length > 0) throw new Error("Widget capabilities are not exposed in M2a; capabilities must be empty");
 }
+
+function readStorage(): Record<string, unknown> {
+  if (storageValues) return storageValues;
+  const raw = native.storageRead();
+  if (raw === null) return storageValues = {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("Stored widget state is not a JSON object");
+  return storageValues = parsed as Record<string, unknown>;
+}
+
+function serializeStorage(values: Record<string, unknown>): string {
+  const encoded = JSON.stringify(values);
+  if (utf8ByteLength(encoded) > 64 * 1024) throw new Error("StorageQuotaExceeded: widget storage exceeds 64 KB");
+  return encoded;
+}
+
+function scheduleStorageWrite(_encoded: string): void {
+  if (storageTimerId !== 0) native.clearInterval(storageTimerId);
+  storageTimerId = native.setInterval(200);
+  native.onTimer(storageTimerId, () => {
+    native.clearInterval(storageTimerId);
+    storageTimerId = 0;
+    flushStorage();
+  });
+}
+
+function flushStorage(): void {
+  if (!storageDirty || !storageValues) return;
+  native.storageWrite(serializeStorage(storageValues));
+  storageDirty = false;
+}
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length && value.charCodeAt(index + 1) >= 0xdc00 && value.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+native.onEvent((id, kind, payload) => {
+  const handler = handlers.get(id);
+  if (kind === "press") handler?.onPress?.();
+  else if (kind === "change" && typeof payload === "number") handler?.onChange?.(payload);
+});
+Object.defineProperty(globalThis, "wfetch", { value: wfetch, configurable: false, writable: false });
+Object.defineProperty(globalThis, "__weaverFlushStorage", { value: flushStorage, configurable: false, writable: false });
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;

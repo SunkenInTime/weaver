@@ -10,7 +10,7 @@ export interface WidgetConfig {
   };
   layer?: "desktop" | "normal" | "topmost";
   clickThrough?: boolean;
-  subscribe?: ("time")[];
+  subscribe?: ("time" | "cpu" | "memory")[];
   origins?: string[];
   capabilities?: never[];
 }
@@ -30,12 +30,32 @@ export interface TimeData {
   epochMs: number;
 }
 
+export interface CpuData { percent: number; perCore: number[] }
+export interface MemoryData { usedMb: number; totalMb: number; percent: number }
+
+export interface WFetchInit {
+  method?: "GET" | "POST";
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface WFetchResponse {
+  status: number;
+  ok: boolean;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}
+
 export function widget(config: WidgetConfig, component: () => JSX.Element): WidgetModule;
 export function useState<T>(initial: T | (() => T)): [T, (next: T | ((prev: T) => T)) => void];
 export function useRef<T>(initial: T): { current: T };
 export function useEffect(fn: () => void | (() => void), deps?: unknown[]): void;
 export function useInterval(fn: () => void, ms: number): void;
 export function useProvider(name: "time"): TimeData;
+export function useProvider(name: "cpu"): CpuData;
+export function useProvider(name: "memory"): MemoryData;
+export function useStorage<T>(key: string, initial: T): [T, (next: T | ((prev: T) => T)) => void];
+export function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
 
 export function h(type: unknown, props: Record<string, unknown> | null, ...children: WidgetChild[]): JSX.Element;
 export const Fragment: unique symbol;
@@ -75,5 +95,9 @@ declare global {
       canvas: BoxProps & { onFrame: (draw: unknown, fps: number) => void };
     }
   }
+}
+
+declare global {
+  function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
 }
 
