@@ -1,6 +1,7 @@
 const std = @import("std");
 const bridge = @import("bridge.zig");
 const qjs = @import("qjs.zig");
+const provider_mod = @import("provider.zig");
 const tree_mod = @import("tree.zig");
 const storage_mod = @import("storage.zig");
 const c = qjs.c;
@@ -23,10 +24,11 @@ pub const Engine = struct {
     runtime: *c.JSRuntime,
     context: *c.JSContext,
     bridge_state: bridge.State,
+    provider: provider_mod.Client = .{},
     deadline_ms: u64 = 0,
     executing: bool = false,
 
-    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8) Error!*Engine {
+    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8, host_pipe: ?[]const u8) !*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
         const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
@@ -36,8 +38,11 @@ pub const Engine = struct {
         self.* = .{
             .runtime = runtime,
             .context = context,
-            .bridge_state = .{ .tree = tree, .storage = storage, .origins = origins },
+            .bridge_state = undefined,
         };
+        try self.provider.init(host_pipe);
+        errdefer self.provider.deinit();
+        self.bridge_state = .{ .tree = tree, .storage = storage, .provider = &self.provider, .origins = origins };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
@@ -47,6 +52,7 @@ pub const Engine = struct {
     pub fn destroy(self: *Engine, allocator: std.mem.Allocator) void {
         self.flushStorage();
         bridge.deinit(self.context, &self.bridge_state);
+        self.provider.deinit();
         c.JS_FreeContext(self.context);
         c.JS_FreeRuntime(self.runtime);
         allocator.destroy(self);
@@ -101,6 +107,20 @@ pub const Engine = struct {
         try self.pumpJobs();
     }
 
+    pub fn hasHostProvider(self: *const Engine) bool {
+        return self.provider.available;
+    }
+
+    pub fn drainProviders(self: *Engine) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        var line_buffer: [8192]u8 = undefined;
+        while (self.provider.take(&line_buffer)) |line| {
+            if (!bridge.dispatchProvider(self.context, &self.bridge_state, line)) return self.reportException();
+        }
+        try self.pumpJobs();
+    }
+
     fn pumpJobs(self: *Engine) Error!void {
         while (true) {
             var job_context: ?*c.JSContext = null;
@@ -120,9 +140,10 @@ pub const Engine = struct {
     }
 
     /// SDK storage normally flushes on its 200 ms native debounce. A clean
-    /// window close gets one final synchronous hook; Windows force-kills used
-    /// by `weaver dev` cannot run process destructors, so native quota and the
-    /// already-completed debounce remain authoritative there.
+    /// window close gets one final synchronous hook. weaverd posts WM_CLOSE
+    /// before its bounded termination fallback, so ordinary dev restarts,
+    /// uninstall, and host shutdown all take this path; only a crashed or
+    /// externally force-killed widget relies on the completed debounce.
     fn flushStorage(self: *Engine) void {
         const global = c.JS_GetGlobalObject(self.context);
         defer c.JS_FreeValue(self.context, global);

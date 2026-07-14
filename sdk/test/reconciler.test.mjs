@@ -8,6 +8,8 @@ const callbacks = new Map();
 let nextNode = 1;
 let nextTimer = 1;
 let eventCallback;
+let providerCallback;
+let hostAvailable = true;
 let storageDocument = null;
 globalThis.native = {
   createNode(type) { const id = nextNode++; operations.push(["createNode", type, id]); return id; },
@@ -21,6 +23,8 @@ globalThis.native = {
   endBatch() { operations.push(["endBatch"]); },
   setHandler(...args) { operations.push(["setHandler", ...args]); },
   onEvent(callback) { eventCallback = callback; },
+  hostAvailable() { return hostAvailable; },
+  onProvider(callback) { providerCallback = callback; },
   setInterval(ms) { const id = nextTimer++; operations.push(["setInterval", ms, id]); return id; },
   clearInterval(id) { operations.push(["clearInterval", id]); callbacks.delete(id); },
   onTimer(id, callback) { operations.push(["onTimer", id]); callbacks.set(id, callback); },
@@ -37,6 +41,7 @@ const bundled = await build({
   platform: "neutral",
   write: false,
 });
+
 const sdk = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].contents).toString("base64")}`);
 
 test("widget renders one native generation and providers use native timers", async () => {
@@ -44,8 +49,9 @@ test("widget renders one native generation and providers use native timers", asy
   let saveMinutes;
   let presses = 0;
   let sliderValue = 0;
-  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time"] }, () => {
+  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu"] }, () => {
     const time = sdk.useProvider("time");
+    const cpu = sdk.useProvider("cpu");
     sdk.useInterval(() => {}, 2500);
     const [reversed, setReversed] = sdk.useState(false);
     const [minutes, setMinutes] = sdk.useStorage("minutes", 25);
@@ -54,6 +60,7 @@ test("widget renders one native generation and providers use native timers", asy
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
     return sdk.h("column", { class: "p-2" },
       sdk.h("text", null, time.ss),
+      sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       ...(reversed ? keyed.reverse() : keyed));
@@ -82,4 +89,8 @@ test("widget renders one native generation and providers use native timers", asy
   const storageTimer = operations.filter(([name, ms]) => name === "setInterval" && ms === 200).at(-1)[2];
   callbacks.get(storageTimer)();
   assert.equal(JSON.parse(storageDocument).minutes, 30);
+  assert.equal(typeof providerCallback, "function");
+  providerCallback('{"provider":"cpu","value":{"percent":37.5,"perCore":[30,45]}}');
+  await Promise.resolve();
+  assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "37.5"));
 });

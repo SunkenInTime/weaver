@@ -17,6 +17,7 @@ pub const Manifest = struct {
     clickThrough: bool = false,
     transparent: bool = true,
     origins: []const []const u8 = &.{},
+    subscribe: []const []const u8 = &.{},
 };
 
 pub const Loaded = struct {
@@ -42,6 +43,9 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     if (!parsed.transparent) return error.UnsupportedOpaqueWidget;
     for (parsed.origins) |origin| {
         if (origin.len == 0 or std.mem.indexOf(u8, origin, "://") != null or std.mem.indexOfAny(u8, origin, "/?#@") != null) return error.InvalidOrigin;
+    }
+    for (parsed.subscribe) |provider| {
+        if (!std.mem.eql(u8, provider, "time") and !std.mem.eql(u8, provider, "cpu") and !std.mem.eql(u8, provider, "memory")) return error.InvalidProvider;
     }
     return .{ .manifest = parsed, .bundle = bundle };
 }

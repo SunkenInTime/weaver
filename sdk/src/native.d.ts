@@ -12,6 +12,8 @@ interface WeaverNativeBridge {
   endBatch(): void;
   setHandler(id: number, kind: "press" | "change", enabled: boolean): void;
   onEvent(callback: (id: number, kind: "press" | "change", payload: number | null) => void): void;
+  hostAvailable(): boolean;
+  onProvider(callback: (jsonLine: string) => void): void;
   setInterval(ms: number): number;
   clearInterval(id: number): void;
   onTimer(id: number, callback: () => void): void;

@@ -14,6 +14,7 @@ pub const Model = struct {
     timer_fires: u64 = 0,
     armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
     fetch_poll_armed: bool = false,
+    provider_poll_armed: bool = false,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
@@ -23,6 +24,7 @@ const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
 fn bridgeTimerCapacity() usize { return @import("bridge.zig").max_timers; }
 const max_images: usize = 16;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
+const provider_poll_key: u64 = 0x7770_726f_7669;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
 pub const Msg = union(enum) {
@@ -61,6 +63,12 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                     std.log.err("widget fetch completion failed: {s}", .{@errorName(err)});
                 };
                 syncTimers(model, effects);
+                return;
+            }
+            if (timer.key == provider_poll_key) {
+                (model.engine orelse return).drainProviders() catch |err| {
+                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
+                };
                 return;
             }
             const before = model.tree.generation;
@@ -137,6 +145,15 @@ fn syncTimers(model: *Model, effects: *Effects) void {
     } else if (!engine.hasActiveFetches() and model.fetch_poll_armed) {
         effects.cancelTimer(fetch_poll_key);
         model.fetch_poll_armed = false;
+    }
+    if (engine.hasHostProvider() and !model.provider_poll_armed) {
+        effects.startTimer(.{
+            .key = provider_poll_key,
+            .interval_ms = 1000,
+            .mode = .repeating,
+            .on_fire = Effects.timerMsg(.timer),
+        });
+        model.provider_poll_armed = true;
     }
 }
 
@@ -342,7 +359,7 @@ pub fn main(init: std.process.Init) !void {
         .on_frame = onFrame,
     });
     defer app_state.destroy();
-    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins);
+    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, init.environ_map.get("WEAVER_HOST_PIPE"));
     defer engine.destroy(std.heap.page_allocator);
     app_state.model.engine = engine;
     try engine.evaluate(loaded.bundle, "bundle.js");
@@ -363,4 +380,5 @@ test {
     _ = @import("manifest.zig");
     _ = @import("network.zig");
     _ = @import("storage.zig");
+    _ = @import("provider.zig");
 }

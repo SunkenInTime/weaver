@@ -191,12 +191,19 @@ export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData
   if (!activeConfig?.subscribe?.includes(name)) {
     throw new Error(`useProvider("${name}") requires subscribe: ["${name}"] in the widget config`);
   }
-  // M2b owns the host-fed provider transport. Keeping this branch here makes
-  // the public contract available now while failing with its operational fix
-  // instead of inventing process-local CPU or memory semantics.
-  if (name !== "time") throw new Error(`Provider "${name}" requires weaverd; run "weaver up"`); // TODO(M2b): host provider seam.
-  const [value, setValue] = useState<TimeData>(() => currentTime());
-  useEffect(() => timeProvider.subscribe(setValue), []);
+  if (name === "time") {
+    const [value, setValue] = useState<TimeData>(() => currentTime());
+    useEffect(() => timeProvider.subscribe(setValue), []);
+    return value;
+  }
+  if (!native.hostAvailable()) throw new Error(`Provider "${name}" requires weaverd; run "weaver up"`);
+  if (name === "cpu") {
+    const [value, setValue] = useState<CpuData>(() => ({ percent: 0, perCore: [] }));
+    useEffect(() => hostProviders.subscribeCpu(setValue), []);
+    return value;
+  }
+  const [value, setValue] = useState<MemoryData>(() => ({ usedMb: 0, totalMb: 0, percent: 0 }));
+  useEffect(() => hostProviders.subscribeMemory(setValue), []);
   return value;
 }
 
@@ -552,6 +559,38 @@ const timeProvider = (() => {
           timerId = 0;
         }
       };
+    },
+  };
+})();
+
+const hostProviders = (() => {
+  const cpuListeners = new Set<(value: CpuData) => void>();
+  const memoryListeners = new Set<(value: MemoryData) => void>();
+  let installed = false;
+  const install = (): void => {
+    if (installed) return;
+    installed = true;
+    native.onProvider((line) => {
+      const frame = JSON.parse(line) as { provider?: unknown; value?: unknown };
+      if (frame.provider === "cpu") {
+        const value = frame.value as CpuData;
+        for (const listener of cpuListeners) listener(value);
+      } else if (frame.provider === "memory") {
+        const value = frame.value as MemoryData;
+        for (const listener of memoryListeners) listener(value);
+      }
+    });
+  };
+  return {
+    subscribeCpu(listener: (value: CpuData) => void): () => void {
+      install();
+      cpuListeners.add(listener);
+      return () => cpuListeners.delete(listener);
+    },
+    subscribeMemory(listener: (value: MemoryData) => void): () => void {
+      install();
+      memoryListeners.add(listener);
+      return () => memoryListeners.delete(listener);
     },
   };
 })();

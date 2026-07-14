@@ -1,6 +1,7 @@
 const std = @import("std");
 const tree_mod = @import("tree.zig");
 const network = @import("network.zig");
+const provider_mod = @import("provider.zig");
 const qjs = @import("qjs.zig");
 const storage_mod = @import("storage.zig");
 const c = qjs.c;
@@ -8,10 +9,12 @@ const c = qjs.c;
 pub const State = struct {
     tree: *tree_mod.Tree,
     storage: *storage_mod.Store,
+    provider: *provider_mod.Client,
     origins: []const []const u8,
     timers: [max_timers]TimerSlot = [_]TimerSlot{.{}} ** max_timers,
     next_timer_id: u64 = 1,
     event_callback: c.JSValue = qjs.undefinedValue(),
+    provider_callback: c.JSValue = qjs.undefinedValue(),
     fetches: [max_fetches]FetchSlot = [_]FetchSlot{.{}} ** max_fetches,
 };
 
@@ -55,6 +58,8 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "endBatch", endBatch, 0);
     try setFunction(ctx, native, "setHandler", setHandler, 3);
     try setFunction(ctx, native, "onEvent", onEvent, 1);
+    try setFunction(ctx, native, "hostAvailable", hostAvailable, 0);
+    try setFunction(ctx, native, "onProvider", onProvider, 1);
     try setFunction(ctx, native, "setInterval", setInterval, 1);
     try setFunction(ctx, native, "clearInterval", clearInterval, 1);
     try setFunction(ctx, native, "onTimer", onTimer, 2);
@@ -71,6 +76,7 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
         timer.* = .{};
     }
     c.JS_FreeValue(ctx, bridge_state.event_callback);
+    c.JS_FreeValue(ctx, bridge_state.provider_callback);
     for (&bridge_state.fetches) |*slot| {
         if (slot.thread) |thread| thread.join();
         c.JS_FreeValue(ctx, slot.resolve);
@@ -194,6 +200,24 @@ fn onEvent(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     const bridge_state = state(js);
     c.JS_FreeValue(js, bridge_state.event_callback);
     bridge_state.event_callback = c.JS_DupValue(js, argv[0]);
+    return qjs.undefinedValue();
+}
+
+fn hostAvailable(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 0) return fail(js, "hostAvailable expects no arguments");
+    return c.JS_NewBool(js, state(js).provider.available);
+}
+
+/// One string callback is the complete host-provider capability. Keeping the
+/// JSON-line parsing in the SDK means native IPC never manufactures arbitrary
+/// JS object graphs, and the runtime still invokes QuickJS only on its loop.
+fn onProvider(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 1 or !c.JS_IsFunction(js, argv[0])) return fail(js, "onProvider expects one function");
+    const bridge_state = state(js);
+    c.JS_FreeValue(js, bridge_state.provider_callback);
+    bridge_state.provider_callback = c.JS_DupValue(js, argv[0]);
     return qjs.undefinedValue();
 }
 
@@ -466,6 +490,17 @@ pub fn dispatchEvent(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.
     var arguments = [_]c.JSValue{ c.JS_NewUint32(ctx, node_id), kind_value, payload_value };
     defer c.JS_FreeValue(ctx, arguments[0]);
     const result = c.JS_Call(ctx, bridge_state.event_callback, qjs.undefinedValue(), arguments.len, &arguments);
+    const succeeded = !c.JS_IsException(result);
+    c.JS_FreeValue(ctx, result);
+    return succeeded;
+}
+
+pub fn dispatchProvider(ctx: *c.JSContext, bridge_state: *State, line: []const u8) bool {
+    if (!c.JS_IsFunction(ctx, bridge_state.provider_callback)) return true;
+    const value = c.JS_NewStringLen(ctx, line.ptr, line.len);
+    defer c.JS_FreeValue(ctx, value);
+    var arguments = [_]c.JSValue{value};
+    const result = c.JS_Call(ctx, bridge_state.provider_callback, qjs.undefinedValue(), 1, &arguments);
     const succeeded = !c.JS_IsException(result);
     c.JS_FreeValue(ctx, result);
     return succeeded;
