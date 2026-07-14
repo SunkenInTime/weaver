@@ -75,7 +75,7 @@ for the widget you actually want.
 
 The substrate is a fork of
 [vercel-labs/native](https://github.com/vercel-labs/native)
-([our fork](https://github.com/SunkenInTime/native), branch `weaver-fork`)
+([our fork](https://github.com/SunkenInTime/native), branch `weaver-main`)
 adding desktop-widget windowing and a widget-scale capacity profile — work we
 intend to offer upstream
 ([vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114)).
