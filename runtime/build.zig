@@ -23,11 +23,21 @@ pub fn build(b: *std.Build) void {
         "vendor/quickjs-ng/quickjs.c",
     };
     addQuickJs(b, artifacts.exe, sources, c_flags);
+    addWindowsMonitor(b, artifacts.exe);
     artifacts.exe.root_module.linkSystemLibrary("winhttp", .{});
     if (artifacts.tests.root_module != artifacts.exe.root_module) {
         addQuickJs(b, artifacts.tests, sources, c_flags);
+        addWindowsMonitor(b, artifacts.tests);
         artifacts.tests.root_module.linkSystemLibrary("winhttp", .{});
     }
+}
+
+fn addWindowsMonitor(b: *std.Build, compile: *std.Build.Step.Compile) void {
+    compile.root_module.addCSourceFile(.{
+        .file = b.path("src/windows_monitor.cpp"),
+        .flags = &.{ "-std=c++17" },
+    });
+    compile.root_module.addIncludePath(b.path("src"));
 }
 
 fn addQuickJs(b: *std.Build, compile: *std.Build.Step.Compile, sources: []const []const u8, c_flags: []const []const u8) void {

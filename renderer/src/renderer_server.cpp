@@ -12,6 +12,7 @@
 #include <vector>
 
 static wchar_t rendererLogPath[32768] = {};
+static wchar_t dpiLogPath[32768] = {};
 static std::mutex rendererLogMutex;
 
 static void logEvent(const char *kind, DWORD widget_pid, uint64_t frames, uint64_t elapsed_ms) {
@@ -24,6 +25,33 @@ static void logEvent(const char *kind, DWORD widget_pid, uint64_t frames, uint64
     std::lock_guard<std::mutex> lock(rendererLogMutex);
     HANDLE file = CreateFileW(rendererLogPath, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
         nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(file, line, (DWORD)length, &written, nullptr);
+    CloseHandle(file);
+}
+
+static void logDpiEvent(const WeaverRendererFrame &frame, const char *action) {
+    if (dpiLogPath[0] == L'\0') return;
+    char line[640] = {};
+    const int length = snprintf(line, sizeof(line),
+        "%llu renderer-surface renderer=%lu widget=%lu scale=%.6f "
+        "logical_surface_dip=%.6fx%.6f destination_dip=(%.6f,%.6f %.6fx%.6f) "
+        "destination_edges_px=(%ld,%ld,%ld,%ld) texture_px=%ux%u generation=%llu action=%s\r\n",
+        (unsigned long long)GetTickCount64(), (unsigned long)GetCurrentProcessId(),
+        (unsigned long)frame.widget_pid, frame.device_scale,
+        frame.logical_surface_width_dip, frame.logical_surface_height_dip,
+        frame.destination_x_dip, frame.destination_y_dip,
+        frame.destination_width_dip, frame.destination_height_dip,
+        frame.destination_left_px, frame.destination_top_px,
+        frame.destination_right_px, frame.destination_bottom_px,
+        frame.source_texture_width_px, frame.source_texture_height_px,
+        (unsigned long long)frame.geometry_generation, action);
+    if (length <= 0) return;
+    std::lock_guard<std::mutex> lock(rendererLogMutex);
+    HANDLE file = CreateFileW(dpiLogPath, FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return;
     DWORD written = 0;
     WriteFile(file, line, (DWORD)length, &written, nullptr);
@@ -61,26 +89,43 @@ static void serveWidget(HANDLE pipe, NativeSdkD3DSharedRenderer *renderer) {
     const uint8_t *retained_pixels = nullptr;
     std::wstring retained_name;
     size_t retained_bytes = 0;
+    WeaverRendererHello hello = {};
+    if (!readExact(pipe, &hello, sizeof(hello))) {
+        CloseHandle(pipe);
+        return;
+    }
+    WeaverRendererHelloReply hello_reply = {};
+    hello_reply.magic = kWeaverRendererMagic;
+    hello_reply.version = kWeaverRendererVersion;
+    hello_reply.struct_size = sizeof(hello_reply);
+    hello_reply.status = weaverRendererHelloValid(hello)
+        ? kWeaverRendererStatusOk : kWeaverRendererStatusVersionMismatch;
+    if (!writeExact(pipe, &hello_reply, sizeof(hello_reply)) ||
+        hello_reply.status != kWeaverRendererStatusOk) {
+        FlushFileBuffers(pipe);
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+        return;
+    }
+    widget_pid = hello.widget_pid;
+    uint64_t last_geometry_generation = 0;
+    uint32_t last_texture_width_px = 0;
+    uint32_t last_texture_height_px = 0;
     for (;;) {
         WeaverRendererFrame frame = {};
         if (!readExact(pipe, &frame, sizeof(frame))) break;
         WeaverRendererReply reply = {};
         reply.magic = kWeaverRendererMagic;
         reply.version = kWeaverRendererVersion;
-        if (frame.magic != kWeaverRendererMagic ||
-            frame.version != kWeaverRendererVersion || frame.widget_pid == 0 ||
-            frame.packet_len == 0 || frame.packet_len > kWeaverRendererMaxPacket ||
-            frame.retained_dirty_rect_count > kWeaverRendererMaxDirtyRects ||
-            frame.retained_section_name_len >= kWeaverRendererSectionNameChars) {
+        if (!weaverRendererFrameValid(frame) || frame.widget_pid != widget_pid) {
             writeExact(pipe, &reply, sizeof(reply));
             break;
         }
         if (!surface) {
-            widget_pid = frame.widget_pid;
             surface = nativeSdkD3DSharedSurfaceCreate(renderer, widget_pid, nullptr);
             logEvent("connect", widget_pid, 0, 0);
         }
-        if (!surface || widget_pid != frame.widget_pid) break;
+        if (!surface) break;
         std::vector<uint8_t> packet(frame.packet_len);
         if (!readExact(pipe, packet.data(), packet.size())) break;
         if (frame.retained_generation != 0) {
@@ -101,16 +146,31 @@ static void serveWidget(HANDLE pipe, NativeSdkD3DSharedRenderer *renderer) {
             }
         }
         uint64_t replacement_handle = 0;
-        if (nativeSdkD3DSharedSurfacePresent(surface, frame.logical_width,
-            frame.logical_height, frame.scale, frame.clear_r, frame.clear_g,
+        if (nativeSdkD3DSharedSurfacePresent(surface,
+            frame.logical_surface_width_dip,
+            frame.logical_surface_height_dip, frame.device_scale,
+            frame.source_texture_width_px, frame.source_texture_height_px,
+            frame.geometry_generation, frame.clear_r, frame.clear_g,
             frame.clear_b, frame.clear_a, packet.data(), packet.size(),
             frame.retained_generation, frame.retained_width, frame.retained_height,
             reinterpret_cast<const float *>(frame.retained_dirty_rects),
             frame.retained_dirty_rect_count,
             frame.retained_generation != 0 ? retained_pixels : nullptr,
             &replacement_handle)) {
-            reply.status = 1;
+            reply.status = kWeaverRendererStatusOk;
             reply.surface_handle = replacement_handle;
+            if (frame.geometry_generation != last_geometry_generation) {
+                const bool resized = weaverSurfaceExtentChanged(
+                    last_texture_width_px, last_texture_height_px,
+                    frame.source_texture_width_px,
+                    frame.source_texture_height_px);
+                logDpiEvent(frame, replacement_handle != 0
+                    ? (last_geometry_generation == 0 ? "created" : "resized-recreated")
+                    : (resized ? "resized-reused" : "geometry-reused"));
+                last_geometry_generation = frame.geometry_generation;
+                last_texture_width_px = frame.source_texture_width_px;
+                last_texture_height_px = frame.source_texture_height_px;
+            }
             if (frame.retained_generation != 0) {
                 logEvent("retained-upload", widget_pid, frame.retained_generation,
                     frame.retained_dirty_rect_count);
@@ -139,6 +199,7 @@ int weaver_renderer_run(void) {
         pipe_name, ARRAYSIZE(pipe_name));
     if (length == 0 || length >= ARRAYSIZE(pipe_name)) return 2;
     GetEnvironmentVariableW(L"WEAVER_RENDERER_LOG", rendererLogPath, ARRAYSIZE(rendererLogPath));
+    GetEnvironmentVariableW(L"WEAVER_DPI_LOG", dpiLogPath, ARRAYSIZE(dpiLogPath));
     NativeSdkD3DSharedRenderer *renderer = nativeSdkD3DSharedRendererCreate();
     if (!renderer) return 3;
     logEvent("start", 0, 0, 0);
