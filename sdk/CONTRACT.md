@@ -149,6 +149,47 @@ the desktop.
 
 ---
 
+# M3 amendment (v0.3)
+
+## `<canvas>` — immediate mode (the ADR 0009 exception)
+
+```tsx
+<canvas class="w-[288px] h-[64px]" fps={30} onFrame={(ctx, frame) => { … }} />
+```
+
+```ts
+interface CanvasFrame { t: number; dt: number }        // seconds
+interface CanvasCtx {
+  width: number; height: number;                       // logical px
+  clear(color?: string): void;                         // default: transparent
+  fillRect(x: number, y: number, w: number, h: number, color: string): void;
+  fillRoundRect(x: number, y: number, w: number, h: number, r: number, color: string): void;
+  fillCircle(cx: number, cy: number, r: number, color: string): void;
+  line(x1: number, y1: number, x2: number, y2: number, width: number, color: string): void;
+  polyline(points: number[], width: number, color: string): void;  // flat x,y pairs
+}
+```
+
+- `fps` capped at 60; omitted → draws once per React render.
+- `onFrame` runs on the native frame clock; commands batch into one
+  immediate-mode buffer per frame. Colors are `#rgb/#rrggbb/#rrggbbaa`.
+- A canvas with `fps > 0` is an *animated* widget and is billed accordingly
+  (ADR 0005); everything outside the canvas stays retained/idle-zero.
+
+## Providers: `audio` and `media` (host-fed)
+
+```ts
+useProvider("audio")  // { rms: number, bands: number[] }   32 bands 0..1, 30 Hz,
+                      // system loopback — silence sends nothing (idle-zero)
+useProvider("media")  // { title: string, artist: string, album: string,
+                      //   playing: boolean, positionMs: number, durationMs: number }
+                      // change-pushed; 1 Hz position while playing
+```
+
+Media *control* (play/seek) is deliberately not in M3.
+
+---
+
 # M2 amendment (v0.2)
 
 Everything above stands. M2 turns on the following.
