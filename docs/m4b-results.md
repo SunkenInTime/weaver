@@ -6,7 +6,7 @@ with the Native SDK reference renderer, but it does so only when the retained
 display layer changes. Canvas commands continue to cross the existing NSGP
 pipe every animated frame.
 
-Fork work is committed on `weaver-fork-hybrid` at `5d066a3b`; the parent
+Fork work is committed on `weaver-fork-hybrid` at `5e83a7d0`; the parent
 repository pins that exact commit.
 
 The static parity captures are [software](m4b-parity-sw.png) and
@@ -49,6 +49,14 @@ windows were temporarily hidden, then restored, for the capture.
 The reproducible `examples/m4b-synthetic` and `examples/m4b-parity` profiles
 provide the 480 x 320 performance and static parity cases.
 
+The final gate-fix pass additionally caches the layer-filtered immediate
+display list on the view, fingerprints retained source commands before render
+planning, and gives each JS canvas one stable context plus one reusable 4096
+value `Float64Array`. The bridge bulk-copies that typed range once and Zig is
+the single finite-value validation boundary. These changes remove retained
+tree planning, JS command-buffer garbage, and per-value QuickJS property reads
+from the 60 Hz path.
+
 ## Visual parity and damage discipline
 
 The parity profile uses fixed canvas commands and `fps={0}`. Both backends have
@@ -76,52 +84,64 @@ completed present.
 
 | Backend/process | Achieved FPS | CPU, one core | Private WS | Private bytes | Threads |
 |---|---:|---:|---:|---:|---:|
-| M4b shared renderer | 59.1-60.2 | 3.85% | 12.50 MiB | 54.49 MiB | 62 |
-| M4b mixed widget | 59.1-60.2 | **16.88%** | **16.48 MiB** | 25.11 MiB | 13 |
+| M4b shared renderer, final | 59.0-59.8 | 3.02% | 12.3 MiB | 52.7 MiB | 62 |
+| M4b mixed widget, final | 59.0-59.8 | **12.92%** | **16.79 MiB** | 25.50 MiB | 13 |
+| M4b mixed widget, before fix pass | 59.1-60.2 | 16.88% | 16.48 MiB | 25.11 MiB | 13 |
 | M4b software control | about 60 requested | 38.85% | 25.35 MiB | - | 12 |
 | M4a canvas-only widget | 60.18-60.19 | 9.38% | 12.33 MiB | 20.86 MiB | 5 |
+| canvas-only regression, true changing 60 Hz | 60.0 | **13.33%** | 17.95 MiB | 26.72 MiB | 13 |
 
 The hybrid path decisively avoids the full-frame software raster cost and cuts
-private WS by about 8.9 MiB versus the software control. It misses the <=10%
-per-widget target: the retained commands are not uploaded per frame, but the
-current Native SDK frame planner still walks/plans the full mixed display list
-before filtering the GPU packet. Splitting frame planning itself, rather than
-only the presentation plan, is the next obvious CPU fix.
+private WS by about 8.6 MiB versus the software control. The frame-planning
+split is fixed: immediate planning is p50 18 us / p90 21 us and contains no
+text layouts, while the retained source is neither walked nor planned on an
+unchanged frame. CPU falls by 3.96 points, but the <=10% target still misses by
+2.92 points. The canvas-only true-changing control misses too, showing the
+remaining bill is the JITless QuickJS `onFrame` command authoring plus the
+main-loop/IPC turn, not mixed retained planning. The old M4a 9.38% control
+changed its synthetic data at 30 Hz while presenting at 60 Hz; the final
+control changes commands on every one of the 60 ticks and is the more honest
+regression case.
 
 ### Three simultaneous mixed 480 x 320 widgets
 
 | Process | Steady achieved FPS | CPU, one core | Private WS | Private bytes | Threads |
 |---|---:|---:|---:|---:|---:|
-| renderer | shared | **8.33%** | **14.10 MiB** | 55.45 MiB | 63 |
-| mixed A | 57.1-59.6 | 18.44% | 16.50 MiB | 25.14 MiB | 13 |
-| mixed B | 56.8-59.6 | 17.60% | 16.62 MiB | 25.28 MiB | 13 |
-| mixed C | 57.5-58.5 | 16.35% | 16.56 MiB | 25.22 MiB | 13 |
-| **total** | three visible widgets | **60.72%** | **63.78 MiB** | **131.09 MiB** | 102 |
+| renderer | shared | **7.71%** | **14.50 MiB** | 57.72 MiB | 64 |
+| mixed A | 58.3-59.3 | 11.98% | 19.06 MiB | 27.80 MiB | 11 |
+| mixed B | 58.3-59.3 | 11.88% | 16.74 MiB | 25.45 MiB | 11 |
+| mixed C | 57.9-59.3 | 12.92% | 16.73 MiB | 25.43 MiB | 11 |
+| **total** | three visible widgets | **44.49%** | **67.03 MiB** | **136.40 MiB** | 97 |
 
-Memory remains in the same class as M4a and the shared renderer stays below
-its 10% target, but each mixed widget misses the <=10% CPU target and cadence
-occasionally dips below 58 fps. This is a performance miss, not a measurement
-artifact: every window was visible and every counted frame completed through
-the renderer.
+Memory remains in the same class as M4a, the shared renderer stays below 10%,
+and every widget holds roughly 58-59 fps. Each widget still misses <=10% by
+1.88-2.92 points. This is a performance miss, not a measurement artifact:
+all three windows were visible, their commands changed every frame, and every
+counted frame completed through the renderer.
 
 ### Audio visualizer and paused clock
 
 | Profile | Presents | CPU, one core | Private WS | Notes |
 |---|---:|---:|---:|---|
-| hosted mixed audio visualizer | 21.3 fps vs 30 requested | 9.06% | 17.34 MiB | one retained upload |
-| its shared renderer | same | 1.88% | 12.68 MiB | audio remained live |
-| hosted visualizer after provider silence | no audio frames | **3.75-4.48%** | 16.20 MiB | backend stayed software after its startup race |
+| hosted mixed audio visualizer, before | 21.3 fps vs 30 requested | 9.06% | 17.34 MiB | provider timer contended |
+| hosted mixed audio visualizer, final | **30.3 fps** | **10.94%** | **16.53 MiB** | continuous 440 Hz source; backend gpu |
+| its shared renderer, final | same | 1.98% | 12.61 MiB | one upload at activation, none per frame |
+| hosted visualizer after provider silence, before | no audio frames | 3.75-4.48% | 16.20 MiB | 30 Hz empty polling |
+| hosted visualizer after provider silence, final | zero presents / zero pipe frames | **0.52%** | **15.41 MiB** | 1 Hz resume probe |
 | mixed `fps={0}` widget | one initial present only | **0.104%** | 16.46 MiB | 15-second idle interval |
 | renderer after that initial present | no further presents | **0.000%** | 13.18 MiB | one retained upload |
 
-The first live audio run had continuously audible Spotify/browser sessions.
-A later host restart did reach provider silence and stopped its audio frame
-counter at 57, but the hosted widget still consumed 3.75-4.48% of one core.
-The direct mixed `fps={0}` control proves the canvas clock and presents are
-stopped, so this residual belongs to hosted runtime/IPC idle work rather than
-canvas rendering and needs separate profiling. The hosted audio cadence
-regression (about 21 fps) is also honest: 30 Hz provider rerenders contend with
-the sub-60 canvas timer and need a follow-up scheduler fix.
+Provider delivery now marks JS state dirty but does not own a competing render
+clock. While active, the 33 ms canvas timer drains queued provider frames and
+commits provider state plus canvas commands as one generation. A continuous
+generated 440 Hz WAV held 300 completed presents in 9.89-9.92 seconds. After
+silence and decay, `fps={0}` cancels that clock; no pipe frame or present was
+observed during the 15-second sample. The former residual was precisely the
+main thread rebuilding on a 30 Hz empty provider poll (about 250 ms thread CPU
+per 15 seconds even after reducing it to 4 Hz). The final 1 Hz resume probe
+reduces this to 0.52%; an event-driven pipe-to-app wakeup is the clean future
+way to remove the last half point without delaying sound resumption by up to a
+second.
 
 ## Supervision and recovery
 
@@ -135,26 +155,23 @@ M4b Hybrid Parity  0  -  source missing  registered source path does not exist
 
 There was no new PID and no backoff loop. The registration was then removed.
 
-Renderer restart backoff still worked and the mixed widget PID survived both
-deliberate renderer kills. The first renderer returned after 1.4 seconds; the
-second exercised the five-second backoff and returned after 5.9 seconds. But
-the hybrid surface retained its last DirectComposition frame during the gap
-instead of visibly repainting through software, and the backend report never
-observed `software`. Promotion uploaded retained generations 2 and 3 after the
-new renderer connected. This fails the requested live-demotion behavior and
-must be fixed before treating renderer crashes as seamless.
+Live demotion is fixed and observed, not inferred. After killing the renderer,
+status reported all three unchanged widget PIDs as `backend=software`.
+[Two captures](m4b-demotion-software.png) [350 ms apart](m4b-demotion-software-next.png)
+have different SHA-256 hashes and visibly different bar positions during the
+gap. The renderer then restarted under backoff and the same three PIDs returned
+to `backend=gpu`; no widget exited. The client detaches the dead DComp visual,
+temporarily restores the layered-window binding with `SWP_FRAMECHANGED`, and
+the runtime goes directly to a full pixel fallback rather than retrying an
+invalid mixed packet. Promotion reverses the binding change and reuploads the
+retained generation.
 
-A final fork follow-up now detaches the dead DirectComposition visual, restores
-the layered-window style with `SWP_FRAMECHANGED`, and skips the invalid retry of
-the full mixed packet before pixel fallback. Those are the two necessary
-demotion seams and compile/test cleanly. The active hosted recovery run above
-still did not produce an observable software frame, so the result remains
-classified as failing rather than claiming recovery from code inspection.
-
-Win+D also hid the direct hybrid proof windows on this run, unlike the M4a
-result. Ordinary bottom-layer behavior remained correct, but WorkerW parenting
-or a software fallback for the desktop layer is still required for reliable
-Show Desktop survival.
+Win+D survival is also fixed. Desktop-layer windows are parented to the shell's
+wallpaper WorkerW before first show and keep `HWND_BOTTOM` enforcement. Real
+`Shell.Application.MinimizeAll()` captures show both the
+[hybrid widget](m4b-wind-hybrid.png) and [canvas-only widget](m4b-wind-canvas.png)
+visible and animated over wallpaper; `UndoMinimizeAll()` restores ordinary
+apps without changing either widget backend.
 
 ## Verification
 
@@ -170,18 +187,22 @@ With Zig 0.16.0 at
 - CLI check and bundle: visualizer, now-playing, parity, and synthetic profiles
   all pass and stamp `renderBackend: "gpu"`.
 
-The fork's broad `zig build test` remains at its pre-existing widget-profile
-baseline (1414/1451 pass, 6 skipped, 31 failures caused by one-window/view and
-reduced canvas capacities). The touched canvas target and all production
-Windows/renderer/runtime compilation paths are green; M4b adds no new broad
-suite failure.
+The fork's broad desktop-shell target remains at its pre-existing
+widget-profile baseline: `test-desktop-ui-shell` passes 74/97 and its 23
+failures are the expected one-window/view and reduced canvas-capacity cases.
+The touched `test-canvas` target (including the new presentation-layer source
+fingerprint test) and every production Windows/renderer/runtime compilation
+path are green; M4b adds no new broad-suite failure.
 
 ## Verdict
 
-M4b lands the important memory and damage result: mixed widgets can use the
-shared GPU device, retained pixels cross processes once per retained change,
-and `fps={0}` is truly idle. It does not yet land the full performance and
-resilience gate. The next three fixes, in order, are: plan immediate commands
-without re-planning static retained text each frame; decouple 30 Hz provider
-rerenders from the canvas timer; and make renderer disconnect switch the DComp
-window live to its software bitmap before retrying promotion.
+M4b now lands the hybrid correctness, cadence, resilience, Win+D, damage, and
+idle gates. Static retained pixels cross once per retained change; immediate
+frames neither plan nor upload retained content; audio holds 30 Hz; renderer
+loss visibly demotes and re-promotes live processes; and silence is 0.52% with
+zero presents. The remaining failure is narrow but real: true-changing 60 Hz
+JS command authoring costs 11.9-12.9% per widget rather than <=10%, and the
+canvas-only true-60 control is 13.33% rather than M4a's 9.4% repeated-frame
+baseline. The obvious next performance workstream is a native-mapped command
+writer or compiled canvas callback path that removes QuickJS typed-index writes
+and the JS-to-Zig turn from each scalar while keeping the CanvasCtx API intact.
