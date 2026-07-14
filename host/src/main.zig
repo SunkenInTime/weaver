@@ -1,0 +1,516 @@
+const std = @import("std");
+const backoff = @import("backoff.zig");
+const providers = @import("providers.zig");
+const registry = @import("registry.zig");
+
+const c = @cImport({
+    @cDefine("WIN32_LEAN_AND_MEAN", "1");
+    @cInclude("windows.h");
+    @cInclude("psapi.h");
+});
+
+const mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostSingletonV2");
+const shutdown_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostShutdownV2");
+const reload_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadV2");
+const env_pipe_name = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_HOST_PIPE");
+const max_widgets: usize = 32;
+const max_name_bytes: usize = 128;
+const max_path_bytes: usize = 2048;
+const invalid_handle = c.INVALID_HANDLE_VALUE;
+
+const RunState = enum { disabled, starting, running, backoff, stopped };
+
+const Slot = struct {
+    used: bool = false,
+    enabled: bool = false,
+    name_buffer: [max_name_bytes]u8 = undefined,
+    name_len: usize = 0,
+    source_buffer: [max_path_bytes]u8 = undefined,
+    source_len: usize = 0,
+    state: RunState = .disabled,
+    process: c.HANDLE = null,
+    pid: u32 = 0,
+    pipe: c.HANDLE = invalid_handle,
+    wants_cpu: bool = false,
+    wants_memory: bool = false,
+    cpu_sent: bool = false,
+    memory_sent: bool = false,
+    artifact_mtime: i128 = 0,
+    started_ms: u64 = 0,
+    next_restart_ms: u64 = 0,
+    crash_times: [backoff.history_capacity]u64 = [_]u64{0} ** backoff.history_capacity,
+    crash_count: usize = 0,
+    reason_buffer: [256]u8 = undefined,
+    reason_len: usize = 0,
+    previous_process_ticks: u64 = 0,
+    previous_sample_ms: u64 = 0,
+    private_samples: [15]u64 = [_]u64{0} ** 15,
+    cpu_samples: [15]f64 = [_]f64{0} ** 15,
+    sample_count: usize = 0,
+    sample_cursor: usize = 0,
+
+    fn name(self: *const Slot) []const u8 { return self.name_buffer[0..self.name_len]; }
+    fn source(self: *const Slot) []const u8 { return self.source_buffer[0..self.source_len]; }
+    fn reason(self: *const Slot) []const u8 { return self.reason_buffer[0..self.reason_len]; }
+
+    fn setRegistration(self: *Slot, value: registry.Registration) !void {
+        if (value.name.len > self.name_buffer.len or value.sourcePath.len > self.source_buffer.len) return error.RegistrationTooLong;
+        @memcpy(self.name_buffer[0..value.name.len], value.name);
+        @memcpy(self.source_buffer[0..value.sourcePath.len], value.sourcePath);
+        self.name_len = value.name.len;
+        self.source_len = value.sourcePath.len;
+        self.enabled = value.enabled;
+        self.used = true;
+        if (!value.enabled) self.state = .disabled;
+    }
+
+    fn setReason(self: *Slot, comptime format: []const u8, args: anytype) void {
+        var writer = std.Io.Writer.fixed(&self.reason_buffer);
+        writer.print(format, args) catch {};
+        self.reason_len = writer.buffered().len;
+    }
+
+    fn averages(self: *const Slot) struct { private_mb: f64, cpu: f64 } {
+        if (self.sample_count == 0) return .{ .private_mb = 0, .cpu = 0 };
+        var private_total: u64 = 0;
+        var cpu_total: f64 = 0;
+        for (self.private_samples[0..self.sample_count]) |value| private_total += value;
+        for (self.cpu_samples[0..self.sample_count]) |value| cpu_total += value;
+        return .{
+            .private_mb = @as(f64, @floatFromInt(private_total)) / @as(f64, @floatFromInt(self.sample_count)) / (1024.0 * 1024.0),
+            .cpu = cpu_total / @as(f64, @floatFromInt(self.sample_count)),
+        };
+    }
+};
+
+const Host = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    repo_root: []const u8,
+    registry_path: []const u8,
+    status_path: []const u8,
+    status_temp_path: []const u8,
+    runtime_exe: []const u8,
+    cli_script: []const u8,
+    slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
+    sampler: providers.Sampler = .{},
+    previous_cpu: [8192]u8 = undefined,
+    previous_cpu_len: usize = 0,
+    previous_memory: [512]u8 = undefined,
+    previous_memory_len: usize = 0,
+
+    fn loadRegistry(self: *Host) !void {
+        const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return err,
+        };
+        defer if (owned_bytes) |bytes| self.allocator.free(bytes);
+        const bytes = owned_bytes orelse "{\"widgets\":[]}";
+        const parsed = try registry.parse(self.allocator, bytes);
+        defer parsed.deinit();
+        var seen = [_]bool{false} ** max_widgets;
+        for (parsed.value.widgets) |registration| {
+            const index = findSlot(&self.slots, registration.name) orelse findFreeSlot(&self.slots) orelse return error.RegistryFull;
+            seen[index] = true;
+            const slot = &self.slots[index];
+            const source_changed = slot.used and !std.mem.eql(u8, slot.source(), registration.sourcePath);
+            if (source_changed) self.stopSlot(slot, true);
+            try slot.setRegistration(registration);
+            if (!registration.enabled and slot.process != null) self.stopSlot(slot, true);
+            if (!registration.enabled) slot.state = .disabled;
+            if (registration.enabled and slot.state == .disabled) slot.state = .starting;
+            const artifact = self.artifactMtime(slot.source());
+            if (slot.process != null and artifact != 0 and artifact != slot.artifact_mtime) {
+                self.stopSlot(slot, true);
+                slot.state = .starting;
+            }
+        }
+        for (&self.slots, 0..) |*slot, index| {
+            if (!slot.used or seen[index]) continue;
+            self.stopSlot(slot, true);
+            slot.* = .{};
+        }
+    }
+
+    fn supervise(self: *Host, now_ms: u64) void {
+        for (&self.slots) |*slot| {
+            if (!slot.used or !slot.enabled or slot.state == .stopped) continue;
+            if (slot.process) |process| {
+                if (c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0) self.handleExit(slot, now_ms);
+                continue;
+            }
+            if ((slot.state == .starting or slot.state == .backoff) and now_ms >= slot.next_restart_ms) {
+                self.launch(slot, now_ms) catch |err| {
+                    slot.setReason("launch failed: {s}", .{@errorName(err)});
+                    self.recordCrash(slot, now_ms, null);
+                };
+            }
+        }
+    }
+
+    fn launch(self: *Host, slot: *Slot, now_ms: u64) !void {
+        try self.ensureBundle(slot.source());
+        const dist = try std.fs.path.join(self.allocator, &.{ slot.source(), "dist" });
+        defer self.allocator.free(dist);
+        const manifest_path = try std.fs.path.join(self.allocator, &.{ dist, "widget.json" });
+        defer self.allocator.free(manifest_path);
+        const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, manifest_path, self.allocator, .limited(64 * 1024));
+        defer self.allocator.free(manifest_bytes);
+        const Manifest = struct { subscribe: []const []const u8 = &.{} };
+        const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
+        defer manifest.deinit();
+        slot.wants_cpu = false;
+        slot.wants_memory = false;
+        for (manifest.value.subscribe) |name| {
+            if (std.mem.eql(u8, name, "cpu")) slot.wants_cpu = true;
+            if (std.mem.eql(u8, name, "memory")) slot.wants_memory = true;
+        }
+        var pipe_name_buffer: [256]u8 = undefined;
+        var pipe_name: []const u8 = &.{};
+        if (slot.wants_cpu or slot.wants_memory) {
+            pipe_name = try std.fmt.bufPrint(&pipe_name_buffer, "\\\\.\\pipe\\weaver-{d}-{x}", .{ c.GetCurrentProcessId(), std.hash.Wyhash.hash(now_ms, slot.name()) });
+            const pipe_name_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, pipe_name);
+            defer self.allocator.free(pipe_name_w);
+            slot.pipe = c.CreateNamedPipeW(pipe_name_w.ptr, c.PIPE_ACCESS_OUTBOUND, c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_NOWAIT, 1, 8192, 8192, 0, null);
+            if (slot.pipe == invalid_handle) return error.CreatePipeFailed;
+        }
+        errdefer self.closePipe(slot);
+        const command = try std.fmt.allocPrint(self.allocator, "\"{s}\" \"{s}\"", .{ self.runtime_exe, dist });
+        defer self.allocator.free(command);
+        const command_w_const = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, command);
+        defer self.allocator.free(command_w_const);
+        const command_w = try self.allocator.dupeZ(u16, command_w_const);
+        defer self.allocator.free(command_w);
+        if (pipe_name.len > 0) {
+            const value_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, pipe_name);
+            defer self.allocator.free(value_w);
+            if (c.SetEnvironmentVariableW(env_pipe_name, value_w.ptr) == 0) return error.SetEnvironmentFailed;
+        }
+        defer {
+            if (pipe_name.len > 0) _ = c.SetEnvironmentVariableW(env_pipe_name, null);
+        }
+        var startup: c.STARTUPINFOW = std.mem.zeroes(c.STARTUPINFOW);
+        startup.cb = @sizeOf(c.STARTUPINFOW);
+        var process_info: c.PROCESS_INFORMATION = std.mem.zeroes(c.PROCESS_INFORMATION);
+        if (c.CreateProcessW(null, command_w.ptr, null, null, 0, c.CREATE_NO_WINDOW, null, null, &startup, &process_info) == 0) return error.CreateProcessFailed;
+        _ = c.CloseHandle(process_info.hThread);
+        slot.process = process_info.hProcess;
+        slot.pid = process_info.dwProcessId;
+        if (slot.pipe != invalid_handle) {
+            if (!connectPipe(slot.pipe, slot.process, 5_000)) {
+                _ = c.TerminateProcess(slot.process, 1);
+                return error.ConnectPipeFailed;
+            }
+        }
+        slot.state = .running;
+        slot.started_ms = now_ms;
+        slot.reason_len = 0;
+        slot.artifact_mtime = self.artifactMtime(slot.source());
+        slot.previous_process_ticks = processTicks(slot.process);
+        slot.previous_sample_ms = now_ms;
+        slot.sample_count = 0;
+        slot.sample_cursor = 0;
+        slot.cpu_sent = false;
+        slot.memory_sent = false;
+    }
+
+    fn handleExit(self: *Host, slot: *Slot, now_ms: u64) void {
+        var exit_code: c.DWORD = 1;
+        _ = c.GetExitCodeProcess(slot.process, &exit_code);
+        self.closeProcess(slot);
+        self.recordCrash(slot, now_ms, exit_code);
+    }
+
+    fn recordCrash(_: *Host, slot: *Slot, now_ms: u64, exit_code: ?u32) void {
+        if (backoff.recordCrash(&slot.crash_times, &slot.crash_count, now_ms)) {
+            slot.state = .stopped;
+            slot.setReason("crashed after 3 restart attempts within 5 minutes{s}{?d}", .{ if (exit_code != null) ": exit code " else "", exit_code });
+            return;
+        }
+        slot.state = .backoff;
+        slot.next_restart_ms = now_ms + backoff.delayMs(slot.crash_count);
+        slot.setReason("crashed; restart {d} in {d}s", .{ slot.crash_count, backoff.delayMs(slot.crash_count) / 1000 });
+    }
+
+    fn stopSlot(self: *Host, slot: *Slot, graceful: bool) void {
+        if (slot.process) |process| {
+            if (graceful) {
+                closeWindowsForProcess(slot.pid);
+                if (c.WaitForSingleObject(process, 1500) != c.WAIT_OBJECT_0) _ = c.TerminateProcess(process, 0);
+            } else _ = c.TerminateProcess(process, 0);
+            _ = c.WaitForSingleObject(process, 1000);
+        }
+        self.closeProcess(slot);
+    }
+
+    fn closeProcess(self: *Host, slot: *Slot) void {
+        self.closePipe(slot);
+        if (slot.process) |process| _ = c.CloseHandle(process);
+        slot.process = null;
+        slot.pid = 0;
+        slot.previous_process_ticks = 0;
+    }
+
+    fn closePipe(_: *Host, slot: *Slot) void {
+        if (slot.pipe == invalid_handle) return;
+        _ = c.FlushFileBuffers(slot.pipe);
+        _ = c.DisconnectNamedPipe(slot.pipe);
+        _ = c.CloseHandle(slot.pipe);
+        slot.pipe = invalid_handle;
+    }
+
+    fn sampleCosts(self: *Host, now_ms: u64) void {
+        for (&self.slots) |*slot| {
+            const process = slot.process orelse continue;
+            var counters: c.PROCESS_MEMORY_COUNTERS_EX = std.mem.zeroes(c.PROCESS_MEMORY_COUNTERS_EX);
+            counters.cb = @sizeOf(c.PROCESS_MEMORY_COUNTERS_EX);
+            if (c.GetProcessMemoryInfo(process, @ptrCast(&counters), @sizeOf(c.PROCESS_MEMORY_COUNTERS_EX)) == 0) continue;
+            const ticks = processTicks(process);
+            const elapsed_ms = now_ms -| slot.previous_sample_ms;
+            const tick_delta = ticks -| slot.previous_process_ticks;
+            const cpu = if (elapsed_ms == 0) 0 else 100.0 * @as(f64, @floatFromInt(tick_delta)) / 10_000.0 / @as(f64, @floatFromInt(elapsed_ms));
+            slot.private_samples[slot.sample_cursor] = counters.PrivateUsage;
+            slot.cpu_samples[slot.sample_cursor] = @round(cpu * 10.0) / 10.0;
+            slot.sample_cursor = (slot.sample_cursor + 1) % slot.private_samples.len;
+            slot.sample_count = @min(slot.sample_count + 1, slot.private_samples.len);
+            slot.previous_process_ticks = ticks;
+            slot.previous_sample_ms = now_ms;
+        }
+    }
+
+    fn sampleProviders(self: *Host) void {
+        var any = false;
+        for (&self.slots) |*slot| if (slot.process != null and (slot.wants_cpu or slot.wants_memory)) { any = true; break; };
+        if (!any) return;
+        const sample = self.sampler.sample() catch return orelse return;
+        var cpu_buffer: [8192]u8 = undefined;
+        const cpu = providers.formatCpu(sample.cpu, &cpu_buffer) catch return;
+        var memory_buffer: [512]u8 = undefined;
+        const memory = providers.formatMemory(sample.memory, &memory_buffer) catch return;
+        const cpu_changed = !std.mem.eql(u8, cpu, self.previous_cpu[0..self.previous_cpu_len]);
+        const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
+        for (&self.slots) |*slot| {
+            if (slot.pipe == invalid_handle) continue;
+            if (slot.wants_cpu and (!slot.cpu_sent or cpu_changed) and writePipe(slot.pipe, cpu)) slot.cpu_sent = true;
+            if (slot.wants_memory and (!slot.memory_sent or memory_changed) and writePipe(slot.pipe, memory)) slot.memory_sent = true;
+        }
+        @memcpy(self.previous_cpu[0..cpu.len], cpu);
+        self.previous_cpu_len = cpu.len;
+        @memcpy(self.previous_memory[0..memory.len], memory);
+        self.previous_memory_len = memory.len;
+    }
+
+    fn writeStatus(self: *Host, now_ms: u64) void {
+        var output: std.Io.Writer.Allocating = .init(self.allocator);
+        defer output.deinit();
+        var json: std.json.Stringify = .{ .writer = &output.writer, .options = .{ .whitespace = .indent_2 } };
+        json.beginObject() catch return;
+        json.objectField("hostPid") catch return;
+        json.write(c.GetCurrentProcessId()) catch return;
+        json.objectField("widgets") catch return;
+        json.beginArray() catch return;
+        for (&self.slots) |*slot| {
+            if (!slot.used) continue;
+            const average = slot.averages();
+            json.beginObject() catch return;
+            json.objectField("name") catch return;
+            json.write(slot.name()) catch return;
+            json.objectField("pid") catch return;
+            json.write(slot.pid) catch return;
+            json.objectField("privateMb") catch return;
+            json.write(average.private_mb) catch return;
+            json.objectField("cpuPercent") catch return;
+            json.write(average.cpu) catch return;
+            json.objectField("uptimeSeconds") catch return;
+            json.write(if (slot.process != null) (now_ms -| slot.started_ms) / 1000 else 0) catch return;
+            json.objectField("state") catch return;
+            json.write(@tagName(slot.state)) catch return;
+            json.objectField("reason") catch return;
+            json.write(slot.reason()) catch return;
+            json.endObject() catch return;
+        }
+        json.endArray() catch return;
+        json.endObject() catch return;
+        var cwd = std.Io.Dir.cwd();
+        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch return;
+        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
+    }
+
+    fn ensureBundle(self: *Host, source: []const u8) !void {
+        const source_path = try std.fs.path.join(self.allocator, &.{ source, "widget.tsx" });
+        defer self.allocator.free(source_path);
+        const bundle_path = try std.fs.path.join(self.allocator, &.{ source, "dist", "bundle.js" });
+        defer self.allocator.free(bundle_path);
+        const manifest_path = try std.fs.path.join(self.allocator, &.{ source, "dist", "widget.json" });
+        defer self.allocator.free(manifest_path);
+        const source_stat = try std.Io.Dir.cwd().statFile(self.io, source_path, .{});
+        const bundle_stat = std.Io.Dir.cwd().statFile(self.io, bundle_path, .{}) catch null;
+        const manifest_stat = std.Io.Dir.cwd().statFile(self.io, manifest_path, .{}) catch null;
+        if (bundle_stat != null and manifest_stat != null and bundle_stat.?.mtime.nanoseconds >= source_stat.mtime.nanoseconds) return;
+        const result = try std.process.run(self.allocator, self.io, .{
+            .argv = &.{ "node", self.cli_script, "bundle", source },
+            .stdout_limit = .limited(64 * 1024),
+            .stderr_limit = .limited(64 * 1024),
+            .create_no_window = true,
+        });
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+        switch (result.term) {
+            .exited => |code| if (code != 0) return error.BundleFailed,
+            else => return error.BundleFailed,
+        }
+    }
+
+    fn artifactMtime(self: *Host, source: []const u8) i128 {
+        const path = std.fs.path.join(self.allocator, &.{ source, "dist", "bundle.js" }) catch return 0;
+        defer self.allocator.free(path);
+        const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return 0;
+        return stat.mtime.nanoseconds;
+    }
+};
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = std.heap.page_allocator;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--signal-down")) return signalEvent(shutdown_event_name);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--signal-reload")) return signalEvent(reload_event_name);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--probe")) {
+        const handle = c.OpenMutexW(c.SYNCHRONIZE, 0, mutex_name);
+        if (handle == null) return error.HostNotRunning;
+        _ = c.CloseHandle(handle);
+        return;
+    }
+    const mutex = c.CreateMutexW(null, 0, mutex_name) orelse return error.CreateMutexFailed;
+    defer _ = c.CloseHandle(mutex);
+    if (c.GetLastError() == c.ERROR_ALREADY_EXISTS) return;
+    const shutdown_event = c.CreateEventW(null, 1, 0, shutdown_event_name) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(shutdown_event);
+    const reload_event = c.CreateEventW(null, 0, 0, reload_event_name) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(reload_event);
+    const local_app_data = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
+    const directory = try std.fs.path.join(allocator, &.{ local_app_data, "weaver" });
+    defer allocator.free(directory);
+    try std.Io.Dir.cwd().createDirPath(init.io, directory);
+    const registry_path = try std.fs.path.join(allocator, &.{ directory, "registry.json" });
+    defer allocator.free(registry_path);
+    const status_path = try std.fs.path.join(allocator, &.{ directory, "status.json" });
+    defer allocator.free(status_path);
+    const status_temp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{status_path});
+    defer allocator.free(status_temp_path);
+    const repo_root = try repositoryRoot(allocator);
+    defer allocator.free(repo_root);
+    const runtime_exe = try std.fs.path.join(allocator, &.{ repo_root, "runtime", "zig-out", "bin", "weaver-widget.exe" });
+    defer allocator.free(runtime_exe);
+    const cli_script = try std.fs.path.join(allocator, &.{ repo_root, "cli", "dist", "index.js" });
+    defer allocator.free(cli_script);
+    var host: Host = .{
+        .io = init.io,
+        .allocator = allocator,
+        .repo_root = repo_root,
+        .registry_path = registry_path,
+        .status_path = status_path,
+        .status_temp_path = status_temp_path,
+        .runtime_exe = runtime_exe,
+        .cli_script = cli_script,
+    };
+    try host.loadRegistry();
+    var next_provider_ms: u64 = 0;
+    var next_cost_ms: u64 = 0;
+    while (true) {
+        const handles = [_]c.HANDLE{ shutdown_event, reload_event };
+        const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, 250);
+        if (wait == c.WAIT_OBJECT_0) break;
+        if (wait == c.WAIT_OBJECT_0 + 1) host.loadRegistry() catch {};
+        const now = c.GetTickCount64();
+        host.supervise(now);
+        if (now >= next_provider_ms) {
+            host.sampleProviders();
+            next_provider_ms = now + 1000;
+        }
+        if (now >= next_cost_ms) {
+            host.sampleCosts(now);
+            host.writeStatus(now);
+            next_cost_ms = now + 2000;
+        }
+    }
+    for (&host.slots) |*slot| if (slot.process != null) host.stopSlot(slot, true);
+    host.writeStatus(c.GetTickCount64());
+}
+
+fn signalEvent(name: [*:0]const u16) !void {
+    const event = c.OpenEventW(c.EVENT_MODIFY_STATE, 0, name) orelse return error.HostNotRunning;
+    defer _ = c.CloseHandle(event);
+    if (c.SetEvent(event) == 0) return error.SignalFailed;
+}
+
+fn repositoryRoot(allocator: std.mem.Allocator) ![]u8 {
+    var path_w: [32768]u16 = undefined;
+    const length = c.GetModuleFileNameW(null, &path_w, path_w.len);
+    if (length == 0 or length == path_w.len) return error.ExecutablePathFailed;
+    const path = try std.unicode.utf16LeToUtf8Alloc(allocator, path_w[0..length]);
+    defer allocator.free(path);
+    const bin_dir = std.fs.path.dirname(path) orelse return error.ExecutablePathFailed;
+    const zig_out = std.fs.path.dirname(bin_dir) orelse return error.ExecutablePathFailed;
+    const host_dir = std.fs.path.dirname(zig_out) orelse return error.ExecutablePathFailed;
+    const repo = std.fs.path.dirname(host_dir) orelse return error.ExecutablePathFailed;
+    return allocator.dupe(u8, repo);
+}
+
+fn findSlot(slots: *[max_widgets]Slot, name: []const u8) ?usize {
+    for (slots, 0..) |*slot, index| if (slot.used and std.mem.eql(u8, slot.name(), name)) return index;
+    return null;
+}
+
+fn findFreeSlot(slots: *[max_widgets]Slot) ?usize {
+    for (slots, 0..) |*slot, index| if (!slot.used) return index;
+    return null;
+}
+
+fn processTicks(process: c.HANDLE) u64 {
+    var created: c.FILETIME = undefined;
+    var exited: c.FILETIME = undefined;
+    var kernel: c.FILETIME = undefined;
+    var user: c.FILETIME = undefined;
+    if (c.GetProcessTimes(process, &created, &exited, &kernel, &user) == 0) return 0;
+    return fileTime(kernel) + fileTime(user);
+}
+
+fn fileTime(value: c.FILETIME) u64 {
+    return (@as(u64, value.dwHighDateTime) << 32) | value.dwLowDateTime;
+}
+
+fn writePipe(pipe: c.HANDLE, bytes: []const u8) bool {
+    var written: c.DWORD = 0;
+    return c.WriteFile(pipe, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
+}
+
+fn connectPipe(pipe: c.HANDLE, process: c.HANDLE, timeout_ms: u64) bool {
+    const deadline = c.GetTickCount64() + timeout_ms;
+    while (true) {
+        if (c.ConnectNamedPipe(pipe, null) != 0 or c.GetLastError() == c.ERROR_PIPE_CONNECTED) break;
+        const pipe_error = c.GetLastError();
+        if (pipe_error != c.ERROR_PIPE_LISTENING and pipe_error != c.ERROR_NO_DATA) return false;
+        if (c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0 or c.GetTickCount64() >= deadline) return false;
+        c.Sleep(10);
+    }
+    var mode: c.DWORD = c.PIPE_READMODE_BYTE | c.PIPE_WAIT;
+    return c.SetNamedPipeHandleState(pipe, &mode, null, null) != 0;
+}
+
+fn closeWindowsForProcess(pid: u32) void {
+    const Callback = struct {
+        fn call(window: c.HWND, process_id: c.LPARAM) callconv(.c) c.BOOL {
+            var owner: c.DWORD = 0;
+            _ = c.GetWindowThreadProcessId(window, &owner);
+            if (owner == @as(u32, @intCast(process_id))) _ = c.PostMessageW(window, c.WM_CLOSE, 0, 0);
+            return 1;
+        }
+    };
+    _ = c.EnumWindows(Callback.call, @intCast(pid));
+}
+
+test {
+    _ = registry;
+    _ = backoff;
+    _ = providers;
+}
