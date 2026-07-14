@@ -15,7 +15,18 @@ export default widget({
   return (
     <column class="w-[360px] h-[142px] p-4 gap-3 bg-[#10131c]/90 rounded-2xl">
       <row class="w-[328px] justify-between items-center">
-        <text class="text-xs text-[#8b5cf6] font-semibold">NOW PLAYING</text>
+        <row class="gap-2 items-center">
+          <canvas
+            class="w-[14px] h-[14px]"
+            fps={media.playing ? 30 : 0}
+            onFrame={(ctx, frame) => {
+              ctx.clear();
+              const pulse = media.playing ? 0.72 + Math.sin(frame.t * Math.PI * 2) * 0.18 : 0.45;
+              ctx.fillCircle(7, 7, 5 * pulse, "#8b5cf6");
+            }}
+          />
+          <text class="text-xs text-[#8b5cf6] font-semibold">NOW PLAYING</text>
+        </row>
         <text class="text-xs text-[#94a3b8]">{media.playing ? "PLAYING" : "PAUSED"}</text>
       </row>
       <column class="w-[328px] gap-1">

@@ -122,9 +122,13 @@ interface CanvasBinding {
   lastT?: number;
   nextT?: number;
   nativeTimestampStarted?: boolean;
+  batch: Float64Array;
+  batchLength: number;
+  active: boolean;
+  ctx: CanvasCtx;
 }
 const canvases = new Map<number, CanvasBinding>();
-const colorCache = new Map<string, number>();
+const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
 export function h(type: VNode["type"], props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
@@ -436,8 +440,8 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
     next.src = props.src;
   } else if (instance.type === "canvas") {
     if (typeof props.onFrame !== "function") throw new Error("<canvas> requires onFrame={(ctx, frame) => ...}");
-    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps <= 0)) {
-      throw new Error("<canvas> fps must be a positive number when provided");
+    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps < 0)) {
+      throw new Error("<canvas> fps must be zero or a positive number when provided");
     }
     next.onFrame = props.onFrame as (ctx: CanvasCtx, frame: CanvasFrame) => void;
     next.fps = props.fps === undefined ? undefined : Math.min(60, props.fps as number);
@@ -472,14 +476,22 @@ function unmount(instance: Instance): void {
 
 function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: number | undefined, width: number, height: number): void {
   let binding = canvases.get(id);
+  const mounted = binding === undefined;
   const intervalChanged = binding?.fps !== fps;
   if (!binding) {
-    binding = { onFrame, fps, timerId: 0, surfaceClock: false, width, height };
+    binding = {
+      onFrame, fps, timerId: 0, surfaceClock: false, width, height,
+      batch: new Float64Array(4096), batchLength: 0, active: false,
+      ctx: undefined as unknown as CanvasCtx,
+    };
+    binding.ctx = createCanvasContext(binding);
     canvases.set(id, binding);
   } else {
+    const sizeChanged = binding.width !== width || binding.height !== height;
     binding.onFrame = onFrame;
     binding.width = width;
     binding.height = height;
+    if (sizeChanged) binding.ctx = createCanvasContext(binding);
   }
   if (intervalChanged && binding.timerId !== 0) {
     native.clearInterval(binding.timerId);
@@ -496,6 +508,10 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     binding.nativeTimestampStarted = false;
   }
   binding.fps = fps;
+  if (fps === 0) {
+    if (mounted) drawCanvasFrame(id, Date.now() / 1000);
+    return;
+  }
   if (fps === undefined) {
     drawCanvasFrame(id, Date.now() / 1000);
     return;
@@ -509,19 +525,21 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     return;
   }
   if (binding.timerId === 0) {
-    // The native timer requests a surface frame; the surface scheduler then
-    // presents on its 60 Hz grid. A short wake lead keeps sub-60 callbacks on
-    // their requested glass cadence; max-rate canvases use the completion
-    // clock above and need no independent timer.
-    binding.timerId = native.setInterval(Math.max(1, Math.floor(1000 / fps - 1000 / 110)));
-    native.onTimer(binding.timerId, (timestampSeconds) => drawTimedCanvasFrame(id, timestampSeconds ?? Date.now() / 1000));
+    // Sub-vsync canvases own one exact-rate SDK effect timer. Provider frames
+    // are drained immediately before this callback in the same native update,
+    // so their state and canvas commands commit as one generation. The Win32
+    // host uses a timer queue below 40 ms; the old one-quantum lead over-drove
+    // that precise clock and made a requested 30 Hz canvas contend at ~50 Hz.
+    const interval = Math.max(1, Math.round(1000 / fps));
+    binding.timerId = native.setInterval(interval);
+    native.onTimer(binding.timerId, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds ?? Date.now() / 1000));
     drawCanvasFrame(id, Date.now() / 1000);
   }
 }
 
 function drawTimedCanvasFrame(id: number, timestampSeconds: number): void {
   const binding = canvases.get(id);
-  if (!binding || binding.fps === undefined) return;
+  if (!binding || binding.fps === undefined || binding.fps === 0) return;
   const period = 1 / binding.fps;
   if (binding.nextT === undefined) binding.nextT = timestampSeconds;
   if (timestampSeconds + 0.000_001 < binding.nextT) return;
@@ -550,53 +568,84 @@ function drawCanvasFrame(id: number, nativeTimestamp?: number): void {
     : Date.now() / 1000;
   const dt = binding.lastT === undefined ? 0 : Math.max(0, t - binding.lastT);
   binding.lastT = t;
-  const batch: number[] = [];
-  let active = true;
-  const ensureActive = (): void => { if (!active) throw new Error("CanvasCtx methods may only be called inside onFrame"); };
-  const number = (value: number, label: string): number => {
-    if (!Number.isFinite(value)) throw new Error(`CanvasCtx ${label} must be finite`);
-    return value;
+  binding.batchLength = 0;
+  binding.active = true;
+  try {
+    binding.onFrame(binding.ctx, { t, dt });
+  } finally {
+    binding.active = false;
+  }
+  // Preserve a real empty canvas on glass without making the GPU transport
+  // treat the frame as an unsupported packet. The zero-area transparent rect
+  // is visually inert in both renderers but gives the retained packet an
+  // explicit draw command that clears stale immediate instances.
+  if (binding.batchLength === 2 && binding.batch[0] === 0) {
+    const at = binding.batchLength;
+    binding.batch[at] = 1; binding.batch[at + 1] = 0; binding.batch[at + 2] = 0;
+    binding.batch[at + 3] = 0; binding.batch[at + 4] = 0; binding.batch[at + 5] = 0;
+    binding.batchLength += 6;
+  }
+  native.setCanvasCommands(id, binding.batch.subarray(0, binding.batchLength));
+}
+
+/// Keep the command writer and its bounded Float64Array stable for the life of
+/// the canvas. A frame resets only the write cursor, avoiding four short-lived
+/// JS allocations per present while retaining the same compact native wire.
+function createCanvasContext(binding: CanvasBinding): CanvasCtx {
+  const ensureActive = (): void => { if (!binding.active) throw new Error("CanvasCtx methods may only be called inside onFrame"); };
+  const reserve = (count: number): number => {
+    if (binding.batchLength + count > binding.batch.length) throw new Error("Canvas command batch exceeds the native limit");
+    const offset = binding.batchLength;
+    binding.batchLength += count;
+    return offset;
   };
-  const ctx: CanvasCtx = Object.freeze({
+  return Object.freeze({
     width: binding.width,
     height: binding.height,
     clear(color = "#00000000"): void {
       ensureActive();
-      batch.push(0, packedColor(color));
+      const at = reserve(2);
+      binding.batch[at] = 0; binding.batch[at + 1] = packedColor(color);
     },
     fillRect(x: number, y: number, rectWidth: number, rectHeight: number, color: string): void {
       ensureActive();
-      batch.push(1, number(x, "x"), number(y, "y"), number(rectWidth, "width"), number(rectHeight, "height"), packedColor(color));
+      const at = reserve(6);
+      binding.batch[at] = 1; binding.batch[at + 1] = x; binding.batch[at + 2] = y;
+      binding.batch[at + 3] = rectWidth; binding.batch[at + 4] = rectHeight; binding.batch[at + 5] = packedColor(color);
     },
     fillRoundRect(x: number, y: number, rectWidth: number, rectHeight: number, radius: number, color: string): void {
       ensureActive();
-      batch.push(2, number(x, "x"), number(y, "y"), number(rectWidth, "width"), number(rectHeight, "height"), number(radius, "radius"), packedColor(color));
+      const at = reserve(7);
+      binding.batch[at] = 2; binding.batch[at + 1] = x; binding.batch[at + 2] = y;
+      binding.batch[at + 3] = rectWidth; binding.batch[at + 4] = rectHeight;
+      binding.batch[at + 5] = radius; binding.batch[at + 6] = packedColor(color);
     },
     fillCircle(cx: number, cy: number, radius: number, color: string): void {
       ensureActive();
-      batch.push(3, number(cx, "cx"), number(cy, "cy"), number(radius, "radius"), packedColor(color));
+      const at = reserve(5);
+      binding.batch[at] = 3; binding.batch[at + 1] = cx; binding.batch[at + 2] = cy;
+      binding.batch[at + 3] = radius; binding.batch[at + 4] = packedColor(color);
     },
     line(x1: number, y1: number, x2: number, y2: number, lineWidth: number, color: string): void {
       ensureActive();
-      batch.push(4, number(x1, "x1"), number(y1, "y1"), number(x2, "x2"), number(y2, "y2"), number(lineWidth, "width"), packedColor(color));
+      const at = reserve(7);
+      binding.batch[at] = 4; binding.batch[at + 1] = x1; binding.batch[at + 2] = y1;
+      binding.batch[at + 3] = x2; binding.batch[at + 4] = y2;
+      binding.batch[at + 5] = lineWidth; binding.batch[at + 6] = packedColor(color);
     },
     polyline(points: number[], lineWidth: number, color: string): void {
       ensureActive();
       if (!Array.isArray(points) || points.length < 4 || points.length % 2 !== 0) throw new Error("CanvasCtx polyline points must be a flat [x,y,...] array with at least two points");
-      batch.push(5, number(lineWidth, "width"), packedColor(color), points.length / 2);
-      for (const point of points) batch.push(number(point, "point"));
+      const at = reserve(4 + points.length);
+      binding.batch[at] = 5; binding.batch[at + 1] = lineWidth;
+      binding.batch[at + 2] = packedColor(color); binding.batch[at + 3] = points.length / 2;
+      for (let index = 0; index < points.length; index += 1) binding.batch[at + 4 + index] = points[index];
     },
   });
-  try {
-    binding.onFrame(ctx, { t, dt });
-  } finally {
-    active = false;
-  }
-  native.setCanvasCommands(id, Float64Array.from(batch));
 }
 
 function packedColor(source: string): number {
-  const cached = colorCache.get(source);
+  const cached = colorCache[source];
   if (cached !== undefined) return cached;
   if (typeof source !== "string") throw new Error("Canvas colors must be #rgb, #rrggbb, or #rrggbbaa");
   let hex: string;
@@ -610,7 +659,7 @@ function packedColor(source: string): number {
     throw new Error(`Invalid canvas color "${source}": use #rgb, #rrggbb, or #rrggbbaa`);
   }
   const packed = Number.parseInt(hex, 16) >>> 0;
-  colorCache.set(source, packed);
+  colorCache[source] = packed;
   return packed;
 }
 

@@ -11,7 +11,7 @@ export interface WidgetStatus {
   threads?: number;
   backend: "gpu" | "software" | "-";
   uptimeSeconds: number;
-  state: "disabled" | "starting" | "running" | "backoff" | "stopped";
+  state: "disabled" | "starting" | "running" | "backoff" | "stopped" | "source missing";
   reason: string;
 }
 export interface StatusDocument { hostPid: number; widgets: WidgetStatus[] }

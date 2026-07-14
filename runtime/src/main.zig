@@ -22,7 +22,9 @@ pub const Model = struct {
 };
 
 const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
-fn bridgeTimerCapacity() usize { return @import("bridge.zig").max_timers; }
+fn bridgeTimerCapacity() usize {
+    return @import("bridge.zig").max_timers;
+}
 const max_images: usize = 16;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
@@ -40,7 +42,6 @@ const WidgetUi = WidgetApp.Ui;
 const Effects = WidgetApp.Effects;
 var rendered_presents: u64 = 0;
 var first_render_ns: u64 = 0;
-var last_canvas_revision: u64 = 0;
 var logged_backend: bool = false;
 
 fn initEffects(model: *Model, effects: *Effects) void {
@@ -72,6 +73,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 (model.engine orelse return).drainProviders() catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
+                syncTimers(model, effects);
                 return;
             }
             if (model.provider_poll_interval_ms <= 33) {
@@ -112,6 +114,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             (model.engine orelse return).fireCanvasFrames(timestamp_ns) catch |err| {
                 std.log.err("widget canvas frame callback failed: {s}", .{@errorName(err)});
             };
+            syncTimers(model, effects);
         },
     }
 }
@@ -172,10 +175,16 @@ fn syncTimers(model: *Model, effects: *Effects) void {
         }
     };
     const needs_provider_timer = engine.hasHostProvider() and !(model.provider_poll_interval_ms <= 33 and has_fast_clock);
+    // Audio providers need a low-latency drain while a canvas is active, but
+    // silence deliberately stops that clock. Polling the empty pipe ring at
+    // 30 Hz was the measured 3.75-4.48% hosted-idle residual. A 1 Hz resume
+    // probe makes silence effectively idle; the first resumed frame re-arms
+    // the canvas clock and provider delivery returns to its 30 Hz path.
+    const provider_interval_ms = if (model.provider_poll_interval_ms <= 33 and !has_fast_clock) @as(u64, 1000) else model.provider_poll_interval_ms;
     if (needs_provider_timer and !model.provider_poll_armed) {
         effects.startTimer(.{
             .key = provider_poll_key,
-            .interval_ms = model.provider_poll_interval_ms,
+            .interval_ms = provider_interval_ms,
             .mode = .repeating,
             .on_fire = Effects.timerMsg(.timer),
         });
@@ -207,19 +216,20 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         logged_backend = true;
         std.log.info("widget renderer backend={s}", .{@tagName(frame.backend)});
     }
-    // A present completion produces a second frame event carrying the same
-    // retained-canvas revision. M0 counted both events as presents; revision
-    // edges identify actual newly rendered display lists at this callback.
-    if (frame.canvas_revision == 0 or frame.canvas_revision == last_canvas_revision) return null;
-    last_canvas_revision = frame.canvas_revision;
+    const engine = model.engine orelse return null;
+    const canvas_clock = engine.hasCanvasFrames();
+    if (!canvas_clock) return null;
+    // Hybrid presentation now rejects a clean completion revision before it
+    // reaches the renderer. The completion event itself is the 60 Hz canvas
+    // clock, so do not suppress it by comparing the pre-present revision in
+    // the platform event; doing so parks max-rate canvases after frame one.
     if (first_render_ns == 0) first_render_ns = frame.timestamp_ns;
     rendered_presents += 1;
     if (rendered_presents % 300 == 0) {
         const elapsed_ns = frame.timestamp_ns -| first_render_ns;
         std.log.info("widget present: {d} rendered frames in {d} ms", .{ rendered_presents, elapsed_ns / std.time.ns_per_ms });
     }
-    const engine = model.engine orelse return null;
-    return if (engine.hasCanvasFrames()) Msg{ .canvas_frame = frame.timestamp_ns } else null;
+    return Msg{ .canvas_frame = frame.timestamp_ns };
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {

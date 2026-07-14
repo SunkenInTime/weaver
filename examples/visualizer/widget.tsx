@@ -1,4 +1,4 @@
-import { useProvider, widget } from "@weaver/sdk";
+import { useEffect, useProvider, useState, widget } from "@weaver/sdk";
 
 const barCount = 28;
 const levels = Array.from({ length: barCount }, () => 0);
@@ -9,20 +9,26 @@ const colors = [
 
 export default widget({
   name: "Visualizer",
-  size: [288, 84],
+  size: [288, 110],
   anchor: { corner: "top-left", offset: [24, 24] },
   layer: "desktop",
   subscribe: ["audio"],
 }, () => {
   const audio = useProvider("audio");
+  const signalActive = audio.bands.some((value) => value > 0.002);
+  const [active, setActive] = useState(signalActive);
+  useEffect(() => {
+    if (signalActive) setActive(true);
+  }, [signalActive]);
   return (
-    <canvas
-      class="w-[288px] h-[84px]"
-      fps={30}
-      onFrame={(ctx, frame) => {
+    <column class="w-[288px] h-[110px] p-3 gap-2 bg-[#10131c]/85 rounded-2xl">
+      <text class="text-xs text-[#94a3b8] font-semibold">SPECTRUM</text>
+      <canvas
+        class="w-[264px] h-[70px]"
+        fps={active ? 30 : 0}
+        onFrame={(ctx, frame) => {
         ctx.clear();
-        ctx.fillRoundRect(0, 0, ctx.width, ctx.height, 18, "#10131cdb");
-        const inset = 14;
+        const inset = 2;
         const gap = 2.5;
         const width = (ctx.width - inset * 2 - gap * (barCount - 1)) / barCount;
         const maxHeight = ctx.height - inset * 2;
@@ -39,7 +45,9 @@ export default widget({
           const x = inset + index * (width + gap);
           ctx.fillRoundRect(x, ctx.height - inset - height, width, height, width / 2, colors[Math.floor(index * colors.length / barCount)]);
         }
+        if (!signalActive && levels.every((value) => value < 0.008)) setActive(false);
       }}
-    />
+      />
+    </column>
   );
 });
