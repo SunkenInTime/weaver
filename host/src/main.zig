@@ -24,7 +24,11 @@ const max_name_bytes: usize = 128;
 const max_path_bytes: usize = 2048;
 const invalid_handle = c.INVALID_HANDLE_VALUE;
 
-const RunState = enum { disabled, starting, running, backoff, stopped };
+const RunState = enum { disabled, starting, running, backoff, stopped, source_missing };
+
+fn runStateLabel(state: RunState) []const u8 {
+    return if (state == .source_missing) "source missing" else @tagName(state);
+}
 
 const Slot = struct {
     used: bool = false,
@@ -188,7 +192,19 @@ const Host = struct {
     fn supervise(self: *Host, now_ms: u64) void {
         self.superviseRenderer(now_ms);
         for (&self.slots) |*slot| {
-            if (!slot.used or !slot.enabled or slot.state == .stopped) continue;
+            if (!slot.used or !slot.enabled) continue;
+            if (!self.sourceExists(slot.source())) {
+                if (slot.process != null) self.stopSlot(slot, true);
+                slot.state = .source_missing;
+                slot.next_restart_ms = 0;
+                slot.setReason("registered source path does not exist", .{});
+                continue;
+            }
+            if (slot.state == .source_missing) {
+                slot.state = .starting;
+                slot.reason_len = 0;
+            }
+            if (slot.state == .stopped) continue;
             if (slot.process) |process| {
                 if (c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0) self.handleExit(slot, now_ms);
                 continue;
@@ -297,7 +313,7 @@ const Host = struct {
     fn rendererDesired(self: *const Host) bool {
         if (self.force_software) return false;
         for (&self.slots) |slot| {
-            if (slot.used and slot.enabled and slot.wants_gpu and slot.state != .stopped) return true;
+            if (slot.used and slot.enabled and slot.wants_gpu and slot.state != .stopped and slot.state != .source_missing) return true;
         }
         return false;
     }
@@ -365,6 +381,12 @@ const Host = struct {
         var exit_code: c.DWORD = 1;
         _ = c.GetExitCodeProcess(slot.process, &exit_code);
         self.closeProcess(slot);
+        if (!self.sourceExists(slot.source())) {
+            slot.state = .source_missing;
+            slot.next_restart_ms = 0;
+            slot.setReason("registered source path does not exist", .{});
+            return;
+        }
         self.recordCrash(slot, now_ms, exit_code);
     }
 
@@ -584,7 +606,7 @@ const Host = struct {
             json.objectField("uptimeSeconds") catch return;
             json.write(if (slot.process != null) (now_ms -| slot.started_ms) / 1000 else 0) catch return;
             json.objectField("state") catch return;
-            json.write(@tagName(slot.state)) catch return;
+            json.write(runStateLabel(slot.state)) catch return;
             json.objectField("reason") catch return;
             json.write(slot.reason()) catch return;
             json.endObject() catch return;
@@ -627,7 +649,16 @@ const Host = struct {
         const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return 0;
         return stat.mtime.nanoseconds;
     }
+
+    fn sourceExists(self: *Host, source: []const u8) bool {
+        _ = std.Io.Dir.cwd().statFile(self.io, source, .{}) catch return false;
+        return true;
+    }
 };
+
+test "source-missing state has the status contract spelling" {
+    try std.testing.expectEqualStrings("source missing", runStateLabel(.source_missing));
+}
 
 pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
