@@ -9,6 +9,7 @@ const c = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cInclude("windows.h");
     @cInclude("psapi.h");
+    @cInclude("tlhelp32.h");
 });
 
 const mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostSingletonV2");
@@ -16,6 +17,8 @@ const shutdown_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\Weave
 const reload_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadV2");
 const env_pipe_name = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_HOST_PIPE");
 const env_backend_file = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_BACKEND_FILE");
+const env_renderer_pipe = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_PIPE");
+const env_renderer_log = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_LOG");
 const max_widgets: usize = 32;
 const max_name_bytes: usize = 128;
 const max_path_bytes: usize = 2048;
@@ -38,6 +41,7 @@ const Slot = struct {
     wants_memory: bool = false,
     wants_audio: bool = false,
     wants_media: bool = false,
+    wants_gpu: bool = false,
     cpu_sent: bool = false,
     memory_sent: bool = false,
     media_sent: bool = false,
@@ -92,6 +96,32 @@ const Slot = struct {
     }
 };
 
+const RendererState = struct {
+    process: c.HANDLE = null,
+    pid: u32 = 0,
+    started_ms: u64 = 0,
+    next_restart_ms: u64 = 0,
+    crash_count: usize = 0,
+    previous_process_ticks: u64 = 0,
+    previous_sample_ms: u64 = 0,
+    private_samples: [15]u64 = [_]u64{0} ** 15,
+    cpu_samples: [15]f64 = [_]f64{0} ** 15,
+    sample_count: usize = 0,
+    sample_cursor: usize = 0,
+
+    fn averages(self: *const RendererState) struct { private_mb: f64, cpu: f64 } {
+        if (self.sample_count == 0) return .{ .private_mb = 0, .cpu = 0 };
+        var private_total: u64 = 0;
+        var cpu_total: f64 = 0;
+        for (self.private_samples[0..self.sample_count]) |value| private_total += value;
+        for (self.cpu_samples[0..self.sample_count]) |value| cpu_total += value;
+        return .{
+            .private_mb = @as(f64, @floatFromInt(private_total)) / @as(f64, @floatFromInt(self.sample_count)) / (1024.0 * 1024.0),
+            .cpu = cpu_total / @as(f64, @floatFromInt(self.sample_count)),
+        };
+    }
+};
+
 const Host = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
@@ -100,7 +130,12 @@ const Host = struct {
     status_path: []const u8,
     status_temp_path: []const u8,
     runtime_exe: []const u8,
+    renderer_exe: []const u8,
+    renderer_pipe_name: []const u8,
+    renderer_log_path: []const u8,
     cli_script: []const u8,
+    force_software: bool,
+    renderer: RendererState = .{},
     slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
     sampler: providers.Sampler = .{},
     audio_provider: audio.Provider = .{},
@@ -113,6 +148,9 @@ const Host = struct {
     previous_media_len: usize = 0,
     audio_pipe_frames: u64 = 0,
     media_pipe_frames: u64 = 0,
+    thread_sample_ms: u64 = 0,
+    slot_threads: [max_widgets]u32 = [_]u32{0} ** max_widgets,
+    renderer_threads: u32 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -148,6 +186,7 @@ const Host = struct {
     }
 
     fn supervise(self: *Host, now_ms: u64) void {
+        self.superviseRenderer(now_ms);
         for (&self.slots) |*slot| {
             if (!slot.used or !slot.enabled or slot.state == .stopped) continue;
             if (slot.process) |process| {
@@ -161,6 +200,7 @@ const Host = struct {
                 };
             }
         }
+        self.superviseRenderer(now_ms);
     }
 
     fn launch(self: *Host, slot: *Slot, now_ms: u64) !void {
@@ -171,19 +211,24 @@ const Host = struct {
         defer self.allocator.free(manifest_path);
         const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, manifest_path, self.allocator, .limited(64 * 1024));
         defer self.allocator.free(manifest_bytes);
-        const Manifest = struct { subscribe: []const []const u8 = &.{} };
+        const Manifest = struct {
+            subscribe: []const []const u8 = &.{},
+            renderBackend: []const u8 = "software",
+        };
         const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
         defer manifest.deinit();
         slot.wants_cpu = false;
         slot.wants_memory = false;
         slot.wants_audio = false;
         slot.wants_media = false;
+        slot.wants_gpu = !self.force_software and std.mem.eql(u8, manifest.value.renderBackend, "gpu");
         for (manifest.value.subscribe) |name| {
             if (std.mem.eql(u8, name, "cpu")) slot.wants_cpu = true;
             if (std.mem.eql(u8, name, "memory")) slot.wants_memory = true;
             if (std.mem.eql(u8, name, "audio")) slot.wants_audio = true;
             if (std.mem.eql(u8, name, "media")) slot.wants_media = true;
         }
+        if (slot.wants_gpu) self.ensureRenderer(now_ms) catch {};
         var pipe_name_buffer: [256]u8 = undefined;
         var pipe_name: []const u8 = &.{};
         if (slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media) {
@@ -205,6 +250,11 @@ const Host = struct {
             defer self.allocator.free(value_w);
             if (c.SetEnvironmentVariableW(env_pipe_name, value_w.ptr) == 0) return error.SetEnvironmentFailed;
         }
+        if (slot.wants_gpu) {
+            const renderer_pipe_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, self.renderer_pipe_name);
+            defer self.allocator.free(renderer_pipe_w);
+            if (c.SetEnvironmentVariableW(env_renderer_pipe, renderer_pipe_w.ptr) == 0) return error.SetEnvironmentFailed;
+        }
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
         slot.backend_path_len = backend_path.len;
@@ -214,6 +264,7 @@ const Host = struct {
         if (c.SetEnvironmentVariableW(env_backend_file, backend_path_w.ptr) == 0) return error.SetEnvironmentFailed;
         defer {
             if (pipe_name.len > 0) _ = c.SetEnvironmentVariableW(env_pipe_name, null);
+            if (slot.wants_gpu) _ = c.SetEnvironmentVariableW(env_renderer_pipe, null);
             _ = c.SetEnvironmentVariableW(env_backend_file, null);
         }
         var startup: c.STARTUPINFOW = std.mem.zeroes(c.STARTUPINFOW);
@@ -223,6 +274,7 @@ const Host = struct {
         _ = c.CloseHandle(process_info.hThread);
         slot.process = process_info.hProcess;
         slot.pid = process_info.dwProcessId;
+        self.thread_sample_ms = 0;
         if (slot.pipe != invalid_handle) {
             if (!connectPipe(slot.pipe, slot.process, 5_000)) {
                 _ = c.TerminateProcess(slot.process, 1);
@@ -240,6 +292,73 @@ const Host = struct {
         slot.cpu_sent = false;
         slot.memory_sent = false;
         slot.media_sent = false;
+    }
+
+    fn rendererDesired(self: *const Host) bool {
+        if (self.force_software) return false;
+        for (&self.slots) |slot| {
+            if (slot.used and slot.enabled and slot.wants_gpu and slot.state != .stopped) return true;
+        }
+        return false;
+    }
+
+    fn superviseRenderer(self: *Host, now_ms: u64) void {
+        if (self.renderer.process) |process| {
+            if (c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0) {
+                _ = c.CloseHandle(process);
+                self.renderer.process = null;
+                self.renderer.pid = 0;
+                self.thread_sample_ms = 0;
+                self.renderer.crash_count += 1;
+                const delays = [_]u64{ 1000, 5000, 30_000 };
+                self.renderer.next_restart_ms = now_ms + delays[@min(self.renderer.crash_count - 1, delays.len - 1)];
+            } else if (!self.rendererDesired()) {
+                _ = c.TerminateProcess(process, 0);
+                _ = c.WaitForSingleObject(process, 1000);
+                _ = c.CloseHandle(process);
+                self.renderer = .{};
+                self.thread_sample_ms = 0;
+            }
+        }
+        if (self.renderer.process == null and self.rendererDesired() and now_ms >= self.renderer.next_restart_ms) {
+            self.ensureRenderer(now_ms) catch {
+                self.renderer.next_restart_ms = now_ms + 1000;
+            };
+        }
+    }
+
+    fn ensureRenderer(self: *Host, now_ms: u64) !void {
+        if (self.force_software or self.renderer.process != null or now_ms < self.renderer.next_restart_ms) return;
+        const command = try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{self.renderer_exe});
+        defer self.allocator.free(command);
+        const command_w_const = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, command);
+        defer self.allocator.free(command_w_const);
+        const command_w = try self.allocator.dupeZ(u16, command_w_const);
+        defer self.allocator.free(command_w);
+        const pipe_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, self.renderer_pipe_name);
+        defer self.allocator.free(pipe_w);
+        const log_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, self.renderer_log_path);
+        defer self.allocator.free(log_w);
+        if (c.SetEnvironmentVariableW(env_renderer_pipe, pipe_w.ptr) == 0) return error.SetEnvironmentFailed;
+        if (c.SetEnvironmentVariableW(env_renderer_log, log_w.ptr) == 0) return error.SetEnvironmentFailed;
+        defer {
+            _ = c.SetEnvironmentVariableW(env_renderer_pipe, null);
+            _ = c.SetEnvironmentVariableW(env_renderer_log, null);
+        }
+        var startup: c.STARTUPINFOW = std.mem.zeroes(c.STARTUPINFOW);
+        startup.cb = @sizeOf(c.STARTUPINFOW);
+        var info: c.PROCESS_INFORMATION = std.mem.zeroes(c.PROCESS_INFORMATION);
+        if (c.CreateProcessW(null, command_w.ptr, null, null, 0, c.CREATE_NO_WINDOW,
+            null, null, &startup, &info) == 0) return error.CreateRendererFailed;
+        _ = c.CloseHandle(info.hThread);
+        self.renderer.process = info.hProcess;
+        self.renderer.pid = info.dwProcessId;
+        self.thread_sample_ms = 0;
+        self.renderer.started_ms = now_ms;
+        self.renderer.previous_process_ticks = processTicks(info.hProcess);
+        self.renderer.previous_sample_ms = now_ms;
+        self.renderer.sample_count = 0;
+        self.renderer.sample_cursor = 0;
     }
 
     fn handleExit(self: *Host, slot: *Slot, now_ms: u64) void {
@@ -276,6 +395,7 @@ const Host = struct {
         if (slot.process) |process| _ = c.CloseHandle(process);
         slot.process = null;
         slot.pid = 0;
+        self.thread_sample_ms = 0;
         slot.previous_process_ticks = 0;
     }
 
@@ -303,6 +423,22 @@ const Host = struct {
             slot.sample_count = @min(slot.sample_count + 1, slot.private_samples.len);
             slot.previous_process_ticks = ticks;
             slot.previous_sample_ms = now_ms;
+        }
+        if (self.renderer.process) |process| {
+            var counters: c.PROCESS_MEMORY_COUNTERS_EX = std.mem.zeroes(c.PROCESS_MEMORY_COUNTERS_EX);
+            counters.cb = @sizeOf(c.PROCESS_MEMORY_COUNTERS_EX);
+            if (c.GetProcessMemoryInfo(process, @ptrCast(&counters), @sizeOf(c.PROCESS_MEMORY_COUNTERS_EX)) != 0) {
+                const ticks = processTicks(process);
+                const elapsed_ms = now_ms -| self.renderer.previous_sample_ms;
+                const tick_delta = ticks -| self.renderer.previous_process_ticks;
+                const cpu = if (elapsed_ms == 0) 0 else 100.0 * @as(f64, @floatFromInt(tick_delta)) / 10_000.0 / @as(f64, @floatFromInt(elapsed_ms));
+                self.renderer.private_samples[self.renderer.sample_cursor] = counters.PrivateUsage;
+                self.renderer.cpu_samples[self.renderer.sample_cursor] = @round(cpu * 10.0) / 10.0;
+                self.renderer.sample_cursor = (self.renderer.sample_cursor + 1) % self.renderer.private_samples.len;
+                self.renderer.sample_count = @min(self.renderer.sample_count + 1, self.renderer.private_samples.len);
+                self.renderer.previous_process_ticks = ticks;
+                self.renderer.previous_sample_ms = now_ms;
+            }
         }
     }
 
@@ -375,6 +511,12 @@ const Host = struct {
     }
 
     fn writeStatus(self: *Host, now_ms: u64) void {
+        if (self.thread_sample_ms == 0 or now_ms -| self.thread_sample_ms >= 30_000) {
+            self.slot_threads = [_]u32{0} ** max_widgets;
+            self.renderer_threads = 0;
+            collectThreadCounts(self, &self.slot_threads, &self.renderer_threads);
+            self.thread_sample_ms = now_ms;
+        }
         var output: std.Io.Writer.Allocating = .init(self.allocator);
         defer output.deinit();
         var json: std.json.Stringify = .{ .writer = &output.writer, .options = .{ .whitespace = .indent_2 } };
@@ -394,7 +536,30 @@ const Host = struct {
         json.endObject() catch return;
         json.objectField("widgets") catch return;
         json.beginArray() catch return;
-        for (&self.slots) |*slot| {
+        if (self.renderer.process != null) {
+            const average = self.renderer.averages();
+            json.beginObject() catch return;
+            json.objectField("name") catch return;
+            json.write("renderer") catch return;
+            json.objectField("pid") catch return;
+            json.write(self.renderer.pid) catch return;
+            json.objectField("privateMb") catch return;
+            json.write(average.private_mb) catch return;
+            json.objectField("cpuPercent") catch return;
+            json.write(average.cpu) catch return;
+            json.objectField("threads") catch return;
+            json.write(self.renderer_threads) catch return;
+            json.objectField("backend") catch return;
+            json.write("gpu") catch return;
+            json.objectField("uptimeSeconds") catch return;
+            json.write((now_ms -| self.renderer.started_ms) / 1000) catch return;
+            json.objectField("state") catch return;
+            json.write("running") catch return;
+            json.objectField("reason") catch return;
+            json.write("") catch return;
+            json.endObject() catch return;
+        }
+        for (&self.slots, 0..) |*slot, slot_index| {
             if (!slot.used) continue;
             const average = slot.averages();
             json.beginObject() catch return;
@@ -406,6 +571,8 @@ const Host = struct {
             json.write(average.private_mb) catch return;
             json.objectField("cpuPercent") catch return;
             json.write(average.cpu) catch return;
+            json.objectField("threads") catch return;
+            json.write(self.slot_threads[slot_index]) catch return;
             json.objectField("backend") catch return;
             if (slot.process != null and slot.backend_path_len > 0) {
                 const backend = std.Io.Dir.cwd().readFileAlloc(self.io, slot.backendPath(), self.allocator, .limited(16)) catch null;
@@ -494,6 +661,13 @@ pub fn main(init: std.process.Init) !void {
     defer allocator.free(repo_root);
     const runtime_exe = try std.fs.path.join(allocator, &.{ repo_root, "runtime", "zig-out", "bin", "weaver-widget.exe" });
     defer allocator.free(runtime_exe);
+    const renderer_exe = try std.fs.path.join(allocator, &.{ repo_root, "renderer", "zig-out", "bin", "weaver-renderer.exe" });
+    defer allocator.free(renderer_exe);
+    const renderer_pipe_name = try std.fmt.allocPrint(allocator, "\\\\.\\pipe\\weaver-renderer-{d}", .{c.GetCurrentProcessId()});
+    defer allocator.free(renderer_pipe_name);
+    const renderer_log_path = try std.fmt.allocPrint(allocator, "{s}.renderer.log", .{status_path});
+    defer allocator.free(renderer_log_path);
+    std.Io.Dir.cwd().deleteFile(init.io, renderer_log_path) catch {};
     const cli_script = try std.fs.path.join(allocator, &.{ repo_root, "cli", "dist", "index.js" });
     defer allocator.free(cli_script);
     var host: Host = .{
@@ -504,7 +678,11 @@ pub fn main(init: std.process.Init) !void {
         .status_path = status_path,
         .status_temp_path = status_temp_path,
         .runtime_exe = runtime_exe,
+        .renderer_exe = renderer_exe,
+        .renderer_pipe_name = renderer_pipe_name,
+        .renderer_log_path = renderer_log_path,
         .cli_script = cli_script,
+        .force_software = if (init.environ_map.get("WEAVER_FORCE_SOFTWARE")) |value| std.mem.eql(u8, value, "1") else false,
     };
     defer host.audio_provider.deinit();
     defer host.media_provider.deinit();
@@ -532,6 +710,12 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     for (&host.slots) |*slot| if (slot.process != null) host.stopSlot(slot, true);
+    if (host.renderer.process) |process| {
+        _ = c.TerminateProcess(process, 0);
+        _ = c.WaitForSingleObject(process, 1000);
+        _ = c.CloseHandle(process);
+        host.renderer.process = null;
+    }
     host.writeStatus(c.GetTickCount64());
 }
 
@@ -575,6 +759,22 @@ fn processTicks(process: c.HANDLE) u64 {
 
 fn fileTime(value: c.FILETIME) u64 {
     return (@as(u64, value.dwHighDateTime) << 32) | value.dwLowDateTime;
+}
+
+fn collectThreadCounts(host: *const Host, slot_counts: *[max_widgets]u32, renderer_count: *u32) void {
+    const snapshot = c.CreateToolhelp32Snapshot(c.TH32CS_SNAPTHREAD, 0);
+    if (snapshot == invalid_handle) return;
+    defer _ = c.CloseHandle(snapshot);
+    var entry: c.THREADENTRY32 = std.mem.zeroes(c.THREADENTRY32);
+    entry.dwSize = @sizeOf(c.THREADENTRY32);
+    if (c.Thread32First(snapshot, &entry) == 0) return;
+    while (true) {
+        if (entry.th32OwnerProcessID == host.renderer.pid) renderer_count.* += 1;
+        for (&host.slots, 0..) |slot, index| {
+            if (slot.pid != 0 and entry.th32OwnerProcessID == slot.pid) slot_counts[index] += 1;
+        }
+        if (c.Thread32Next(snapshot, &entry) == 0) break;
+    }
 }
 
 fn writePipe(pipe: c.HANDLE, bytes: []const u8) bool {

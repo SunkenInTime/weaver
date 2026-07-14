@@ -43,8 +43,8 @@ test("status table is aligned and includes crash reasons", () => {
     { name: "Clock", pid: 42, backend: "software", privateMb: 9.55, cpuPercent: 0.2, uptimeSeconds: 65, state: "running", reason: "" },
     { name: "Broken", pid: 0, backend: "-", privateMb: 0, cpuPercent: 0, uptimeSeconds: 0, state: "stopped", reason: "crashed 3 times" },
   ] });
-  assert.match(table, /^NAME\s+PID\s+BACKEND\s+PRIVATE\s+CPU\s+UPTIME\s+STATE/m);
-  assert.match(table, /Broken\s+-\s+-\s+0\.0 MB\s+0\.0%\s+0s\s+stopped: crashed 3 times/);
+  assert.match(table, /^NAME\s+PID\s+BACKEND\s+PRIVATE\s+CPU\s+THREADS\s+UPTIME\s+STATE/m);
+  assert.match(table, /Broken\s+-\s+-\s+0\.0 MB\s+0\.0%\s+0\s+0s\s+stopped: crashed 3 times/);
 });
 
 test("bundle manifest is the subscription origin of truth", () => {
