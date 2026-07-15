@@ -150,13 +150,13 @@ try {
   const providerSockets = readdirSync(activeRuntimeRoot, { withFileTypes: true }).filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
   assert.equal(providerSockets.length, 2, "provider fan-out did not create one Unix socket per Widget");
   assert.ok(providerSockets.every((entry) => join(activeRuntimeRoot, entry.name).length <= 104), "provider Unix socket exceeded macOS sun_path capacity");
-  const providerSamplesBeforeStop = status().providers.systemSampleCount;
   const systemUninstalls = await Promise.all([runAsync(["uninstall", "System Monitor"]), runAsync(["uninstall", "System Monitor 2"])]);
   for (const result of systemUninstalls) assert.equal(result.code, 0, `concurrent System uninstall failed\n${result.stderr}`);
   await waitFor("system provider shutdown", () => status()?.providers?.systemSubscribers === 0 && status()?.widgets?.length === 0);
   assert.ok(providerSockets.every((entry) => !existsSync(join(activeRuntimeRoot, entry.name))), "uninstall left a per-Widget provider endpoint behind");
+  const providerSamplesAfterStop = status().providers.systemSampleCount;
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 2200));
-  assert.equal(status().providers.systemSampleCount, providerSamplesBeforeStop, "host continued sampling after the final system subscriber stopped");
+  assert.equal(status().providers.systemSampleCount, providerSamplesAfterStop, "host continued sampling after the final system subscriber stopped");
 
   run(["install", "clock"]);
   await waitFor("installed Clock", () => status()?.widgets?.[0]?.state === "running" && status().widgets[0]);
