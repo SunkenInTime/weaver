@@ -547,6 +547,7 @@ pub fn main(init: std.process.Init) !void {
         .bundle_id = "com.weaver.widget",
         .default_frame = frame,
         .restore_state = false,
+        .primary_display_anchor = if (@import("builtin").os.tag == .macos) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
         .js_window_api = false,
     }, init);
 }

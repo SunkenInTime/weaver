@@ -36,6 +36,14 @@ pub const Loaded = struct {
     bundle: []const u8,
 };
 
+fn resolvedAnchor(value: Manifest) Anchor {
+    return value.anchor orelse .{
+        .monitor = "primary",
+        .corner = "top-right",
+        .offset = .{ 24, 24 },
+    };
+}
+
 /// Load the two-file widget contract into the process-lifetime arena. M0 is
 /// intentionally strict: unknown JSON fields and unsupported placement fail
 /// at launch instead of quietly changing the desktop behavior.
@@ -76,11 +84,7 @@ fn roundPhysicalEdge(logical_edge: f32, scale: f32) i32 {
 pub fn anchoredPhysicalFrame(value: Manifest, monitor: MonitorGeometry) native_sdk.geometry.RectI {
     const work_area = monitor.work_area_px;
     const scale = monitor.scale();
-    const anchor = value.anchor orelse Anchor{
-        .monitor = "primary",
-        .corner = "top-right",
-        .offset = .{ 24, 24 },
-    };
+    const anchor = resolvedAnchor(value);
     const on_right = std.mem.endsWith(u8, anchor.corner, "right");
     const on_bottom = std.mem.startsWith(u8, anchor.corner, "bottom");
     const width_px = roundPhysicalEdge(value.size[0], scale);
@@ -121,8 +125,10 @@ fn primaryMonitorGeometry() MonitorGeometry {
 /// Native SDK converts it to physical pixels once during HWND creation.
 pub fn desktopFrame(value: Manifest) native_sdk.geometry.RectF {
     if (builtin.os.tag == .macos) {
-        // PR 03 has a direct, visible runtime but no monitor bridge. AppKit
-        // placement and coordinate conversion land as one seam in PR 04.
+        // AppKit resolves `primaryDisplayAnchor` against the live primary
+        // visible frame. This frame contributes size only; keeping the
+        // placeholder origin out of the placement math prevents a second
+        // platform coordinate conversion from appearing here.
         return native_sdk.geometry.RectF.init(0, 0, value.size[0], value.size[1]);
     }
     const monitor = primaryMonitorGeometry();
@@ -134,6 +140,22 @@ pub fn desktopFrame(value: Manifest) native_sdk.geometry.RectF {
         value.size[0],
         value.size[1],
     );
+}
+
+pub fn primaryDisplayAnchor(value: Manifest) native_sdk.PrimaryDisplayAnchor {
+    const anchor = resolvedAnchor(value);
+    const corner: native_sdk.PrimaryDisplayAnchorCorner = if (std.mem.eql(u8, anchor.corner, "top-left"))
+        .top_left
+    else if (std.mem.eql(u8, anchor.corner, "top-right"))
+        .top_right
+    else if (std.mem.eql(u8, anchor.corner, "bottom-left"))
+        .bottom_left
+    else
+        .bottom_right;
+    return .{
+        .corner = corner,
+        .offset = native_sdk.geometry.PointF.init(anchor.offset[0], anchor.offset[1]),
+    };
 }
 
 test "clock manifest shape parses" {
@@ -184,4 +206,18 @@ test "anchor physical extents follow the five supported scale factors" {
         try std.testing.expectEqual(2560 - roundPhysicalEdge(manifest.anchor.?.offset[0], scale), frame.x + frame.width);
         try std.testing.expectEqual(1400 - roundPhysicalEdge(manifest.anchor.?.offset[1], scale), frame.y + frame.height);
     }
+}
+
+test "manifest anchors map to the primary-display logical contract" {
+    const manifest = Manifest{
+        .name = "logical",
+        .size = .{ 240, 110 },
+        .anchor = .{ .corner = "bottom-left", .offset = .{ 13, 17 } },
+    };
+    const anchor = primaryDisplayAnchor(manifest);
+    try std.testing.expectEqual(native_sdk.PrimaryDisplayAnchorCorner.bottom_left, anchor.corner);
+    try std.testing.expectEqualDeep(native_sdk.geometry.PointF.init(13, 17), anchor.offset);
+    const default_anchor = primaryDisplayAnchor(.{ .name = "default", .size = .{ 240, 110 } });
+    try std.testing.expectEqual(native_sdk.PrimaryDisplayAnchorCorner.top_right, default_anchor.corner);
+    try std.testing.expectEqualDeep(native_sdk.geometry.PointF.init(24, 24), default_anchor.offset);
 }
