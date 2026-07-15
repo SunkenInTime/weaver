@@ -3,7 +3,8 @@
 Recorded 2026-07-15 on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS
 26.5.1 (25F80), arm64, Zig 0.16.0, Node 23.11.0, and Xcode 16.0 (16A242d).
 The measured implementation is Weaver commit `e8708a9` on
-`macos/11-cpu-memory-providers`; Native SDK remains `359f5c9c`. Runtime and
+`macos/11-cpu-memory-providers`, published as draft
+[Weaver PR #13](https://github.com/SunkenInTime/weaver/pull/13); Native SDK remains `359f5c9c`. Runtime and
 host artifacts were ReleaseFast.
 
 ## Contract and implementation

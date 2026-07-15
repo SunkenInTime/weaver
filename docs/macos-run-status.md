@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 10 pushed; CI pending`
+- State: `IN PROGRESS — PR 11 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T06:18:30-07:00
+- Last updated: 2026-07-15T06:38:10-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/10-macos-daemon` | `aa9ce6c` | [#12](https://github.com/SunkenInTime/weaver/pull/12) | [#11](https://github.com/SunkenInTime/weaver/pull/11) |
+| Weaver | `macos/11-cpu-memory-providers` | `3eed553` | [#13](https://github.com/SunkenInTime/weaver/pull/13) | [#12](https://github.com/SunkenInTime/weaver/pull/12) |
 
 ## Last reproducible capability
 
-- Capability: native macOS daemon and complete acknowledged CLI/dev lifecycle on the portable supervisor
-- Checkout/pointer: `macos/10-macos-daemon` at `aa9ce6c`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `cd host && zig build test && zig build -Doptimize=ReleaseFast`; `cd runtime && zig build test && zig build -Doptimize=ReleaseFast`; `node cli/test/install-smoke.mjs`; `node cli/test/macos-host-smoke.mjs`
-- Visible result: `weaver dev` kept PID 20747 through a preserved-state bundle hot swap, restarted it as PID 28062 only after the size/window contract changed, then removed the registration and stopped without remnants
-- Machine-readable evidence: actual Metal status and process CPU/footprint/thread metrics; acknowledged concurrent install/uninstall; bounded UDS provider transport; host/Widget SIGKILL recovery with observable backoff; all local gates pass and three-architecture CI is running
+- Capability: host-owned macOS CPU/memory sampling and byte-identical 1 Hz fan-out to every subscribed Widget, with zero collection when unused
+- Checkout/pointer: `macos/11-cpu-memory-providers` at `3eed553`; measured implementation `e8708a9`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `cd host && zig build test && zig build -Doptimize=ReleaseFast`; `cd runtime && zig build test && zig build -Doptimize=ReleaseFast`; `npm run build && npm run typecheck && npm test`; `node cli/test/macos-host-smoke.mjs`; `python3 scripts/macos-provider-cost.py --sample-seconds 5 --output docs/macos-m8-data.json`
+- Visible result: System Monitor launched through the production host and applied its first CPU + memory frame pair; two distinct System Widgets then received the same sample over separate private sockets
+- Machine-readable evidence: exact public JSON serializer tests, bounded live Mach samples, `systemSubscribers/systemSampleCount/systemFrames`, runtime applied-frame logs, fan-out 1→3 without sampler growth, stable zero-subscriber count, and full raw cost data; three-architecture CI is running
 
 ## Gates
 
@@ -43,7 +43,7 @@ blocker and the next executable command.
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
 | CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
 | macOS daemon / `weaver dev` | PASS | Weaver #12; `macos-host-smoke.mjs` proves init/dev/edit preserved-state hot swap/config restart/stop, concurrent mutations, provider UDS, host + Widget adverse kills, backoff/recovery/status, and zero process/socket/lock remnants |
-| CPU/memory providers | pending | — |
+| CPU/memory providers | UNVERIFIED | Weaver #13 functional/fan-out/cost/zero-collection gates pass; required sleep/wake remains unsafe on the only unattended machine and is not inferred |
 | Audio decision/implementation | pending | — |
 | Media decision/implementation | pending | — |
 | Full CI/regression closure | pending | — |
@@ -66,6 +66,8 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 | Synthetic, sustained 60 Hz | software / Metal hybrid / Metal composite; three processes | 302.85% / 73.98% / 61.11% | 324.373 / 361.139 / 378.899 MB physical | 331.47 / 325.95 / 334.08 wakeups/s; 15051.751 / 712.669 / 506.738 process mJ/s | same production workload in every candidate | `docs/macos-m5-results.md`, `docs/macos-m5-data.json` |
 | Synthetic, sustained 60 Hz | production Metal composite; one process, 10 minutes | 23.61% mean | 123.782 MB final; 127.567 MB peak; 6–8 threads; 34 FDs | 87.22 wakeups/s; 158.794 process mJ/s | p50/p90/p99 16.666/16.704/18.270 ms; 4 of 36,410 intervals over 25 ms; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
 | Retained parity, zero updates | production Metal composite; one process, 10 minutes | 0.006% mean | 110.265 MB final; 118.211 MB peak; 5–7 threads; 34 FDs | 1.11 wakeups/s; 0.019 process mJ/s | three startup/reveal frames, then fully parked; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
+| Host, zero system subscribers | native macOS daemon only; five 1 s samples | 0.14% mean of one core | 1.441 MiB RSS | 2 threads; wakeups not captured | exactly 0 sampler calls / 0 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
+| Host + one / three System Widgets | one shared Mach sample, UDS fan-out; five 1 s samples | 1.96% / 3.96% whole workload | 156.059 / 428.816 MiB RSS | 9.4 / 24.8 threads; wakeups not captured | 4 sampler calls in both captured boundaries; 8 / 24 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
 
 ## Assumptions made autonomously
 
@@ -87,6 +89,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - PR 09 keeps platform process state as an opaque generic field owned by the adapter-facing slot type. The supervisor can decide what must happen but cannot create, signal, sample, or terminate a process or IPC endpoint.
 - PR 10 uses one acknowledged control UDS and one cryptographically unguessable UDS per provider-subscribed Widget under a mode-0700 per-user root. Long default `TMPDIR` paths fall back to `/tmp` before they can exceed `sun_path`.
 - Because macOS has no public kill-on-close Job equivalent, a replacement host kills an orphan only when both its private marker and live `proc_pidpath` match the exact runtime executable. ADR 0013 records the rejected polling/unvalidated-kill alternatives.
+- macOS `memory.usedMb` projects the platform-neutral SDK meaning as total physical memory minus free and inactive/reclaimable pages. CPU uses public per-logical-core Mach ticks with wrapping deltas; aggregate percent remains 0–100 rather than summing cores.
 
 ## Exact blockers
 
@@ -98,15 +101,15 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, System Monitor, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, and loopback HTTPS server terminated; no Accessibility warning helper remains
+- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, and loopback HTTPS server terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, isolated CLI home/data/log trees, registry locks, install stages, and owned versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
 - Reversible System Settings restored: unchanged
 - Working trees/submodule clean: clean after Weaver PR 10 implementation commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-10 and Native SDK fork PRs 01-05 pushed
+- Latest stack branches pushed: Weaver PRs 01-11 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 10 CI and correct actionable failures without weakening coverage.
-2. Create Weaver `macos/11-cpu-memory-providers` from `macos/10-macos-daemon`.
-3. Implement subscription-driven host-owned CPU/memory collection and existing provider JSON shapes, then prove System parity, fan-out, zero unsubscribed collection, rapid subscription changes, and measured host idle cost.
+1. Inspect Weaver PR 10-11 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/12-audio-decision` from `macos/11-cpu-memory-providers`.
+3. Run the public macOS audio-capture feasibility spike, record permission/signing/device/latency/cost constraints, and publish the shipping/minimum-version decision as an ADR without landing production audio ahead of it.
