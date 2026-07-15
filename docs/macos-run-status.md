@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 03 implementation complete; publishing stack`
+- State: `IN PROGRESS — PR 03 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T02:49:15-07:00
+- Last updated: 2026-07-15T02:52:45-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,7 +20,7 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/02-backend-honesty` | `673c07f4` | [#2](https://github.com/SunkenInTime/native/pull/2) | [#1](https://github.com/SunkenInTime/native/pull/1) |
-| Weaver | `macos/03-runtime-clock` | pending commit | pending draft PR | [#4](https://github.com/SunkenInTime/weaver/pull/4) |
+| Weaver | `macos/03-runtime-clock` | `bb07967` | [#5](https://github.com/SunkenInTime/weaver/pull/5) | [#4](https://github.com/SunkenInTime/weaver/pull/4) |
 
 ## Last reproducible capability
 
@@ -82,11 +82,10 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: PR 03's synthetic storage value, probe log, and oversized Clock backup removed after recording evidence
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: PR 03 changes pending their Weaver commit; Native SDK submodule clean at `673c07f4`
-- Latest stack branches pushed: Weaver PRs 01-02 and Native SDK fork PRs 01-02 pushed
+- Working trees/submodule clean: clean after the PR 03 implementation commit; Native SDK submodule clean at `673c07f4`
+- Latest stack branches pushed: Weaver PRs 01-03 and Native SDK fork PRs 01-02 pushed
 
 ## Next executable task
 
-1. Remove the recorded PR 03 probe artifacts, commit/push Weaver `macos/03-runtime-clock`, and open its draft PR on PR 02.
-2. Inspect PR 03 CI and correct actionable failures without weakening coverage.
-3. Start PR 04 display discovery, anchoring, Spaces, and desktop-survival work.
+1. Inspect PR 03 CI and correct actionable failures without weakening coverage.
+2. Start PR 04 display discovery, anchoring, Spaces, and desktop-survival work.
