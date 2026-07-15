@@ -22,6 +22,14 @@ Widget (system stats, media, time, weather). Distinct from a Widget's own
 direct API access: Providers are shared and curated; direct API access is
 per-Widget and declared.
 
+## Renderer
+
+The internal path that turns a Widget's retained display operations into
+pixels and presents them on its OS surface. Renderer policy is platform-owned:
+the healthy path, reference/fallback path, resource lifetime, and any helper
+process may differ by OS, but Widget source and the public SDK never do. Its
+bill always includes every participating Widget, host, and renderer process.
+
 ## Standard surface
 
 What a Widget may do without any user-facing consent: subscribe to Providers,

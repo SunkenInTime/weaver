@@ -2,6 +2,7 @@ runtime/.zig-cache
 runtime/zig-out
 host/.zig-cache
 host/zig-out
+.zig-cache
 
 
 # General
