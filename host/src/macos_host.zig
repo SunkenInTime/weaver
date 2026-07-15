@@ -694,7 +694,7 @@ fn run(init: std.process.Init) !void {
             next_cost_ms = now + 2000;
         }
         if (acknowledge_reload) control.complete(.ok);
-        if (!stopping) try std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 10 else 50), .awake);
+        if (!stopping) try std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 30 else 50), .awake);
     }
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
     host.audio_provider.setActive(false, monotonicMilliseconds());

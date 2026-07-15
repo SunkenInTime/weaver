@@ -280,7 +280,7 @@ int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t capacity, s
             atomic_store_explicit(&state->status, WEAVER_AUDIO_DEVICE_UNAVAILABLE, memory_order_release);
             return -2;
         }
-        const size_t count = capacity < 480 ? capacity : 480;
+        const size_t count = capacity < 1440 ? capacity : 1440;
         for (size_t index = 0; index < count; index++) {
             mono[index] = mode == 'a' ? (float)(0.35 * sin(state->automation_phase)) : 0.0f;
             state->automation_phase += 2.0 * M_PI * 440.0 / 48000.0;
