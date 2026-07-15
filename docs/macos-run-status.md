@@ -20,12 +20,12 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/11-cpu-memory-providers` | `3eed553` | [#13](https://github.com/SunkenInTime/weaver/pull/13) | [#12](https://github.com/SunkenInTime/weaver/pull/12) |
+| Weaver | `macos/11-cpu-memory-providers` | `3f5881b` | [#13](https://github.com/SunkenInTime/weaver/pull/13) | [#12](https://github.com/SunkenInTime/weaver/pull/12) |
 
 ## Last reproducible capability
 
 - Capability: host-owned macOS CPU/memory sampling and byte-identical 1 Hz fan-out to every subscribed Widget, with zero collection when unused
-- Checkout/pointer: `macos/11-cpu-memory-providers` at `3eed553`; measured implementation `e8708a9`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Checkout/pointer: `macos/11-cpu-memory-providers` at `3f5881b`; measured implementation `9c1dbc4`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
 - Commands: `cd host && zig build test && zig build -Doptimize=ReleaseFast`; `cd runtime && zig build test && zig build -Doptimize=ReleaseFast`; `npm run build && npm run typecheck && npm test`; `node cli/test/macos-host-smoke.mjs`; `python3 scripts/macos-provider-cost.py --sample-seconds 5 --output docs/macos-m8-data.json`
 - Visible result: System Monitor launched through the production host and applied its first CPU + memory frame pair; two distinct System Widgets then received the same sample over separate private sockets
 - Machine-readable evidence: exact public JSON serializer tests, bounded live Mach samples, `systemSubscribers/systemSampleCount/systemFrames`, runtime applied-frame logs, fan-out 1→3 without sampler growth, stable zero-subscriber count, and full raw cost data; three-architecture CI is running
