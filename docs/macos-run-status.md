@@ -9,7 +9,7 @@ blocker and the next executable command.
 
 - State: `IN PROGRESS — PR 14 pushed; PR 15 omitted by ADR; PR 16 next`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T07:52:00-07:00
+- Last updated: 2026-07-15T08:07:00-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,12 +20,12 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/14-media-decision` | `37f9dfe` | [#16](https://github.com/SunkenInTime/weaver/pull/16) | [#15](https://github.com/SunkenInTime/weaver/pull/15) |
+| Weaver | `macos/14-media-decision` | `68d7b99` | [#16](https://github.com/SunkenInTime/weaver/pull/16) | [#15](https://github.com/SunkenInTime/weaver/pull/15) |
 
 ## Last reproducible capability
 
 - Capability: the macOS v0 media boundary is explicit and reproducible: public Now Playing APIs publish only the current application's session, the Apple Music controller is compiler-unavailable, private MediaRemote and incomplete per-player automation are rejected, and PR 15 is omitted
-- Checkout/pointer: `macos/14-media-decision` decision/spike head `37f9dfe`; Native SDK remains `359f5c9c` (`macos/05-production-renderer`)
+- Checkout/pointer: `macos/14-media-decision` decision/spike head `4fe97f8`, restacked ledger `68d7b99`; Native SDK remains `359f5c9c` (`macos/05-production-renderer`)
 - Commands: `spikes/macos-media-observation/build.sh`; `npm run build`; `npm run typecheck`; `npm test`; `python3 -m json.tool docs/macos-m11-data.json`; `git diff --check`
 - Visible result: no visible player claim is made; the deterministic publisher reads back its own title/state while a concurrent process reports no Now Playing dictionary, and the negative Music-controller source fails with the SDK's exact macOS-unavailable diagnostic
 - Machine-readable evidence: `docs/macos-m11-results.md`, `docs/macos-m11-data.json`, ADR 0015, probe JSON/compiler log, 22/22 root tests, and no production media dependency

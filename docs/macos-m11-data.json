@@ -1,7 +1,7 @@
 {
   "schema": "weaver.macos-media-feasibility.v1",
-  "recorded_at": "2026-07-15T14:48:59Z",
-  "weaver_base_commit": "bf9d6b5f9d67dde6a38f64514779341a165bd35e",
+  "recorded_at": "2026-07-15T15:07:29Z",
+  "weaver_base_commit": "2001014d4118ff4ee985dd893647566d32dd6308",
   "machine": {
     "model": "MacBook Air",
     "model_identifier": "Mac14,2",
@@ -27,7 +27,7 @@
       "artist": "Weaver",
       "hasNowPlayingInfo": true,
       "mode": "publish",
-      "pid": 99753,
+      "pid": 83598,
       "playbackState": 1,
       "title": "Weaver Public API Probe"
     },
@@ -36,7 +36,7 @@
       "artist": null,
       "hasNowPlayingInfo": false,
       "mode": "observe",
-      "pid": 99755,
+      "pid": 83600,
       "playbackState": 0,
       "title": null
     },
@@ -119,4 +119,3 @@
     "next_pr": "PR 16 macOS CI, regression matrix, and release closure"
   }
 }
-

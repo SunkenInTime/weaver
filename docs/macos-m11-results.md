@@ -2,7 +2,7 @@
 
 Recorded 2026-07-15 on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS
 26.5.1 (25F80), arm64, Xcode 16.0 (16A242d), Apple clang 16.0.0, and the macOS
-15.0 SDK. The probe ran from Weaver base commit `bf9d6b5` on
+15.0 SDK. The probe ran from Weaver base commit `2001014` on
 `macos/14-media-decision`. Raw evidence is in
 [`macos-m11-data.json`](macos-m11-data.json).
 
@@ -91,4 +91,3 @@ status and assert zero media frames/work in closure tests.
 
 Rollback is this documentation layer only. The next implemented layer is PR 16;
 PR 15 is intentionally absent under the omission rule in the Lane D brief.
-
