@@ -189,6 +189,11 @@ pub fn recordRendererExit(renderer: anytype, now_ms: u64) void {
 }
 
 pub fn hasSubscription(slots: anytype, subscription: Subscription, adapter: anytype) bool {
+    return subscriptionCount(slots, subscription, adapter) > 0;
+}
+
+pub fn subscriptionCount(slots: anytype, subscription: Subscription, adapter: anytype) u32 {
+    var count: u32 = 0;
     for (slots, 0..) |slot, index| {
         if (!adapter.running(index)) continue;
         const wanted = switch (subscription) {
@@ -197,12 +202,23 @@ pub fn hasSubscription(slots: anytype, subscription: Subscription, adapter: anyt
             .audio => slot.wants_audio,
             .media => slot.wants_media,
         };
-        if (wanted) return true;
+        if (wanted) count += 1;
     }
-    return false;
+    return count;
+}
+
+pub fn systemSubscriberCount(slots: anytype, adapter: anytype) u32 {
+    var count: u32 = 0;
+    for (slots, 0..) |slot, index| {
+        if (adapter.running(index) and (slot.wants_cpu or slot.wants_memory)) count += 1;
+    }
+    return count;
 }
 
 pub const ProviderStatus = struct {
+    system_subscribers: u32,
+    system_sample_count: u64,
+    system_frames: u64,
     audio_capture_active: bool,
     audio_silent: bool,
     audio_pipe_frames: u64,
@@ -228,6 +244,12 @@ pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: Provi
     try json.write(host_pid);
     try json.objectField("providers");
     try json.beginObject();
+    try json.objectField("systemSubscribers");
+    try json.write(provider_status.system_subscribers);
+    try json.objectField("systemSampleCount");
+    try json.write(provider_status.system_sample_count);
+    try json.objectField("systemFrames");
+    try json.write(provider_status.system_frames);
     try json.objectField("audioCaptureActive");
     try json.write(provider_status.audio_capture_active);
     try json.objectField("audioSilent");
@@ -347,7 +369,7 @@ test "portable status serializer keeps the public state spelling" {
         .state = .source_missing,
         .reason = "registered source path does not exist",
     }};
-    try writeStatus(&output.writer, 7, .{ .audio_capture_active = false, .audio_silent = true, .audio_pipe_frames = 0, .media_pipe_frames = 0 }, &entries);
+    try writeStatus(&output.writer, 7, .{ .system_subscribers = 0, .system_sample_count = 0, .system_frames = 0, .audio_capture_active = false, .audio_silent = true, .audio_pipe_frames = 0, .media_pipe_frames = 0 }, &entries);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"state\": \"source missing\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"hostPid\": 7") != null);
 }

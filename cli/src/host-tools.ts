@@ -15,7 +15,16 @@ export interface WidgetStatus {
   state: "disabled" | "starting" | "running" | "backoff" | "stopped" | "source missing";
   reason: string;
 }
-export interface StatusDocument { hostPid: number; widgets: WidgetStatus[] }
+export interface ProviderStatus {
+  systemSubscribers: number;
+  systemSampleCount: number;
+  systemFrames: number;
+  audioCaptureActive: boolean;
+  audioSilent: boolean;
+  audioPipeFrames: number;
+  mediaPipeFrames: number;
+}
+export interface StatusDocument { hostPid: number; providers: ProviderStatus; widgets: WidgetStatus[] }
 export interface RegistryLockOptions { timeoutMs?: number; retryMs?: number; staleMs?: number }
 export interface WeaverPathEnvironment {
   platform?: NodeJS.Platform;

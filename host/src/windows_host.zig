@@ -4,6 +4,7 @@ const audio = @import("audio.zig");
 const backoff = @import("backoff.zig");
 const media = @import("media.zig");
 const providers = @import("providers.zig");
+const provider_protocol = @import("provider_protocol.zig");
 const registry = @import("registry.zig");
 
 const c = @cImport({
@@ -106,6 +107,7 @@ const Host = struct {
     previous_cpu_len: usize = 0,
     previous_memory: [512]u8 = undefined,
     previous_memory_len: usize = 0,
+    system_frames: u64 = 0,
     previous_media: [2048]u8 = undefined,
     previous_media_len: usize = 0,
     audio_pipe_frames: u64 = 0,
@@ -385,8 +387,14 @@ const Host = struct {
         const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
         for (&self.slots) |*slot| {
             if (slot.platform.pipe == invalid_handle) continue;
-            if (slot.wants_cpu and (!slot.cpu_sent or cpu_changed) and writePipe(slot.platform.pipe, cpu)) slot.cpu_sent = true;
-            if (slot.wants_memory and (!slot.memory_sent or memory_changed) and writePipe(slot.platform.pipe, memory)) slot.memory_sent = true;
+            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and writePipe(slot.platform.pipe, cpu)) {
+                slot.cpu_sent = true;
+                self.system_frames += 1;
+            }
+            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and writePipe(slot.platform.pipe, memory)) {
+                slot.memory_sent = true;
+                self.system_frames += 1;
+            }
         }
         @memcpy(self.previous_cpu[0..cpu.len], cpu);
         self.previous_cpu_len = cpu.len;
@@ -488,6 +496,9 @@ const Host = struct {
         var output: std.Io.Writer.Allocating = .init(self.allocator);
         defer output.deinit();
         supervisor.writeStatus(&output.writer, c.GetCurrentProcessId(), .{
+            .system_subscribers = supervisor.systemSubscriberCount(&self.slots, self),
+            .system_sample_count = self.sampler.sample_calls,
+            .system_frames = self.system_frames,
             .audio_capture_active = self.audio_provider.capture != null,
             .audio_silent = self.audio_provider.silent,
             .audio_pipe_frames = self.audio_pipe_frames,

@@ -254,6 +254,13 @@ Delivered by `weaverd` (the host). `time` remains SDK-local. Subscribing
 without the host running is a runtime error that names the fix (`weaver up`);
 `weaver dev` auto-starts the host.
 
+`cpu.percent` is whole-machine utilization from 0–100, not the sum of cores;
+`perCore` reports the same 0–100 utilization for each logical core. Memory
+`usedMb` is physical memory that is not currently free or reclaimable idle
+cache, `totalMb` is installed physical memory, and `percent` is their ratio.
+These meanings stay platform-neutral even though each host uses its public OS
+counters to project them.
+
 ## The host and its CLI verbs
 
 ```

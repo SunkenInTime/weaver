@@ -1,6 +1,8 @@
 const std = @import("std");
 const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
+const provider_protocol = @import("provider_protocol.zig");
+const system_providers = @import("providers_macos.zig");
 
 const posix = std.posix;
 const c = @cImport({
@@ -253,6 +255,12 @@ const Host = struct {
     cli_script: []const u8,
     runtime_root: []const u8,
     slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
+    sampler: system_providers.Sampler = .{},
+    previous_cpu: [8192]u8 = undefined,
+    previous_cpu_len: usize = 0,
+    previous_memory: [512]u8 = undefined,
+    previous_memory_len: usize = 0,
+    system_frames: u64 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -460,6 +468,32 @@ const Host = struct {
         }
     }
 
+    fn sampleProviders(self: *Host) void {
+        if (!supervisor.hasSubscription(&self.slots, .cpu, self) and !supervisor.hasSubscription(&self.slots, .memory, self)) return;
+        const sample = self.sampler.sample() catch return orelse return;
+        var cpu_buffer: [8192]u8 = undefined;
+        const cpu = provider_protocol.formatCpu(sample.cpu, &cpu_buffer) catch return;
+        var memory_buffer: [512]u8 = undefined;
+        const memory = provider_protocol.formatMemory(sample.memory, &memory_buffer) catch return;
+        const cpu_changed = !std.mem.eql(u8, cpu, self.previous_cpu[0..self.previous_cpu_len]);
+        const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
+        for (&self.slots) |*slot| {
+            const endpoint = slot.platform.endpoint orelse continue;
+            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and endpoint.write(cpu)) {
+                slot.cpu_sent = true;
+                self.system_frames += 1;
+            }
+            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and endpoint.write(memory)) {
+                slot.memory_sent = true;
+                self.system_frames += 1;
+            }
+        }
+        @memcpy(self.previous_cpu[0..cpu.len], cpu);
+        self.previous_cpu_len = cpu.len;
+        @memcpy(self.previous_memory[0..memory.len], memory);
+        self.previous_memory_len = memory.len;
+    }
+
     fn writeStatus(self: *Host, now_ms: u64) void {
         var entries: [max_widgets]supervisor.StatusEntry = undefined;
         var entry_count: usize = 0;
@@ -489,6 +523,9 @@ const Host = struct {
         var output: std.Io.Writer.Allocating = .init(self.allocator);
         defer output.deinit();
         supervisor.writeStatus(&output.writer, @intCast(posix.system.getpid()), .{
+            .system_subscribers = supervisor.systemSubscriberCount(&self.slots, self),
+            .system_sample_count = self.sampler.sample_calls,
+            .system_frames = self.system_frames,
             .audio_capture_active = false,
             .audio_silent = true,
             .audio_pipe_frames = 0,
@@ -575,6 +612,7 @@ fn run(init: std.process.Init) !void {
     try host.loadRegistry();
     var stopping = false;
     var next_cost_ms: u64 = 0;
+    var next_provider_ms: u64 = 0;
     while (!stopping) {
         var acknowledge_reload = false;
         if (control.take()) |command| switch (command) {
@@ -592,6 +630,10 @@ fn run(init: std.process.Init) !void {
         };
         const now = monotonicMilliseconds();
         host.supervise(now);
+        if (now >= next_provider_ms) {
+            host.sampleProviders();
+            next_provider_ms = now + 1000;
+        }
         if (acknowledge_reload or now >= next_cost_ms) {
             host.sampleCosts(now);
             host.writeStatus(now);

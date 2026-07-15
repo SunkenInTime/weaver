@@ -39,6 +39,7 @@ pub const Model = struct {
     fetch_poll_armed: bool = false,
     provider_poll_armed: bool = false,
     provider_poll_interval_ms: u64 = 1000,
+    provider_frames: u64 = 0,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
@@ -112,14 +113,14 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 return;
             }
             if (timer.key == provider_poll_key) {
-                (model.engine orelse return).drainProviders() catch |err| {
+                drainProviderFrames(model) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
                 syncTimers(model, effects);
                 return;
             }
             if (model.provider_poll_interval_ms <= 33) {
-                (model.engine orelse return).drainProviders() catch |err| {
+                drainProviderFrames(model) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
             }
@@ -149,7 +150,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         },
         .canvas_frame => |timestamp_ns| {
             if (model.provider_poll_interval_ms <= 33) {
-                (model.engine orelse return).drainProviders() catch |err| {
+                drainProviderFrames(model) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
             }
@@ -159,6 +160,13 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             syncTimers(model, effects);
         },
     }
+}
+
+fn drainProviderFrames(model: *Model) !void {
+    const count = try (model.engine orelse return).drainProviders();
+    if (count == 0) return;
+    model.provider_frames += count;
+    if (model.provider_frames == count) std.log.info("widget provider frames applied count={d}", .{count});
 }
 
 fn reloadIfChanged(model: *Model, effects: *Effects) !void {
