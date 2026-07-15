@@ -213,11 +213,14 @@ try {
   const startsBeforeRevocation = status().providers.audioCaptureStarts;
   const framesBeforeRevocation = status().providers.audioProviderFrames;
   writeFileSync(audioControl, "r", "utf8");
-  await waitFor("audio permission revocation", () => {
+  const revokedAudio = await waitFor("audio permission revocation", () => {
     const providers = status()?.providers;
     return providers?.audioAvailability === "permission-revoked" && providers.audioLastError !== 0 &&
-      providers.audioSilent === true && providers.audioProviderFrames === framesBeforeRevocation + 1 && providers;
+      providers.audioSilent === true && providers.audioProviderFrames > framesBeforeRevocation && providers;
   });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 2200));
+  assert.equal(status().providers.audioProviderFrames, revokedAudio.audioProviderFrames,
+    "revoked audio emitted more than its final zero after reaching the revoked state");
   writeFileSync(audioControl, "a", "utf8");
   run(["audio", "authorize"]);
   await waitFor("audio reauthorization", () => {
