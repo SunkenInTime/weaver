@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `CAPABILITY COMPLETE — post-closure memory fixes validated; PR evidence update pending`
+- State: `CAPABILITY COMPLETE — active renderer CPU/memory fixes validated; final CI rerun pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T14:40:00-07:00
+- Last updated: 2026-07-15T15:41:39-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -19,13 +19,13 @@ blocker and the next executable command.
 
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
-| Native SDK fork | `macos/06-composite-presenter-closure` | `73b6e20e` | [#6](https://github.com/SunkenInTime/native/pull/6) | [#5](https://github.com/SunkenInTime/native/pull/5) |
-| Weaver | `macos/16-ci-regression-closure` | `dca90f9` plus post-closure memory evidence | [#17](https://github.com/SunkenInTime/weaver/pull/17) | [#16](https://github.com/SunkenInTime/weaver/pull/16) |
+| Native SDK fork | `macos/06-composite-presenter-closure` | `91949e15` | [#6](https://github.com/SunkenInTime/native/pull/6) | [#5](https://github.com/SunkenInTime/native/pull/5) |
+| Weaver | `macos/16-ci-regression-closure` | `c3985e1` plus release-audit pin update | [#17](https://github.com/SunkenInTime/weaver/pull/17) | [#16](https://github.com/SunkenInTime/weaver/pull/16) |
 
 ## Last reproducible capability
 
 - Capability: permissioned physical closure now proves the retained Metal Clock reaches the real drawable with per-pixel transparency, remains visible through Show Desktop, and a real signed Core Audio tap drives the production Visualizer through audible, silent parked, and resumed states
-- Checkout/pointer: Weaver closure head `dca90f9` plus this memory evidence on `macos/16-ci-regression-closure`; Native SDK `73b6e20e` on `macos/06-composite-presenter-closure`
+- Checkout/pointer: Weaver efficiency evidence head `c3985e1` on `macos/16-ci-regression-closure`; Native SDK `91949e15` on `macos/06-composite-presenter-closure`
 - Commands: direct `screencapture`; `NATIVE_SDK_SMOKE_BUDGET_MS=1000 zig build test-gpu-dashboard-smoke -Dwidget-profile=true`; `zig build test-example-macos-widget-windowing test-webview-system-link`; release audit; fresh recursive clone plus the complete README Quickstart/artifact loop
 - Visible result: 480 x 220 OS Clock capture has transparent corner RGBA `0,0,0,0`; the attached 9-second OS recording shows Show Desktop expose the correctly composited production Clock and restore the prior frontmost app
 - Machine-readable evidence: `docs/macos-m12-results.md`, `docs/macos-m12-data.json`, `docs/macos-m12-clock-os.png`, `docs/macos-m12-show-desktop.mov`, all four required CI jobs on the previous code head, and a clean-clone pass at `359be90`
@@ -68,6 +68,8 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 | Retained parity, zero updates | production Metal composite; one process, 10 minutes | 0.006% mean | 110.265 MB final; 118.211 MB peak; 5–7 threads; 34 FDs | 1.11 wakeups/s; 0.019 process mJ/s | three startup/reveal frames, then fully parked; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
 | Corrected Clock, steady-state 1 Hz | production Metal composite; accessory process without a Dock icon | 1.20% short-run mean | 29.590 MB physical; 30.016 MB peak; 34 FDs | not captured | retained Metal premium over corrected software is 3.932 MB | `docs/macos-m6-results.md`, `docs/macos-m6-memory-data.json` |
 | Synthetic, sustained 60 Hz | production texture-only raster cache; interleaved A/B | 16.83% short-run candidate mean | 51.451 MB mean / 51.594 MB median; 1.705 / 1.180 MB mean / median saving | not captured | 199 comparator frames, zero differing pixels | `docs/macos-m6-results.md`, `docs/macos-m6-memory-data.json` |
+| Synthetic, sustained 60 Hz | analytic Metal rounded rectangles + private retained target; interleaved A/B | 8.61% candidate mean; 50.22% below paired 17.29% baseline | 41.493 MB mean; 10.363 MB / 19.98% below paired baseline | not captured | frame mean/p50 16.646/16.664 ms; paired p90 non-regression | `docs/macos-m6-results.md`, `docs/macos-m6-memory-data.json` |
+| Corrected Clock, steady-state 1 Hz | production Metal composite with private retained target | 0.32% mean | 28.452 MB mean; 0.197 MB / 0.69% below shared-target pairs; 34 FDs | not captured | clean retained updates and teardown | `docs/macos-m6-results.md`, `docs/macos-m6-memory-data.json` |
 | Host, zero system subscribers | native macOS daemon only; five 1 s samples | 0.14% mean of one core | 1.441 MiB RSS | 2 threads; wakeups not captured | exactly 0 sampler calls / 0 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
 | Host + one / three System Widgets | one shared Mach sample, UDS fan-out; five 1 s samples | 1.96% / 3.96% whole workload | 156.059 / 428.816 MiB RSS | 9.4 / 24.8 threads; wakeups not captured | 4 sampler calls in both captured boundaries; 8 / 24 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
 | Core Audio setup-only process | one private global mono tap + aggregate; ten launches, each with intentional 0.5 s sleep | 0.014 s summed CPU / 0.610 s wall mean (2.295% over boundary) | 14,209,843 bytes mean maximum RSS | not captured | no IO proc/callback; no latency claim | `docs/macos-m9-results.md`, `docs/macos-m9-data.json` |
@@ -114,11 +116,11 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, PR 13 Visualizers/control/authorization markers, isolated CLI home/data/log trees, registry locks, install stages, owned versions, scoped audio TCC decision, and temporary audio taps/aggregates removed after recording evidence; ignored spike builds and raw renderer run reports remain only as reproducible local build products
 - Reversible System Settings restored: Show Desktop toggled back and T3 Code returned frontmost; System Settings is closed during final cleanup; user-granted TCC decisions are intentionally retained
-- Working trees/submodule clean: post-closure evidence commit pending; Native SDK clean at `73b6e20e`
+- Working trees/submodule clean before the release-audit pin update; Native SDK clean and pushed at `91949e15`
 - Latest stack branches pushed: Weaver PRs 01-17 and Native SDK fork PRs 01-06 pushed; PR #17 CI reruns from the final pin/evidence head
 
 ## Next executable task
 
-1. Commit and push the Native `73b6e20e` submodule pointer plus M6 memory ledger.
-2. Attach the corrected memory profile and validation evidence to Weaver PR #17 and Native PR #6.
-3. Route any actionable CI failure without weakening coverage; keep only the explicitly listed hardware/distribution boundaries open.
+1. Commit and push the release-audit expectation for Native `91949e15`.
+2. Watch all four CI jobs to completion and update the existing PR evidence comments in place with the final run.
+3. Keep only the explicitly listed hardware/distribution boundaries open.
