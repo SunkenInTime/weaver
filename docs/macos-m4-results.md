@@ -12,6 +12,10 @@ declarations, GET/POST, validated string headers, four bounded worker slots,
 and main-loop-only promise completion. The Objective-C seam owns only the
 system HTTPS exchange.
 
+The implementation is published as stacked draft
+[Weaver PR #7](https://github.com/SunkenInTime/weaver/pull/7), based on the
+display/anchoring layer.
+
 The macOS transport uses the system trust store, has no cookie store or URL
 cache, returns the original 3xx instead of following redirects, enforces a
 15-second whole-exchange deadline, streams into a 5 MiB response cap, and
