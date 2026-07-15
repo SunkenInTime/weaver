@@ -121,6 +121,9 @@ jobs:
         run: |
           zig build -Doptimize=ReleaseFast
           zig build test -Doptimize=ReleaseFast
+          codesign --verify --deep --strict zig-out/Weaverd.app
+          test "$(plutil -extract CFBundleIdentifier raw zig-out/Weaverd.app/Contents/Info.plist)" = "com.sunkenintime.weaver.host"
+          test "$(otool -l zig-out/Weaverd.app/Contents/MacOS/weaverd | awk '/LC_BUILD_VERSION/{found=1} found&&/minos/{print $2; exit}')" = "14.2"
 
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs

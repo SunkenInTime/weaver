@@ -50,10 +50,11 @@ notes in [`docs/m0-results.md`](docs/m0-results.md) and
 in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
 change.
 
-Host-owned CPU and memory providers now run on both platforms and stay fully
-off with no subscriber. macOS audio has selected the public Core Audio process
-tap route; production capture and media remain explicit port work, not stubbed
-capabilities.
+Host-owned CPU, memory, and audio providers now run on both platforms and stay
+off with no subscriber. macOS audio uses one public Core Audio process tap and
+one shared analysis/fan-out pipeline; unavailable permission or hardware is
+reported explicitly and never replaced with fake frames. Media remains
+explicit port work, not a stubbed capability.
 
 ## Quickstart
 
@@ -76,7 +77,12 @@ node cli\bin\weaver.js install myclock.weave
 On macOS, build the runtime with `cd runtime && zig build
 -Doptimize=ReleaseFast`, build the host with `cd host && zig build
 -Doptimize=ReleaseFast`, and use `node cli/bin/weaver.js`. `up`, `down`,
-`status`, `dev`, and all artifact commands above are available.
+`status`, `dev`, and all artifact commands above are available. Before running
+an audio-reactive Widget, authorize the signed host identity in the foreground:
+
+```sh
+node cli/bin/weaver.js audio authorize
+```
 
 Or do it the intended way: point your coding agent at
 [`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it

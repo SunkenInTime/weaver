@@ -1,0 +1,336 @@
+{
+  "schema": "weaver.macos-production-audio-cost.v1",
+  "recorded_at": "2026-07-15T07:41:18-07:00",
+  "weaver_commit": "ba1336bfb5a8d75b7e4173991eabaf1c314439ab",
+  "macos": [
+    "ProductName:\t\tmacOS",
+    "ProductVersion:\t\t26.5.1",
+    "BuildVersion:\t\t25F80"
+  ],
+  "hardware": "Apple M2",
+  "architecture": "arm64",
+  "zig": "0.16.0",
+  "node": "v23.11.0",
+  "sample_seconds": 10,
+  "cpu_metric": "ps percent of one core summed across weaverd and participating Widget processes",
+  "memory_metrics": {
+    "physical_footprint": "footprint aggregate phys_footprint, de-duplicated across selected processes",
+    "rss": "ps RSS summed across selected processes"
+  },
+  "capture_source": "automation-only 48 kHz mono injection through the production C/Zig provider seam",
+  "workloads": [
+    {
+      "label": "host, audio unsubscribed",
+      "pids": [
+        69099
+      ],
+      "providers_before": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "audioAvailability": "idle",
+        "audioSubscribers": 0,
+        "audioCaptureStarts": 0,
+        "audioProviderFrames": 0,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "providers_after": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "audioAvailability": "idle",
+        "audioSubscribers": 0,
+        "audioCaptureStarts": 0,
+        "audioProviderFrames": 0,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_frame_delta": 0,
+      "pipe_frame_delta": 0,
+      "cpu_percent_one_core": {
+        "mean": 0.17,
+        "min": 0.0,
+        "max": 0.4
+      },
+      "rss_bytes": {
+        "mean": 8634368.0,
+        "min": 8634368,
+        "max": 8634368
+      },
+      "physical_footprint_bytes": {
+        "mean": 2458008.0,
+        "min": 2458008,
+        "max": 2458008
+      },
+      "samples": [
+        {
+          "cpu_percent_one_core": 0.0,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.1,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.4,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.1,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.3,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.1,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.3,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.1,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.3,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        },
+        {
+          "cpu_percent_one_core": 0.0,
+          "rss_bytes": 8634368,
+          "physical_footprint_bytes": 2458008
+        }
+      ]
+    },
+    {
+      "label": "host + two active Visualizers",
+      "pids": [
+        69099,
+        69886,
+        70079
+      ],
+      "providers_before": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": true,
+        "audioSilent": false,
+        "audioPipeFrames": 55,
+        "audioAvailability": "live",
+        "audioSubscribers": 2,
+        "audioCaptureStarts": 1,
+        "audioProviderFrames": 55,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "providers_after": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": true,
+        "audioSilent": false,
+        "audioPipeFrames": 324,
+        "audioAvailability": "live",
+        "audioSubscribers": 2,
+        "audioCaptureStarts": 1,
+        "audioProviderFrames": 324,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_frame_delta": 269,
+      "pipe_frame_delta": 269,
+      "cpu_percent_one_core": {
+        "mean": 18.06,
+        "min": 11.4,
+        "max": 22.9
+      },
+      "rss_bytes": {
+        "mean": 260728422.4,
+        "min": 242810880,
+        "max": 305053696
+      },
+      "physical_footprint_bytes": {
+        "mean": 100723233.6,
+        "min": 94061480,
+        "max": 102532032
+      },
+      "samples": [
+        {
+          "cpu_percent_one_core": 14.799999999999999,
+          "rss_bytes": 304988160,
+          "physical_footprint_bytes": 102532032
+        },
+        {
+          "cpu_percent_one_core": 12.700000000000001,
+          "rss_bytes": 305053696,
+          "physical_footprint_bytes": 102384576
+        },
+        {
+          "cpu_percent_one_core": 14.7,
+          "rss_bytes": 290029568,
+          "physical_footprint_bytes": 102368192
+        },
+        {
+          "cpu_percent_one_core": 19.2,
+          "rss_bytes": 244269056,
+          "physical_footprint_bytes": 102400960
+        },
+        {
+          "cpu_percent_one_core": 20.8,
+          "rss_bytes": 244301824,
+          "physical_footprint_bytes": 102351808
+        },
+        {
+          "cpu_percent_one_core": 21.8,
+          "rss_bytes": 244301824,
+          "physical_footprint_bytes": 102351808
+        },
+        {
+          "cpu_percent_one_core": 22.9,
+          "rss_bytes": 244400128,
+          "physical_footprint_bytes": 102351808
+        },
+        {
+          "cpu_percent_one_core": 20.3,
+          "rss_bytes": 244318208,
+          "physical_footprint_bytes": 102368192
+        },
+        {
+          "cpu_percent_one_core": 22.0,
+          "rss_bytes": 242810880,
+          "physical_footprint_bytes": 94061480
+        },
+        {
+          "cpu_percent_one_core": 11.4,
+          "rss_bytes": 242810880,
+          "physical_footprint_bytes": 94061480
+        }
+      ]
+    },
+    {
+      "label": "host + two silent parked Visualizers",
+      "pids": [
+        69099,
+        69886,
+        70079
+      ],
+      "providers_before": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": true,
+        "audioSilent": true,
+        "audioPipeFrames": 401,
+        "audioAvailability": "live",
+        "audioSubscribers": 2,
+        "audioCaptureStarts": 1,
+        "audioProviderFrames": 401,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "providers_after": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": true,
+        "audioSilent": true,
+        "audioPipeFrames": 401,
+        "audioAvailability": "live",
+        "audioSubscribers": 2,
+        "audioCaptureStarts": 1,
+        "audioProviderFrames": 401,
+        "audioLastError": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_frame_delta": 0,
+      "pipe_frame_delta": 0,
+      "cpu_percent_one_core": {
+        "mean": 0.87,
+        "min": 0.5,
+        "max": 1.3
+      },
+      "rss_bytes": {
+        "mean": 194446950.4,
+        "min": 145899520,
+        "max": 242335744
+      },
+      "physical_footprint_bytes": {
+        "mean": 87548864.0,
+        "min": 87540672,
+        "max": 87557056
+      },
+      "samples": [
+        {
+          "cpu_percent_one_core": 0.8,
+          "rss_bytes": 242335744,
+          "physical_footprint_bytes": 87540672
+        },
+        {
+          "cpu_percent_one_core": 0.8,
+          "rss_bytes": 242335744,
+          "physical_footprint_bytes": 87540672
+        },
+        {
+          "cpu_percent_one_core": 0.8,
+          "rss_bytes": 242335744,
+          "physical_footprint_bytes": 87540672
+        },
+        {
+          "cpu_percent_one_core": 1.1,
+          "rss_bytes": 242335744,
+          "physical_footprint_bytes": 87540672
+        },
+        {
+          "cpu_percent_one_core": 0.5,
+          "rss_bytes": 242335744,
+          "physical_footprint_bytes": 87540672
+        },
+        {
+          "cpu_percent_one_core": 0.6,
+          "rss_bytes": 147161088,
+          "physical_footprint_bytes": 87557056
+        },
+        {
+          "cpu_percent_one_core": 1.3,
+          "rss_bytes": 146620416,
+          "physical_footprint_bytes": 87557056
+        },
+        {
+          "cpu_percent_one_core": 0.9,
+          "rss_bytes": 146538496,
+          "physical_footprint_bytes": 87557056
+        },
+        {
+          "cpu_percent_one_core": 0.9,
+          "rss_bytes": 146571264,
+          "physical_footprint_bytes": 87557056
+        },
+        {
+          "cpu_percent_one_core": 1.0,
+          "rss_bytes": 145899520,
+          "physical_footprint_bytes": 87557056
+        }
+      ]
+    }
+  ]
+}
