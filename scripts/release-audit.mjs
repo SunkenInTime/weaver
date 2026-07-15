@@ -7,7 +7,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedNativeCommit = "359f5c9caaecd542eb8d838e91c3ff347f6fe3dd";
+const expectedNativeCommit = "9cb7cd98055e15d68f5f6f81a6debe23186cb6db";
 
 function filesBelow(root) {
   const output = [];
@@ -74,4 +74,3 @@ for (const required of [
 ]) assert.ok(workflow.includes(required), `CI workflow is missing ${required}`);
 
 process.stdout.write(`Release audit passed; Native SDK pinned at ${nativeCommit.slice(0, 8)} and no platform/private API leaked into the SDK.\n`);
-
