@@ -1,0 +1,85 @@
+{
+  "schema": "weaver.macos-release-closure.v1",
+  "recorded_at": "2026-07-15T15:10:39Z",
+  "weaver_implementation_commit": "771042ffb9387d0c8ed0eef0a600b8b91f9f17cd",
+  "native_sdk_commit": "359f5c9caaecd542eb8d838e91c3ff347f6fe3dd",
+  "machine": {
+    "model": "MacBook Air",
+    "chip": "Apple M2",
+    "memory_gib": 8,
+    "architecture": "arm64",
+    "macos_version": "26.5.1",
+    "macos_build": "25F80",
+    "zig": "0.16.0",
+    "node_local": "23.11.0",
+    "node_ci": "22"
+  },
+  "local_gates": {
+    "npm_build": "pass",
+    "npm_typecheck": "pass",
+    "npm_test": { "status": "pass", "passed": 22, "failed": 0 },
+    "release_audit": "pass",
+    "portable_install_artifact_logs_follow": "pass",
+    "example_surfaces": { "status": "pass", "count": 8 },
+    "runtime_platform_services": "pass",
+    "runtime_tests": "pass",
+    "runtime_release_build": "pass",
+    "host_tests": "pass",
+    "host_release_build": "pass",
+    "host_codesign_strict": "pass",
+    "host_bundle_id": "com.sunkenintime.weaver.host",
+    "host_minimum_macos": "14.2",
+    "media_public_api_probe": "pass",
+    "native_sdk_stock_profile": "pass",
+    "native_sdk_widget_profile": "pass",
+    "macos_host_control_smoke": "pass",
+    "macos_host_real_widget_smoke": "pass"
+  },
+  "ci_jobs": {
+    "windows_gate": "pending",
+    "macos_headless_apple_silicon": "pending",
+    "macos_headless_intel": "pending",
+    "macos_session_apple_silicon": "pending"
+  },
+  "clean_clone": {
+    "status": "pending",
+    "branch": "macos/16-ci-regression-closure"
+  },
+  "media_unavailable": {
+    "status_value": "unavailable",
+    "subscriber_count_exposed": true,
+    "pipe_frames": 0,
+    "provider_socket_created": false,
+    "fabricated_frame": false,
+    "private_api_dependency": false
+  },
+  "failure_routing": [
+    {
+      "failure": "revocation smoke could race with live frames captured before the control transition",
+      "fixed_in": "2001014d4118ff4ee985dd893647566d32dd6308",
+      "resolution": "wait for revoked state then assert the frame counter remains stable across a later status interval; exact final-zero count remains unit-tested"
+    },
+    {
+      "failure": "first PR16 local session attempt used an older PR13 host binary and status lacked mediaAvailability",
+      "resolution": "rebuilt the host from the current checkout; full smoke passed; clean CI builds before running the session gate"
+    }
+  ],
+  "unverified_physical": [
+    "permissioned OS screen recording",
+    "external displays on every side and reconnect",
+    "Show Desktop, Stage Manager, Space switching, fullscreen, lock and unlock",
+    "sleep and wake",
+    "real System Audio Recording consent, mix, callback cost, revocation, and physical route recovery",
+    "Bluetooth and AirPlay",
+    "physical Intel runtime and performance",
+    "Instruments and privileged whole-SoC energy",
+    "Developer ID signing, notarization, App Sandbox, universal packaging, and login item"
+  ],
+  "cleanup": {
+    "weaver_processes": 0,
+    "new_runtime_roots": 0,
+    "test_registrations": 0,
+    "test_permission_helpers": 0,
+    "user_data_deleted": false
+  }
+}
