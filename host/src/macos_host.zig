@@ -6,13 +6,7 @@ const provider_protocol = @import("provider_protocol.zig");
 const system_providers = @import("providers_macos.zig");
 
 const posix = std.posix;
-const c = @cImport({
-    @cInclude("libproc.h");
-    @cInclude("sys/proc_info.h");
-    @cInclude("sys/resource.h");
-    @cInclude("sys/stat.h");
-    @cInclude("sys/wait.h");
-});
+const c = @cImport({ @cInclude("macos_system.h"); });
 
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes = supervisor.max_path_bytes;
@@ -474,12 +468,12 @@ const Host = struct {
     fn sampleCosts(self: *Host, now_ms: u64) void {
         for (&self.slots) |*slot| {
             const pid = slot.platform.process orelse continue;
-            var usage: c.struct_rusage_info_v4 = undefined;
-            if (c.proc_pid_rusage(pid, c.RUSAGE_INFO_V4, @ptrCast(&usage)) != 0) continue;
-            var task: c.struct_proc_taskinfo = undefined;
-            const task_size = c.proc_pidinfo(pid, c.PROC_PIDTASKINFO, 0, &task, @sizeOf(c.struct_proc_taskinfo));
-            if (task_size == @sizeOf(c.struct_proc_taskinfo)) slot.platform.threads = @intCast(@max(0, task.pti_threadnum));
-            slot.platform.costs.add(usage.ri_phys_footprint, usage.ri_user_time + usage.ri_system_time, now_ms);
+            var footprint: u64 = 0;
+            var cpu_time_ns: u64 = 0;
+            var threads: u32 = 0;
+            if (c.weaver_process_sample(pid, &footprint, &cpu_time_ns, &threads) != 0) continue;
+            slot.platform.threads = threads;
+            slot.platform.costs.add(footprint, cpu_time_ns, now_ms);
         }
     }
 
@@ -634,7 +628,7 @@ fn run(init: std.process.Init) !void {
     try std.Io.Dir.cwd().createDirPath(init.io, runtime_root);
     const runtime_root_z = try allocator.dupeZ(u8, runtime_root);
     defer allocator.free(runtime_root_z);
-    _ = c.chmod(runtime_root_z.ptr, 0o700);
+    _ = c.weaver_chmod_private(runtime_root_z.ptr);
     defer std.Io.Dir.cwd().deleteTree(init.io, runtime_root) catch {};
 
     const registry_path = try std.fs.path.join(allocator, &.{ data_root, "registry.json" });
@@ -768,8 +762,8 @@ fn cleanupStaleChildren(io: std.Io, allocator: std.mem.Allocator, runtime_root: 
         const marker_exe = std.Io.Dir.cwd().readFileAlloc(io, marker_path, allocator, .limited(max_path_bytes)) catch continue;
         defer allocator.free(marker_exe);
         if (!std.mem.eql(u8, marker_exe, runtime_exe)) continue;
-        var actual_path: [c.PROC_PIDPATHINFO_MAXSIZE]u8 = undefined;
-        const actual_len = c.proc_pidpath(pid, &actual_path, actual_path.len);
+        var actual_path: [c.WEAVER_PROCESS_PATH_CAPACITY]u8 = undefined;
+        const actual_len = c.weaver_process_path(pid, &actual_path, actual_path.len);
         if (actual_len <= 0 or !std.mem.eql(u8, actual_path[0..@intCast(actual_len)], runtime_exe)) continue;
         posix.kill(-pid, .KILL) catch posix.kill(pid, .KILL) catch {};
     }

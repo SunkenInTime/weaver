@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    const target = hostTarget(b);
     const optimize = b.standardOptimizeOption(.{});
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -111,12 +111,43 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
 }
 
+fn hostTarget(b: *std.Build) std.Build.ResolvedTarget {
+    const target = b.standardTargetOptions(.{});
+    if (target.result.os.tag != .macos) return target;
+    if (b.sysroot == null) b.sysroot = macosSdkRoot(b);
+    var query = target.query;
+    query.os_tag = .macos;
+    query.os_version_min = .{ .semver = .{ .major = 14, .minor = 2, .patch = 0 } };
+    return b.resolveTargetQuery(query);
+}
+
+fn macosSdkRoot(b: *std.Build) []const u8 {
+    if (b.graph.environ_map.get("SDKROOT")) |root| if (root.len > 0) return root;
+    const result = std.process.run(b.allocator, b.graph.io, .{
+        .argv = &.{ "xcrun", "--sdk", "macosx", "--show-sdk-path" },
+        .stdout_limit = .limited(16 * 1024),
+        .stderr_limit = .limited(16 * 1024),
+    }) catch @panic("xcrun is required to locate the macOS SDK");
+    b.allocator.free(result.stderr);
+    switch (result.term) {
+        .exited => |code| if (code != 0) @panic("xcrun could not locate the macOS SDK"),
+        else => @panic("xcrun could not locate the macOS SDK"),
+    }
+    return std.mem.trim(u8, result.stdout, " \t\r\n");
+}
+
 fn addMacosAudio(module: *std.Build.Module, b: *std.Build) void {
+    const sdk_include = b.fmt("-I{s}/usr/include", .{b.sysroot.?});
     module.addCSourceFile(.{
         .file = b.path("src/macos_audio.m"),
-        .flags = &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2" },
+        .flags = &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include },
+    });
+    module.addCSourceFile(.{
+        .file = b.path("src/macos_system.c"),
+        .flags = &.{ "-std=c11", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include },
     });
     module.addIncludePath(b.path("src"));
+    module.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ b.sysroot.?, "System", "Library", "Frameworks" }) });
     module.linkFramework("CoreAudio", .{});
     module.linkFramework("Foundation", .{});
 }
