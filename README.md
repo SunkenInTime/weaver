@@ -53,8 +53,11 @@ change.
 Host-owned CPU, memory, and audio providers now run on both platforms and stay
 off with no subscriber. macOS audio uses one public Core Audio process tap and
 one shared analysis/fan-out pipeline; unavailable permission or hardware is
-reported explicitly and never replaced with fake frames. Media remains
-explicit port work, not a stubbed capability.
+reported explicitly and never replaced with fake frames. macOS media is
+explicitly unavailable in v0: public APIs at the 14.2 floor do not observe
+other applications' Now Playing sessions, so Weaver sends no fake media frame
+and does not depend on private MediaRemote APIs. See
+[`ADR 0015`](docs/adr/0015-macos-media-provider-unavailable.md).
 
 ## Quickstart
 
