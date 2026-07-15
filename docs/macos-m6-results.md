@@ -155,6 +155,51 @@ held 34 descriptors; physical footprint ranged from 95.962 to 100.763 MB and
 teardown from 8.85 to 12.13 ms (10.56 ms mean). No renderer transition or
 leftover Widget process remained.
 
+## Post-closure memory correction and follow-up
+
+The published 95–124 MB process totals above included an accidental AppKit
+application icon cost, not a necessary price of one-process isolation or the
+retained renderer. A `no_activate` Widget runs with accessory activation
+policy and has no Dock or Command-Tab presence, but the host still decoded the
+default app icon and asked AppKit to adopt it. Allocation stacks attributed a
+33.571 MB Dock icon snapshot plus a 16 MiB purgeable-large allocation to that
+call. Native `73b6e20e` now plans no Dock icon for accessory processes and the
+host also refuses to publish one under accessory policy.
+
+The same production Clock measurement now ends at 29.590 MB physical
+(30.016 MB peak, 34 descriptors); forced software ends at 25.658 MB. Relative
+to the published 100.156 MB Metal Clock, this removes 70.566 MB / 70.46%, and
+the honest retained-Metal premium is 3.932 MB. The corrected `vmmap` contains
+neither the prior CG-image region nor `MALLOC_LARGE`. This does not merge
+Widgets or weaken the crash-isolation contract: every Widget remains one
+process.
+
+The next live target was the production raster cache. The composite path
+uploaded every command raster to a Metal texture but also retained the CPU
+`CGImage` used by the hybrid/reference renderer. The cache now skips that
+second representation in production, while `NATIVE_SDK_GPU_COMPARE=1` and the
+CPU path explicitly retain it. An interleaved 60 Hz synthetic A/B measured:
+
+| Production binary | Runs | Physical mean | Physical median | CPU mean | CG raster region |
+|---|---:|---:|---:|---:|---:|
+| Before | 3 | 53.156 MB | 52.774 MB | 20.87% | 5.872–5.904 MiB virtual |
+| GPU texture only | 4 | 51.451 MB | 51.594 MB | 16.83% | absent |
+
+The physical saving is 1.705 MB by mean / 1.180 MB by median. Short CPU
+samples are load-sensitive, so the lower candidate CPU is only a
+non-regression signal, not a performance claim. Metal graphics and IOSurface
+regions were unchanged, every run retained 34 descriptors, and the explicit
+GPU-vs-CPU comparator produced 199 consecutive frames with zero differing
+pixels.
+
+The remaining active memory is mostly honest surface storage: the three
+CAMetalLayer drawables, the retained canvas target, and cached command
+textures. Forcing two drawables saved about 3.54 MB in the short run, but made
+`nextDrawable` wait 3.734/5.080/5.862 ms at p50/p90/p99 and moved frame p90
+from the published 16.704 ms to 17.961 ms. That trade was rejected rather than
+buy memory with input/frame latency. The machine-readable follow-up is
+[`macos-m6-memory-data.json`](macos-m6-memory-data.json).
+
 ## Instruments and physical-environment boundary
 
 The required before/after Instruments capture cannot launch on this machine.
