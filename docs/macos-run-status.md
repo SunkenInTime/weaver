@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 02 implementation complete; pointer PR pending`
+- State: `IN PROGRESS — PR 02 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T02:11:48-07:00
+- Last updated: 2026-07-15T02:13:40-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,7 +20,7 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/01-appkit-windowing` | `819e878a` | [#1](https://github.com/SunkenInTime/native/pull/1) | `weaver-main` |
-| Weaver | `macos/02-appkit-windowing` | pending pointer commit | pending | [#3](https://github.com/SunkenInTime/weaver/pull/3) |
+| Weaver | `macos/02-appkit-windowing` | `9e74535` | [#4](https://github.com/SunkenInTime/weaver/pull/4) | [#3](https://github.com/SunkenInTime/weaver/pull/3) |
 
 ## Last reproducible capability
 
@@ -79,10 +79,10 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: none created
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: Native SDK clean; Weaver pointer/docs staged next
-- Latest stack branches pushed: Weaver PR 01 and Native SDK fork PR 01 pushed
+- Working trees/submodule clean: clean after the PR 02 status update; submodule clean
+- Latest stack branches pushed: Weaver PRs 01-02 and Native SDK fork PR 01 pushed
 
 ## Next executable task
 
-1. Commit the Native SDK pointer plus M1 evidence on `macos/02-appkit-windowing`, push, and open the stacked Weaver PR 02.
-2. Start Weaver PR 03 portable runtime services and direct software Clock from that pointer.
+1. Inspect PR 02 CI and correct actionable failures without weakening coverage.
+2. Create `macos/03-runtime-clock` from PR 02 for portable runtime services and the direct software Clock.
