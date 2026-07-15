@@ -7,7 +7,7 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 01 implementation complete locally`
+- State: `IN PROGRESS — PR 01 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
 - Last updated: 2026-07-15T01:42:05-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
@@ -20,7 +20,7 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | — | — | — | `weaver-main` |
-| Weaver | `macos/01-build-seams` | pending commit | pending | `master` |
+| Weaver | `macos/01-build-seams` | `9ba2024` | [#3](https://github.com/SunkenInTime/weaver/pull/3) | `master` |
 
 ## Last reproducible capability
 
@@ -76,10 +76,10 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: none created
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: pending commit; submodule clean
-- Latest stack branches pushed: pending
+- Working trees/submodule clean: clean after the PR 01 status update; submodule clean
+- Latest stack branches pushed: PR 01 pushed
 
 ## Next executable task
 
-1. Commit/push Weaver PR 01, open its draft PR, and record CI results.
+1. Inspect PR 01 CI and correct actionable failures without weakening coverage.
 2. Create Native SDK `macos/01-appkit-windowing` from `weaver-main` for PR 02.
