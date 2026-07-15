@@ -236,9 +236,9 @@ const Host = struct {
     }
 
     fn superviseRenderer(self: *Host, now_ms: u64) void {
-        const running = self.renderer.platform.process != null;
+        const renderer_running = self.renderer.platform.process != null;
         const exited = if (self.renderer.platform.process) |process| c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0 else false;
-        switch (supervisor.nextRendererAction(running, exited, self.rendererDesired(), now_ms, self.renderer.next_restart_ms)) {
+        switch (supervisor.nextRendererAction(renderer_running, exited, self.rendererDesired(), now_ms, self.renderer.next_restart_ms)) {
             .none => {},
             .handle_exit => {
                 const process = self.renderer.platform.process.?;
