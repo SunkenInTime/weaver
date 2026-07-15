@@ -2,7 +2,8 @@
 
 Recorded 2026-07-15 on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS
 26.5.1 (25F80), arm64, Zig 0.16.0, Node 23.11.0, and Xcode 16.0 (16A242d).
-The Weaver branch is `macos/10-macos-daemon`; Native SDK remains pinned to
+The Weaver branch is `macos/10-macos-daemon` at implementation commit
+`aa9ce6c`, published as draft [Weaver PR #12](https://github.com/SunkenInTime/weaver/pull/12); Native SDK remains pinned to
 `359f5c9c` from draft Native PR #5. Runtime and host artifacts were
 ReleaseFast. This layer implements [ADR 0013](adr/0013-macos-daemon-uds-process-ownership.md)
 without changing Widget source, the public SDK, or `.weave`.
