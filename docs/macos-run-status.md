@@ -41,7 +41,7 @@ blocker and the next executable command.
 | Network parity | PASS | Ephemeral NSURLSession transport plus 12/12 runtime suite; deterministic loopback TLS covers success, timeout, caps, redirect denial, malformed URL, certificate failure, and active-request cancellation; production probe returned 200 |
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
-| CLI/artifact lifecycle | pending | Weaver #10 local macOS gate passes deterministic pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs; Windows/Apple-silicon/Intel CI proof is running |
+| CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
 | macOS daemon / `weaver dev` | pending | — |
 | CPU/memory providers | pending | — |
 | Audio decision/implementation | pending | — |
