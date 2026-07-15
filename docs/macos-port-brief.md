@@ -14,6 +14,12 @@ covers parity with the product that exists when Lane D starts. It does not pull
 future manager, gallery, remix, or general packaging work forward merely
 because macOS is being added.
 
+Compatibility is the floor, not the aspiration. The macOS implementation
+should use AppKit, Metal, Mach, IOSurface, event delivery, and other public
+platform strengths aggressively behind Weaver's internal seams when they make
+the product materially leaner. “It works on macOS” is not Lane D's success
+condition; it should feel like Weaver's architecture was meant for macOS.
+
 ## Non-negotiable delivery shape: stacked PRs
 
 The macOS implementation MUST be delivered as stacked pull requests. Do not
@@ -159,22 +165,95 @@ Retina backing scale and logical placement are different contracts.
 
 The macOS port does not automatically inherit the Windows shared renderer.
 That process exists because measurements justified sharing D3D11 and
-DirectComposition resources. Start with the already available damage-aware
-software path for the baseline Clock, then map a Widget requesting `gpu` to
-Native SDK's in-process Metal presenter. Measure both.
+DirectComposition resources. macOS must earn its renderer architecture from
+fresh measurements. The damage-aware software path is the correctness and
+fallback baseline, not a predetermined default. Metal is a candidate default
+for the entire Widget surface, including static retained Widgets, if it lowers
+the total system bill while preserving identical SDK behavior and pixels.
 
-The initial policy is:
+The bakeoff must compare at least:
 
-- quiet/static Widgets default to software;
-- Widgets selected as GPU Widgets use Metal;
-- `weaver-renderer` remains Windows-only;
-- a shared Metal renderer is a later architectural change only if measured
-  aggregate footprint, startup cost, or reliability proves that it pays rent.
+1. damage-aware software presentation;
+2. one in-process Metal presenter per Widget;
+3. an adaptive hybrid that retains unchanged content and sends only genuinely
+   changing work to Metal;
+4. a shared Metal service if per-process devices, queues, pipeline state,
+   driver allocations, or threads scale badly;
+5. a shared window/compositor owner with crash-isolated Widget logic processes
+   only if a thinner shared-Metal design cannot remove the scaling cost.
+
+Options 4 and 5 are research candidates, not foregone conclusions. A shared
+design must use public, distributable macOS primitives and keep one
+crash-isolated runtime/capability process per Widget. Moving every Widget's JS
+logic into one process is not an acceptable optimization. The internal
+generated `renderBackend` choice may change by platform; Widget source and the
+public API may not.
+
+The decision is made on total host + Widget + renderer cost for realistic
+loads, not renderer FPS in isolation. Test one, three, and ten static Widgets;
+mixed static/animated Widgets; and one and three 60 Hz synthetic Widgets.
+Include cold and warm first frame, idle and active CPU, wakeups, energy impact,
+thread count, file descriptors, process footprint, dirty/private memory,
+compressed memory, Metal/IOSurface resource bytes, frame latency, cadence,
+and teardown. Covered, occluded, all-Spaces, sleep/wake, and display-change
+behavior are part of the performance result because a fast visible path that
+polls while hidden is not lean.
+
+The initial engineering targets to investigate include:
+
+- share `MTLDevice`, command queues, immutable pipeline state, samplers, and
+  shader libraries at the widest safe lifetime;
+- ship precompiled Metal libraries instead of compiling shader source in each
+  Widget at startup when packaging permits it;
+- use the binary packet path and eliminate JSON parsing, per-frame Objective-C
+  collections, temporary buffers, readbacks, and allocations from production
+  presentation;
+- keep retained pixels/textures resident and update only proven dirty regions;
+- choose private versus shared storage modes from actual CPU/GPU ownership and
+  avoid CPU-visible resources where no CPU access remains;
+- reuse command buffers, upload rings, textures, scratch surfaces, and image/
+  font resources with explicit bounded caches;
+- make drawable acquisition and completion event-driven, cap frames in flight,
+  and arm no display clock for a clean static Widget;
+- lazily load Metal, AppKit-adjacent media frameworks, and provider machinery
+  only when the selected Widget/provider needs them;
+- audit thread stack reservations, framework imports, allocator peaks, logging,
+  status sampling, provider polling, and IPC copies as part of the same bill.
+
+Use Instruments Time Profiler, Allocations/VM Tracker, System Trace, Metal
+System Trace, and Energy diagnostics alongside Weaver's own counters. Every
+optimization must have a before/after workload capture. Do not keep an
+optimization because it sounds native; keep it because the full workload got
+measurably leaner without weakening correctness, crash isolation, fallback,
+or API behavior.
+
+### Whole-application leanness
+
+The renderer bakeoff is the sharpest experiment, but the budget belongs to the
+entire product. Every implementation PR must update a cost ledger for the
+processes it affects. The host, every Widget runtime, an optional renderer,
+provider workers, framework helpers, IPC, timers, and background wakeups all
+count. Shared memory is not free merely because it is absent from one
+process's private column, and moving work into a daemon does not erase it.
+
+Prefer event-driven wakeups over probes; fixed-capacity/reused storage over
+per-turn allocation; binary bounded transport over repeated JSON parsing in
+hot paths; lazy framework/provider initialization over permanent imports; and
+one shared collection over per-subscriber polling. Preserve the widget
+capacity profile, QuickJS turn/memory limits, source/capability isolation, and
+process-per-Widget failure boundary. Any proposal to spend more memory or
+threads for lower latency must show the whole-workload tradeoff explicitly.
+
+Performance is a continuous stack gate, not a cleanup PR at the end. A change
+that regresses a previously measured idle, startup, memory, wakeup, or active
+budget must explain and earn that regression in the PR where it occurs.
 
 Backend reports, status output, demotion, recovery, frame cadence, damage,
 alpha, images, text, input hit-testing, and canvas clocks must remain honest.
 A requested but unavailable Metal backend must demote visibly to software or
 fail explicitly; it may not report `metal` while presenting software pixels.
+Software remains the recovery/reference path even if the bakeoff makes Metal
+the default for every healthy Widget.
 
 ### Host and provider policy
 
@@ -187,7 +266,8 @@ not by copying `host/src/main.zig` into a second daemon. The macOS host needs:
 - atomic registry/status handling and install-owned source semantics;
 - per-widget provider endpoints and subscription-driven provider lifetime;
 - process PID, thread count, CPU, and a documented macOS footprint metric;
-- software/Metal status without launching the Windows renderer process;
+- software/Metal status and the selected macOS renderer lifecycle without
+  ever launching the Windows renderer binary;
 - shutdown and restart cleanup that leaves no child or socket behind.
 
 CPU and memory providers are public-system-API work. Audio and system-wide
@@ -287,23 +367,61 @@ success, timeout, oversized body, disallowed redirect, malformed URL,
 certificate failure, and shutdown with an active request. Windows WinHTTP
 regressions remain green.
 
-### PR 06 — Software/Metal rendering parity
+### PR 06 — Whole-system renderer bakeoff and architecture decision
 
-**Repositories:** Native SDK fork PR 03 only if presenter fixes are required,
-plus Weaver.
+**Repositories:** Native SDK fork spike PR plus Weaver measurement/ADR PR.
 
-Map `renderBackend: "gpu"` to Metal on macOS while retaining software for quiet
-Widgets. Verify premultiplied alpha, transparent clears, text, images, canvas,
-damage, input geometry, first-frame show, occlusion pacing, and frame clocks.
-Implement honest fallback/demotion reporting. Do not add a shared Metal
-renderer in this PR.
+Build the smallest honest harnesses needed to compare software, in-process
+Metal, retained/immediate hybrid, and a shared-Metal proof when per-process
+costs warrant it. Do not optimize only the animated synthetic case: include
+static Clock/Pomodoro, mixed real Widgets, and 1/3/10-Widget scaling. Instrument
+packet construction, decode, retained planning, texture upload, command encode,
+drawable wait, GPU completion, and application-loop dispatch separately.
 
-**Gate:** Clock and Pomodoro in software; Visualizer and the synthetic parity
-fixture in Metal; pixel comparisons where deterministic; 10-minute cadence
-and idle captures; repeated GPU Widget launch/close with no monotonic resource
-growth; backend shown correctly in logs.
+Specifically audit the existing AppKit presenter's per-view Metal device and
+queue ownership, runtime shader compilation, shared-storage textures,
+Objective-C packet/object construction, scratch texture pool, verification
+readbacks, image uploads, and completion handlers. Establish which paths are
+debug/automation-only and ensure they disappear from production cost. Prototype
+precompiled metallib loading, process-wide immutable resource caches, bounded
+upload/resource reuse, binary packets, and a static clean-frame fast path.
 
-### PR 07 — Cross-platform CLI and artifact lifecycle
+If one in-process Metal stack per Widget scales poorly, prototype public
+IOSurface/Metal sharing or another public thin-presentation design. Measure a
+shared service against its IPC, process, synchronization, fallback, window,
+and input costs. The spike may conclude that in-process Metal already wins;
+it may not skip the scaling measurement.
+
+**Gate:** a renderer ADR selects the default and fallback architecture using
+captured whole-workload numbers. It states whether all healthy Widgets use
+Metal, whether backend choice remains adaptive, whether a shared service is
+required, which resources are shared, and why the rejected designs lose. All
+candidates pass the same pixel/API/input tests before their performance is
+compared. No production default changes in the measurement PR.
+
+### PR 07 — Production lean Metal/rendering architecture
+
+**Repositories:** Native SDK fork PR 03 (and additional stacked fork PRs if
+the chosen shared design requires them), plus Weaver.
+
+Implement the PR 06 decision completely. Metal may become the default for the
+entire macOS Widget surface when that is the measured winner; no Widget source
+or public API change is allowed. Land the selected device/queue/pipeline/
+texture lifetime, binary command path, retained/damage policy, resource reuse,
+static parking, occlusion pacing, and lazy initialization. Implement honest
+software fallback, live demotion/recovery, and status/cost attribution. A
+shared service, if chosen, starts only while needed and may never own Widget JS
+logic or capability state.
+
+**Gate:** Clock, Pomodoro, System, Visualizer, Now Playing when available, and
+synthetic parity fixtures pass in the chosen default and forced-software
+reference paths. Pixel/input/API parity, cold/warm first frame, 1/3/10 scaling,
+10-minute active cadence, 10-minute static idle, covered/occluded behavior,
+sleep/wake, display changes, repeated launch/close, crash/demotion/recovery,
+and resource-growth tests pass. The result document includes total cost across
+every participating process and before/after Instruments captures.
+
+### PR 08 — Cross-platform CLI and artifact lifecycle
 
 **Repository:** Weaver.
 
@@ -318,9 +436,9 @@ manifest.
 **Gate:** pack on Windows and macOS produces identical bytes from identical
 source; cross-platform pack/open/install round trips; traversal, symlink,
 containment, replacement, rollback, abandoned-lock, and cleanup tests pass.
-Host-dependent commands remain clearly unavailable until PR 09.
+Host-dependent commands remain clearly unavailable until PR 10.
 
-### PR 08 — Extract the portable supervisor core
+### PR 09 — Extract the portable supervisor core
 
 **Repository:** Weaver.
 
@@ -335,14 +453,14 @@ do not mix the macOS daemon into the extraction.
 renderer recovery, crash/backoff, status, and shutdown gates remain green.
 Unit tests exercise the extracted supervisor with a fake platform adapter.
 
-### PR 09 — macOS daemon, IPC, status, and `weaver dev`
+### PR 10 — macOS daemon, IPC, status, and `weaver dev`
 
 **Repository:** Weaver.
 
 Implement the macOS host adapter: singleton/control channel, acknowledged
 reload, Unix-domain provider endpoints, child spawn/environment, graceful and
 forced termination, crash observation, stale endpoint cleanup, process CPU/
-thread/footprint metrics, and no external renderer process. Wire CLI
+thread/footprint metrics, and the renderer lifecycle selected by PR 06. Wire CLI
 `up`, `down`, `status`, `logs`, install reload, uninstall reload, and
 `weaver dev` to it. Preserve stateful in-process hot-swap when only the bundle
 changes and restart only when the manifest/window contract changes.
@@ -352,7 +470,7 @@ hot-swap → stop. Install/replace/uninstall is acknowledged and leaves no
 process or endpoint behind. Kill the host and Widgets in adverse orders and
 verify recovery/backoff/status. Run concurrent CLI registry mutations.
 
-### PR 10 — CPU and memory providers
+### PR 11 — CPU and memory providers
 
 **Repository:** Weaver.
 
@@ -366,7 +484,7 @@ value by matching the public SDK—not by exposing Mach terms to Widgets.
 fan-out; zero collection when unsubscribed; sleep/wake and rapid subscribe/
 unsubscribe; measured host idle cost with zero and multiple subscribers.
 
-### PR 11 — Audio capture feasibility and shipping decision
+### PR 12 — Audio capture feasibility and shipping decision
 
 **Repository:** Weaver documentation/ADR, with a disposable spike branch if
 needed. This remains in the stack because its conclusion fixes the support
@@ -383,7 +501,7 @@ fragile shortcuts unless explicitly approved as a product tradeoff.
 story, fallback/unavailable behavior, and shipping constraints. Raw spike
 results are attached. No production audio code lands without this decision.
 
-### PR 12 — Production audio provider and Visualizer
+### PR 13 — Production audio provider and Visualizer
 
 **Repository:** Weaver, plus a Native SDK fork PR only if a genuinely generic
 public capture seam is required.
@@ -400,7 +518,7 @@ decay → silence → resume; permission deny/allow/revoke; default-device and
 output-route changes; multiple subscribers; host/widget crash recovery;
 measured silent and active CPU/footprint.
 
-### PR 13 — Media provider feasibility and shipping decision
+### PR 14 — Media provider feasibility and shipping decision
 
 **Repository:** Weaver documentation/ADR.
 
@@ -415,9 +533,9 @@ poll/push cadence, privacy/distribution constraints, and honest unavailable
 behavior. If public parity is impossible, narrow the provider explicitly
 rather than shipping a hidden private dependency.
 
-### PR 14 — Production media provider
+### PR 15 — Production media provider
 
-**Repository:** Weaver. Omit only if PR 13 explicitly decides that no honest
+**Repository:** Weaver. Omit only if PR 14 explicitly decides that no honest
 shippable implementation exists for this release.
 
 Implement the approved host-owned media adapter behind the existing provider
@@ -431,7 +549,7 @@ players; play/pause/seek if approved; player handoff, no active player,
 sleep/wake, app quit, malformed/missing artwork, multiple subscribers, and
 measured idle behavior.
 
-### PR 15 — macOS CI, regression matrix, and release closure
+### PR 16 — macOS CI, regression matrix, and release closure
 
 **Repository:** Weaver, with final Native SDK fork cleanup PRs if earlier
 evidence found issues.
@@ -486,13 +604,20 @@ permission helper remains after teardown.
 ### Performance and honest billing
 
 - Clock private/footprint metric and idle CPU, with the macOS metric defined.
-- Host alone, host plus one Widget, and host plus mixed software/Metal Widgets.
+- Host alone; host plus 1/3/10 static Widgets; mixed static/animated Widgets;
+  and 1/3 sustained 60 Hz Widgets, with totals across all processes.
 - Visualizer silent and active; provider unsubscribed versus subscribed.
-- First visible frame, hot-swap latency, provider-to-present latency, and
-  cadence over at least ten minutes.
-- Software damage behavior, Metal resource cost, occluded behavior, and sleep/
-  wake recovery. A `<=15 MiB` goal is retained, but the result must name the
-  macOS metric and may not masquerade as Windows `PrivateUsage` parity.
+- Cold and warm first visible frame, hot-swap latency, provider-to-present
+  latency, input-to-present latency, and cadence over at least ten minutes.
+- CPU, wakeups, energy impact, threads, descriptors, dirty/private and
+  compressed memory, process footprint, Metal/IOSurface bytes, frames in
+  flight, upload bytes, and allocation/high-water counts.
+- Software damage behavior, retained-cache behavior, Metal resource cost,
+  shared-renderer cost when selected, covered/occluded behavior, and sleep/
+  wake recovery. A `<=15 MiB` goal is retained for a quiet Widget, but the
+  result must name the macOS metric and may not masquerade as Windows
+  `PrivateUsage` parity. Aggregate 3/10-Widget scaling is equally important;
+  optimizing a single process while total cost grows linearly is not a win.
 
 ## Definition of done
 
@@ -512,3 +637,6 @@ Lane D is complete only when:
 7. The two PR stacks have been reviewed and merged bottom-up, the superproject
    pins the final canonical Native SDK fork commit, and the working trees and
    submodule are clean.
+8. The renderer ADR proves the selected macOS architecture against software,
+   in-process Metal, hybrid, and shared candidates; the implementation meets
+   its whole-application cost ledger without changing Widget API behavior.
