@@ -4,6 +4,7 @@ const native_sdk = @import("native_sdk");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
 const provider_mod = @import("provider.zig");
+const platform = @import("platform/root.zig");
 const storage_mod = @import("storage.zig");
 const tree_mod = @import("tree.zig");
 const widget_log = @import("widget_log.zig");
@@ -452,7 +453,7 @@ pub fn main(init: std.process.Init) !void {
     const log_name = try safeLogName(allocator, loaded.manifest.name);
     const log_path = try std.fs.path.join(allocator, &.{ log_directory, log_name });
     try widget_log.init(log_path);
-    std.log.info("widget runtime starting pid={d}{s}", .{ std.os.windows.GetCurrentProcessId(), if (dev) " dev=true" else "" });
+    std.log.info("widget runtime starting pid={d}{s}", .{ platform.currentProcessId(), if (dev) " dev=true" else "" });
     var storage = try storage_mod.Store.init(init.io, allocator, init.environ_map.get("LOCALAPPDATA"), loaded.manifest.name);
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
     const bundle_stat = try std.Io.Dir.cwd().statFile(init.io, bundle_path, .{});

@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,6 +264,11 @@ function copyWidgetAssets(sourceDirectory: string, outputDirectory: string, root
 }
 
 function weaverResolutionPlugin(sourceRoot: string): import("esbuild").Plugin {
+  // esbuild resolves importer directories through the filesystem. On macOS,
+  // tmpdir() commonly returns /var/... while the resolver reports the same
+  // directory through its canonical /private/var/... path. Compare against
+  // the canonical root so a real child is not mistaken for an escape.
+  const canonicalSourceRoot = realpathSync(sourceRoot);
   return {
     name: "weaver-import-wall",
     setup(pluginBuild) {
@@ -279,7 +284,7 @@ function weaverResolutionPlugin(sourceRoot: string): import("esbuild").Plugin {
           return { errors: [{ text: `External import "${args.path}" is not allowed in a widget. Only @weaver/sdk imports are bundled.` }] };
         }
         const candidate = resolve(args.resolveDir, args.path);
-        if (!pathsEqual(candidate, sourceRoot) && !pathInside(sourceRoot, candidate)) {
+        if (!pathsEqual(candidate, canonicalSourceRoot) && !pathInside(canonicalSourceRoot, candidate)) {
           return { errors: [{ text: `Import "${args.path}" escapes the widget source root ${sourceRoot}` }] };
         }
         return null;

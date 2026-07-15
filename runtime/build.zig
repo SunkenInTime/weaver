@@ -8,13 +8,25 @@ pub fn build(b: *std.Build) void {
         .name = "weaver-widget",
         .widget_profile = true,
     });
-    const c_flags = &.{
-        "-std=c11",
-        "-funsigned-char",
-        "-D_GNU_SOURCE",
-        "-DWIN32_LEAN_AND_MEAN",
-        "-D_WIN32_WINNT=0x0601",
-        "-D_CRT_SECURE_NO_WARNINGS",
+    const target = artifacts.exe.root_module.resolved_target.?;
+    const os_tag = target.result.os.tag;
+    if (os_tag != .windows and os_tag != .macos) {
+        @panic("weaver-widget currently supports only Windows and macOS targets");
+    }
+    const c_flags: []const []const u8 = switch (os_tag) {
+        .windows => &.{
+            "-std=c11",
+            "-funsigned-char",
+            "-D_GNU_SOURCE",
+            "-DWIN32_LEAN_AND_MEAN",
+            "-D_WIN32_WINNT=0x0601",
+            "-D_CRT_SECURE_NO_WARNINGS",
+        },
+        .macos => &.{
+            "-std=c11",
+            "-funsigned-char",
+        },
+        else => unreachable,
     };
     const sources = &.{
         "vendor/quickjs-ng/dtoa.c",
@@ -23,12 +35,31 @@ pub fn build(b: *std.Build) void {
         "vendor/quickjs-ng/quickjs.c",
     };
     addQuickJs(b, artifacts.exe, sources, c_flags);
-    addWindowsMonitor(b, artifacts.exe);
-    artifacts.exe.root_module.linkSystemLibrary("winhttp", .{});
+    addPlatformLinkage(b, artifacts.exe, os_tag);
     if (artifacts.tests.root_module != artifacts.exe.root_module) {
         addQuickJs(b, artifacts.tests, sources, c_flags);
-        addWindowsMonitor(b, artifacts.tests);
-        artifacts.tests.root_module.linkSystemLibrary("winhttp", .{});
+        addPlatformLinkage(b, artifacts.tests, os_tag);
+    }
+
+    const platform_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/platform/root.zig"),
+            .target = target,
+            .optimize = artifacts.tests.root_module.optimize,
+        }),
+    });
+    const platform_test_step = b.step("test-platform-services", "Run portable platform-service seam tests");
+    platform_test_step.dependOn(&b.addRunArtifact(platform_tests).step);
+}
+
+fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: std.Target.Os.Tag) void {
+    switch (os_tag) {
+        .windows => {
+            addWindowsMonitor(b, compile);
+            compile.root_module.linkSystemLibrary("winhttp", .{});
+        },
+        .macos => {},
+        else => unreachable,
     }
 }
 
