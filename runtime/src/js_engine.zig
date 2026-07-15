@@ -1,13 +1,11 @@
 const std = @import("std");
 const bridge = @import("bridge.zig");
+const platform = @import("platform/root.zig");
 const qjs = @import("qjs.zig");
 const provider_mod = @import("provider.zig");
 const tree_mod = @import("tree.zig");
 const storage_mod = @import("storage.zig");
 const c = qjs.c;
-const win = @cImport({
-    @cInclude("windows.h");
-});
 
 pub const memory_limit_bytes: usize = 32 * 1024 * 1024;
 pub const turn_budget_ms: u64 = 100;
@@ -186,7 +184,7 @@ pub const Engine = struct {
     }
 
     fn beginTurn(self: *Engine) void {
-        self.deadline_ms = win.GetTickCount64() + turn_budget_ms;
+        self.deadline_ms = platform.monotonicMilliseconds() + turn_budget_ms;
         self.executing = true;
     }
 
@@ -235,5 +233,5 @@ fn logExceptionFrom(context: *c.JSContext) void {
 
 fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
     const self: *Engine = @ptrCast(@alignCast(context orelse return 1));
-    return if (self.executing and win.GetTickCount64() >= self.deadline_ms) 1 else 0;
+    return if (self.executing and platform.monotonicMilliseconds() >= self.deadline_ms) 1 else 0;
 }

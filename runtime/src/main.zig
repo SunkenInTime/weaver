@@ -67,7 +67,10 @@ const Effects = WidgetApp.Effects;
 var rendered_presents: u64 = 0;
 var first_render_ns: u64 = 0;
 var logged_backend: bool = false;
+var logged_present_path: bool = false;
 var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
+var requested_software_backend: bool = false;
+var diagnostic_runtime: ?*native_sdk.Runtime = null;
 
 fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
@@ -293,7 +296,7 @@ fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) vo
 fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
     if (!logged_backend) {
         logged_backend = true;
-        std.log.info("widget renderer backend={s}", .{@tagName(frame.backend)});
+        std.log.info("widget host surface backend={s}", .{@tagName(frame.backend)});
     } else if (frame.backend != last_backend) {
         if (last_backend == .d3d11 and frame.backend == .software) {
             std.log.warn("widget renderer demoted d3d11 -> software", .{});
@@ -304,6 +307,16 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         }
     }
     last_backend = frame.backend;
+    if (!logged_present_path) {
+        if (diagnostic_runtime) |runtime| {
+            var view_buffer: [1]native_sdk.platform.ViewInfo = undefined;
+            for (runtime.listViews(frame.window_id, &view_buffer)) |view_info| {
+                if (!std.mem.eql(u8, view_info.label, frame.label)) continue;
+                logged_present_path = true;
+                std.log.info("widget presenter path={s}", .{@tagName(view_info.gpu_present_path)});
+            }
+        }
+    }
     const engine = model.engine orelse return null;
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
@@ -442,19 +455,21 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(allocator);
     const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
-        std.debug.print("usage: weaver-widget.exe [--dev] <widget-directory>\n", .{});
+        std.debug.print("usage: weaver-widget [--dev] <widget-directory>\n", .{});
         return error.InvalidArguments;
     }
     const directory = args[if (dev) 2 else 1];
     const loaded = try manifest_mod.load(init.io, allocator, directory);
-    const local_app_data = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
-    const log_directory = try std.fs.path.join(allocator, &.{ local_app_data, "weaver", "logs" });
+    const local_app_data = init.environ_map.get("LOCALAPPDATA");
+    const home = init.environ_map.get("HOME");
+    const data_root = try platform.dataRoot(allocator, local_app_data, home);
+    const log_directory = try platform.logsRoot(allocator, local_app_data, home);
     try std.Io.Dir.cwd().createDirPath(init.io, log_directory);
     const log_name = try safeLogName(allocator, loaded.manifest.name);
     const log_path = try std.fs.path.join(allocator, &.{ log_directory, log_name });
-    try widget_log.init(log_path);
+    try widget_log.init(init.io, log_path);
     std.log.info("widget runtime starting pid={d}{s}", .{ platform.currentProcessId(), if (dev) " dev=true" else "" });
-    var storage = try storage_mod.Store.init(init.io, allocator, init.environ_map.get("LOCALAPPDATA"), loaded.manifest.name);
+    var storage = try storage_mod.Store.init(init.io, allocator, data_root, loaded.manifest.name);
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
     const bundle_stat = try std.Io.Dir.cwd().statFile(init.io, bundle_path, .{});
     const frame = manifest_mod.desktopFrame(loaded.manifest);
@@ -464,7 +479,7 @@ pub fn main(init: std.process.Init) !void {
         .fill = true,
         .role = "Weaver widget canvas",
         .accessibility_label = loaded.manifest.name,
-        .gpu_backend = if (std.mem.eql(u8, loaded.manifest.renderBackend, "gpu")) .d3d11 else .software,
+        .gpu_backend = declaredGpuBackend(loaded.manifest.renderBackend),
         .gpu_pixel_format = .bgra8_unorm,
         .gpu_present_mode = .timer,
         .gpu_alpha_mode = .premultiplied,
@@ -503,7 +518,10 @@ pub fn main(init: std.process.Init) !void {
         .on_frame = onFrame,
     });
     defer app_state.destroy();
-    try app_state.model.provider.init(init.environ_map.get("WEAVER_HOST_PIPE"));
+    try app_state.model.provider.init(platform.providerEndpoint(
+        init.environ_map.get("WEAVER_HOST_PIPE"),
+        init.environ_map.get("WEAVER_HOST_ENDPOINT"),
+    ));
     defer app_state.model.provider.deinit();
     const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, &app_state.model.provider);
     app_state.model.engine = engine;
@@ -520,7 +538,10 @@ pub fn main(init: std.process.Init) !void {
     try engine.evaluate(loaded.bundle, "bundle.js");
     try loadLocalImages(init.io, allocator, directory, &app_state.model);
 
-    try runner.runWithOptions(app_state.app(), .{
+    requested_software_backend = std.mem.eql(u8, loaded.manifest.renderBackend, "software");
+    var app = app_state.app();
+    app.start_fn = startRendererDiagnostics;
+    try runner.runWithOptions(app, .{
         .app_name = "weaver-widget",
         .window_title = loaded.manifest.name,
         .bundle_id = "com.weaver.widget",
@@ -528,6 +549,26 @@ pub fn main(init: std.process.Init) !void {
         .restore_state = false,
         .js_window_api = false,
     }, init);
+}
+
+fn declaredGpuBackend(render_backend: []const u8) native_sdk.app_manifest.GpuSurfaceBackend {
+    if (std.mem.eql(u8, render_backend, "software")) return .software;
+    return switch (@import("builtin").os.tag) {
+        .windows => .d3d11,
+        .macos => .metal,
+        else => .none,
+    };
+}
+
+/// Capture the live runtime for one present-path diagnostic. Presentation
+/// selection itself belongs to Native SDK and follows the declared backend.
+fn startRendererDiagnostics(_: *anyopaque, runtime: *native_sdk.Runtime) !void {
+    diagnostic_runtime = runtime;
+    if (!requested_software_backend) {
+        std.log.info("widget renderer selected=gpu presenter=host", .{});
+        return;
+    }
+    std.log.info("widget renderer selected=software presenter=pixels", .{});
 }
 
 fn safeLogName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
@@ -554,4 +595,11 @@ test {
     _ = @import("storage.zig");
     _ = @import("provider.zig");
     _ = @import("widget_log.zig");
+    try std.testing.expectEqual(native_sdk.app_manifest.GpuSurfaceBackend.software, declaredGpuBackend("software"));
+    const native_gpu_backend: native_sdk.app_manifest.GpuSurfaceBackend = switch (@import("builtin").os.tag) {
+        .windows => .d3d11,
+        .macos => .metal,
+        else => .none,
+    };
+    try std.testing.expectEqual(native_gpu_backend, declaredGpuBackend("gpu"));
 }

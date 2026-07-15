@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 02 pushed; CI pending`
+- State: `IN PROGRESS — PR 03 implementation complete; publishing stack`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T02:13:40-07:00
+- Last updated: 2026-07-15T02:49:15-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -19,24 +19,24 @@ blocker and the next executable command.
 
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
-| Native SDK fork | `macos/01-appkit-windowing` | `819e878a` | [#1](https://github.com/SunkenInTime/native/pull/1) | `weaver-main` |
-| Weaver | `macos/02-appkit-windowing` | `9e74535` | [#4](https://github.com/SunkenInTime/weaver/pull/4) | [#3](https://github.com/SunkenInTime/weaver/pull/3) |
+| Native SDK fork | `macos/02-backend-honesty` | `673c07f4` | [#2](https://github.com/SunkenInTime/native/pull/2) | [#1](https://github.com/SunkenInTime/native/pull/1) |
+| Weaver | `macos/03-runtime-clock` | pending commit | pending draft PR | [#4](https://github.com/SunkenInTime/weaver/pull/4) |
 
 ## Last reproducible capability
 
-- Capability: AppKit projection of transparent/chromeless, layer, pass-through, and nonactivating widget windows
-- Checkout/pointer: `macos/02-appkit-windowing`; Native SDK `819e878a` (`macos/01-appkit-windowing`)
-- Commands: see `docs/macos-m1-results.md`
-- Visible result: six-window layer/input harness launched; recording `UNVERIFIED` because the unattended process lacks Screen Recording permission
-- Machine-readable evidence: six on-screen CG windows at the intended levels/bounds; focus hand-back; stock/default policy comparison; Native SDK suites
+- Capability: direct macOS `weaver-widget` launch with portable runtime services and an honestly reported software Clock
+- Checkout/pointer: `macos/03-runtime-clock`; Native SDK `673c07f4` (`macos/02-backend-honesty`)
+- Commands: see `docs/macos-m2-results.md`
+- Visible result: bundled Clock directly launched, nonblank, and on-screen at 240 x 110; deterministic AppKit surface capture attached
+- Machine-readable evidence: software backend, premultiplied alpha, pixel presentation, storage restart, rotation, clean exit, native and Windows-cross regression gates
 
 ## Gates
 
 | Gate | State | Evidence or exact blocker |
 |---|---|---|
 | Build/toolchain | PASS | Zig 0.16.0 installed; M0 commands and exact runtime blockers recorded in `docs/macos-m0-results.md` |
-| Direct software Clock | pending | — |
-| AppKit window contract | UNVERIFIED | Implementation, automated gates, CG inventory, and focus query pass; required recording blocked by ScreenCaptureKit TCC `-3801` (`The user declined TCCs for application, window, display capture`) |
+| Direct software Clock | PASS | Direct production launch plus correlated CG-window/log/automation evidence in `docs/macos-m2-results.md` |
+| AppKit window contract | UNVERIFIED | PR 02 implementation and automated/CG/focus gates pass; required OS recording blocked by ScreenCaptureKit TCC `-3801` (`The user declined TCCs for application, window, display capture`) |
 | Display/Spaces behavior | pending | — |
 | Network parity | pending | — |
 | Renderer bakeoff | pending | — |
@@ -58,6 +58,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 | Workload | Backend/architecture | CPU | Footprint/memory | Wakeups/energy | Frames/latency | Evidence |
 |---|---|---:|---:|---:|---:|---|
+| Direct Clock, steady-state 1 Hz | CPU reference renderer; AppKit pixel presenter; one process | 0.79% mean of one core (10 x 1 s samples) | 86 MB physical; 90 MB peak; 5–6 threads | not captured | first visible window about 307 ms in verbose launch; full trace deferred | `docs/macos-m2-results.md` |
 
 ## Assumptions made autonomously
 
@@ -66,23 +67,26 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - PR 01 carries no visible/runtime performance claim and therefore requires no computer-use capture.
 - PR 02 uses desktop-icon-minus-one as the provisional bottom level after measuring desktop/icon/normal/floating levels on the physical M2. PR 04 revalidates it under macOS desktop-management modes.
 - An unbundled widget process returns transient AppKit startup activation to the first visible regular application in the public front-to-back CG window list. Bundled packaging still needs the matching agent-app metadata in PR 14.
+- PR 03 discovered that Weaver's software choice could not be reported honestly while the Native SDK hard-coded AppKit frames to Metal. Native SDK PR 02 is an explicit extra stacked dependency; it carries the requested backend/alpha contract and forces CPU pixel presentation for software surfaces.
+- Clock's once-per-second update makes its recorded CPU a 1 Hz steady-state baseline, not a static-idle claim. The 86 MB footprint misses the aspirational 15 MiB investigation target and remains an explicit PR 06–07 optimization input.
 
 ## Exact blockers
 
-- Full `weaver-widget` build is intentionally blocked at the enumerated Win32 source modules in `manifest.zig`, `provider.zig`, and `widget_log.zig`; PRs 03-05 own those implementations.
 - `weaverd` and `weaver-renderer` remain Windows-only build graphs until PRs 09-10 and the PR 06 renderer decision.
+- macOS HTTPS requests fail explicitly until PR 05 provides the transport. URL/origin policy itself is portable and tested.
 - Computer-use recording is unavailable: Chronicle is not running and ScreenCaptureKit returned TCC error `-3801`. Independent layers continue; a permissioned rerun must attach PR 02's recording.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness and stock GPU example terminated
+- Test processes: macOS policy harness, stock GPU example, Clock, and StorageProbe terminated
 - Ephemeral sockets/endpoints: none created
-- Temporary registrations/data: none created
+- Temporary registrations/data: PR 03's synthetic storage value, probe log, and oversized Clock backup removed after recording evidence
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after the PR 02 status update; submodule clean
-- Latest stack branches pushed: Weaver PRs 01-02 and Native SDK fork PR 01 pushed
+- Working trees/submodule clean: PR 03 changes pending their Weaver commit; Native SDK submodule clean at `673c07f4`
+- Latest stack branches pushed: Weaver PRs 01-02 and Native SDK fork PRs 01-02 pushed
 
 ## Next executable task
 
-1. Inspect PR 02 CI and correct actionable failures without weakening coverage.
-2. Create `macos/03-runtime-clock` from PR 02 for portable runtime services and the direct software Clock.
+1. Remove the recorded PR 03 probe artifacts, commit/push Weaver `macos/03-runtime-clock`, and open its draft PR on PR 02.
+2. Inspect PR 03 CI and correct actionable failures without weakening coverage.
+3. Start PR 04 display discovery, anchoring, Spaces, and desktop-survival work.

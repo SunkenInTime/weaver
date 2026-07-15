@@ -1,9 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const native_sdk = @import("native_sdk");
 
-const win = @cImport({
-    @cInclude("windows_monitor.h");
-});
+const windows_monitor = if (builtin.os.tag == .windows) @import("platform/windows_monitor.zig") else struct {};
 
 pub const MonitorGeometry = struct {
     work_area_px: native_sdk.geometry.RectI,
@@ -100,13 +99,12 @@ pub fn anchoredPhysicalFrame(value: Manifest, monitor: MonitorGeometry) native_s
 }
 
 fn primaryMonitorGeometry() MonitorGeometry {
-    var native: win.WeaverPrimaryMonitorGeometry = undefined;
-    if (win.weaver_primary_monitor_geometry(&native) == 0) {
+    const native = windows_monitor.primary() orelse {
         return .{
             .work_area_px = native_sdk.geometry.RectI.init(0, 0, 1920, 1080),
             .effective_dpi = 96,
         };
-    }
+    };
     return .{
         .work_area_px = native_sdk.geometry.RectI.init(
             native.work_left_px,
@@ -122,6 +120,11 @@ fn primaryMonitorGeometry() MonitorGeometry {
 /// physical anchor position back once at the target monitor's scale; the
 /// Native SDK converts it to physical pixels once during HWND creation.
 pub fn desktopFrame(value: Manifest) native_sdk.geometry.RectF {
+    if (builtin.os.tag == .macos) {
+        // PR 03 has a direct, visible runtime but no monitor bridge. AppKit
+        // placement and coordinate conversion land as one seam in PR 04.
+        return native_sdk.geometry.RectF.init(0, 0, value.size[0], value.size[1]);
+    }
     const monitor = primaryMonitorGeometry();
     const physical = anchoredPhysicalFrame(value, monitor);
     const scale = monitor.scale();

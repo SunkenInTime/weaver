@@ -4,7 +4,6 @@ pub const quota_bytes: usize = 64 * 1024;
 
 pub const Error = error{
     StorageQuotaExceeded,
-    MissingLocalAppData,
 };
 
 /// One widget owns one JSON document. The filename is a stable hash of the
@@ -17,9 +16,8 @@ pub const Store = struct {
     path: []const u8,
     temporary_path: []const u8,
 
-    pub fn init(io: std.Io, allocator: std.mem.Allocator, local_app_data: ?[]const u8, widget_name: []const u8) !Store {
-        const root = local_app_data orelse return error.MissingLocalAppData;
-        const directory = try std.fs.path.join(allocator, &.{ root, "weaver", "storage" });
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, data_root: []const u8, widget_name: []const u8) !Store {
+        const directory = try std.fs.path.join(allocator, &.{ data_root, "storage" });
         const hash = nameHash(widget_name);
         const filename = try std.fmt.allocPrint(allocator, "{x:0>16}.json", .{hash});
         const path = try std.fs.path.join(allocator, &.{ directory, filename });
