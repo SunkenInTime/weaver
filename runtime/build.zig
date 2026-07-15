@@ -35,10 +35,10 @@ pub fn build(b: *std.Build) void {
         "vendor/quickjs-ng/quickjs.c",
     };
     addQuickJs(b, artifacts.exe, sources, c_flags);
-    addPlatformLinkage(b, artifacts.exe, os_tag);
+    addPlatformLinkage(b, artifacts.exe, os_tag, false);
     if (artifacts.tests.root_module != artifacts.exe.root_module) {
         addQuickJs(b, artifacts.tests, sources, c_flags);
-        addPlatformLinkage(b, artifacts.tests, os_tag);
+        addPlatformLinkage(b, artifacts.tests, os_tag, true);
     }
 
     const platform_tests = b.addTest(.{
@@ -52,13 +52,33 @@ pub fn build(b: *std.Build) void {
     platform_test_step.dependOn(&b.addRunArtifact(platform_tests).step);
 }
 
-fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: std.Target.Os.Tag) void {
+fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: std.Target.Os.Tag, is_test: bool) void {
     switch (os_tag) {
         .windows => {
             addWindowsMonitor(b, compile);
             compile.root_module.linkSystemLibrary("winhttp", .{});
         },
-        .macos => {},
+        .macos => {
+            const sdk_include = if (b.sysroot) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";
+            const flags: []const []const u8 = if (b.sysroot) |sysroot|
+                if (is_test)
+                    &.{ "-fobjc-arc", "-DWEAVER_NETWORK_TESTING=1", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include }
+                else
+                    &.{ "-fobjc-arc", "-mmacosx-version-min=11.0", "-isysroot", sysroot, sdk_include }
+            else if (is_test)
+                &.{ "-fobjc-arc", "-DWEAVER_NETWORK_TESTING=1", "-mmacosx-version-min=11.0" }
+            else
+                &.{ "-fobjc-arc", "-mmacosx-version-min=11.0" };
+            compile.root_module.addCSourceFile(.{
+                .file = b.path("src/network_macos.m"),
+                .flags = flags,
+            });
+            if (b.sysroot) |sysroot| {
+                compile.root_module.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) });
+            }
+            compile.root_module.linkFramework("Foundation", .{});
+            compile.root_module.linkFramework("Security", .{});
+        },
         else => unreachable,
     }
 }
@@ -66,13 +86,13 @@ fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: s
 fn addWindowsMonitor(b: *std.Build, compile: *std.Build.Step.Compile) void {
     compile.root_module.addCSourceFile(.{
         .file = b.path("src/windows_monitor.cpp"),
-        .flags = &.{ "-std=c++17" },
+        .flags = &.{"-std=c++17"},
     });
     compile.root_module.addIncludePath(b.path("src"));
 }
 
 fn addQuickJs(b: *std.Build, compile: *std.Build.Step.Compile, sources: []const []const u8, c_flags: []const []const u8) void {
-        compile.root_module.addIncludePath(b.path("vendor/quickjs-ng"));
-        compile.root_module.addCSourceFiles(.{ .files = sources, .flags = c_flags });
-        compile.root_module.linkSystemLibrary("c", .{});
+    compile.root_module.addIncludePath(b.path("vendor/quickjs-ng"));
+    compile.root_module.addCSourceFiles(.{ .files = sources, .flags = c_flags });
+    compile.root_module.linkSystemLibrary("c", .{});
 }

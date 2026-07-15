@@ -231,7 +231,8 @@ function wfetch(url: string, init?: {
   `OriginNotDeclared: add "api.example.com" to origins in your widget config`.
 - `weaver check` statically flags string-literal fetch URLs whose host is not
   declared. Runtime enforcement is authoritative.
-- Timeout 15s. No cookies, no redirects across hosts, response cap 5 MB.
+- Timeout 15s. No cookies; redirects are returned rather than followed; total
+  request and response caps are 5 MB each.
 
 ## `useStorage` — scoped persistence (quiet standard surface)
 
@@ -272,4 +273,3 @@ registers a developer workspace by reference (ADR 0011).
 weaverd supervises widget processes (crash → restart with backoff, 3 strikes
 → stopped + noted in status), fans out providers over local IPC, and samples
 per-widget cost. Registrations persist across host restarts.
-
