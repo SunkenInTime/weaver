@@ -8,13 +8,14 @@ import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
-import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
+import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
 import { extractWeave, isWeaveSourceEntryIncluded, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
-const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", "weaver-widget.exe");
-const hostExecutable = join(repoRoot, "host", "zig-out", "bin", "weaverd.exe");
+const executableSuffix = process.platform === "win32" ? ".exe" : "";
+const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", `weaver-widget${executableSuffix}`);
+const hostExecutable = join(repoRoot, "host", "zig-out", "bin", `weaverd${executableSuffix}`);
 
 class WeaverFailure extends Error {
   constructor(readonly details: string[]) {
@@ -68,8 +69,12 @@ async function main(argv: string[]): Promise<void> {
     if (!argument || rest.length > 1 || (rest.length === 1 && rest[0] !== "--follow")) throw new WeaverFailure(["Usage: weaver logs <name> [--follow]"]);
     return showLogs(argument, rest[0] === "--follow");
   }
+  if (command === "inspect") {
+    if (!argument || rest.length > 0) throw new WeaverFailure(["Usage: weaver inspect <file.weave>"]);
+    return inspectWidget(resolve(argument));
+  }
   if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "install" && !argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "install", "uninstall", "status"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | inspect <file.weave> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
   }
   if (command === "up") return upHost(true);
   if (command === "down") return downHost();
@@ -212,6 +217,22 @@ async function packWidget(directory: string): Promise<void> {
   process.stdout.write(`Packed ${project.config.name}\nArtifact: ${packed.manifest.artifactId}\nSource: ${packed.manifest.sourceId}\nWrote ${output}\n`);
 }
 
+function inspectWidget(input: string): void {
+  if (!existsSync(input)) throw new WeaverFailure([`Archive does not exist: ${input}`]);
+  const inputStat = statSync(input);
+  if (!inputStat.isFile() || extname(input).toLowerCase() !== ".weave") {
+    throw new WeaverFailure([`Inspect expects a regular .weave file: ${input}`]);
+  }
+  if (inputStat.size > MAX_WEAVE_ARCHIVE_BYTES) {
+    throw new WeaverFailure([`Archive exceeds the ${MAX_WEAVE_ARCHIVE_BYTES / (1024 * 1024)} MiB .weave limit: ${input}`]);
+  }
+  let opened: OpenedWeave;
+  try { opened = openWeave(readFileSync(input)); }
+  catch (error) { throw new WeaverFailure([`Cannot open ${input}: ${errorMessage(error)}`]); }
+  const sourceBytes = [...opened.files.values()].reduce((total, bytes) => total + bytes.length, 0);
+  printArtifactAudit(opened.manifest, opened.files.size, sourceBytes);
+}
+
 function declaredSurface(config: WidgetConfigData): DeclaredSurface {
   return {
     providers: [...(config.subscribe ?? [])],
@@ -294,6 +315,7 @@ function weaverResolutionPlugin(sourceRoot: string): import("esbuild").Plugin {
 }
 
 async function devWidget(directory: string): Promise<void> {
+  assertHostLifecycleAvailable("dev");
   assertRuntimeBuilt();
   await upHost(false);
   const initial = await bundleWidget(directory);
@@ -402,10 +424,8 @@ async function devWidget(directory: string): Promise<void> {
 }
 
 function logPath(name: string): string {
-  const localAppData = process.env.LOCALAPPDATA;
-  if (!localAppData) throw new WeaverFailure(["LOCALAPPDATA is not available"]);
   const safe = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "_") || "widget";
-  return join(localAppData, "weaver", "logs", `${safe}.log`);
+  return join(weaverLogsPath(), `${safe}.log`);
 }
 
 function showLogs(name: string, follow: boolean): Promise<void> | void {
@@ -466,7 +486,7 @@ async function installWidget(input: string): Promise<void> {
   const root = widgetsPath();
   mkdirSync(root, { recursive: true });
   const destination = join(root, installDirectoryName(opened.manifest));
-  const stage = mkdtempSync(join(root, ".install-"));
+  const stage = mkdtempSync(join(root, `.install-${process.pid}-`));
   let stageExists = true;
   let finalExists = false;
   const cleanupWarnings: string[] = [];
@@ -478,12 +498,12 @@ async function installWidget(input: string): Promise<void> {
     await bundleWidget(stage);
     await withRegistryLock(async () => {
       const originalRegistry = readRegistry();
-      if (hostRunning()) assertHostReloadReady();
+      if (hostLifecycleAvailable() && hostRunning()) assertHostReloadReady();
       const conflicting = originalRegistry.widgets.find((widget) => widget.name === project.config.name && !ownedInstallPath(widget.sourcePath));
       if (conflicting) {
         throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${conflicting.sourcePath}`, `Run "weaver uninstall ${project.config.name}" before replacing a source-linked installation.`]);
       }
-      await upHost(false);
+      if (hostLifecycleAvailable()) await upHost(false);
       renameSync(stage, destination);
       stageExists = false;
       finalExists = true;
@@ -491,16 +511,21 @@ async function installWidget(input: string): Promise<void> {
         name: project.config.name, sourcePath: destination, enabled: true,
       }] };
       printInstallAudit(opened.manifest);
+      if (process.env.WEAVER_AUTOMATION === "1" && process.env.WEAVER_AUTOMATION_FAIL_INSTALL_AFTER_PUBLISH === "1") {
+        throw new WeaverFailure(["Automation refused the install after publishing its owned source."]);
+      }
       writeRegistry(nextRegistry);
-      try {
-        signalHost("--signal-reload");
-      } catch (error) {
-        writeRegistry(originalRegistry);
-        if (hostRunning()) {
-          try { signalHost("--signal-reload"); }
-          catch { /* Preserve the original failure; the registry is authoritative on the next reload. */ }
+      if (hostLifecycleAvailable()) {
+        try {
+          signalHost("--signal-reload");
+        } catch (error) {
+          writeRegistry(originalRegistry);
+          if (hostRunning()) {
+            try { signalHost("--signal-reload"); }
+            catch { /* Preserve the original failure; the registry is authoritative on the next reload. */ }
+          }
+          throw error;
         }
-        throw error;
       }
       cleanupWarnings.push(...sweepUnregisteredInstallDirectories(nextRegistry));
     });
@@ -531,6 +556,12 @@ function printInstallAudit(manifest: WeaveManifest): void {
   process.stdout.write(`Reviewing ${manifest.name}\n${author}\nArtifact: ${manifest.artifactId}\nSource: readable · ${manifest.sourceId}\nProviders: ${providers}\nNetwork origins: ${origins}\nSystem capabilities: ${capabilities}\n`);
 }
 
+function printArtifactAudit(manifest: WeaveManifest, sourceFiles: number, sourceBytes: number): void {
+  const author = manifest.provenance.author === null ? "local/unsigned" : `${manifest.provenance.author} (claimed, unverified)`;
+  const list = (values: string[]): string => values.length > 0 ? values.join(", ") : "none";
+  process.stdout.write(`Name: ${manifest.name}\nFormat: .weave v${manifest.formatVersion}\nArtifact: ${manifest.artifactId}\nSource: ${manifest.sourceId}\nAuthor: ${author}\nLineage root: ${manifest.lineage.root}\nLineage parent: ${manifest.lineage.parent ?? "none"}\nProviders: ${list(manifest.declared.providers)}\nNetwork origins: ${list(manifest.declared.origins)}\nSystem capabilities: ${list(manifest.declared.capabilities)}\nReadable source: ${sourceFiles} files, ${sourceBytes} bytes\n`);
+}
+
 function installDirectoryName(manifest: WeaveManifest): string {
   const slug = manifest.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "widget";
   const nameHash = createHash("sha256").update(manifest.name, "utf8").digest("hex").slice(0, 12);
@@ -551,7 +582,7 @@ async function uninstallWidget(name: string): Promise<void> {
     const document = readRegistry();
     const registration = document.widgets.find((widget) => widget.name === name);
     if (!registration) {
-      const running = hostRunning();
+      const running = hostLifecycleAvailable() && hostRunning();
       if (running) {
         assertHostReloadReady();
         signalHost("--signal-reload");
@@ -561,7 +592,7 @@ async function uninstallWidget(name: string): Promise<void> {
     }
     installed = true;
     const nextRegistry = { widgets: document.widgets.filter((widget) => widget.name !== name) };
-    const running = hostRunning();
+    const running = hostLifecycleAvailable() && hostRunning();
     if (running) assertHostReloadReady();
     writeRegistry(nextRegistry);
     if (running) {
@@ -589,13 +620,37 @@ function sweepUnregisteredInstallDirectories(document: RegistryDocument): string
   try { entries = readdirSync(root, { withFileTypes: true }); }
   catch (error) { return [`Could not inspect owned widget sources at ${root}: ${errorMessage(error)}. A later registry mutation will retry cleanup.`]; }
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".install-")) continue;
+    if (!entry.isDirectory()) continue;
     const candidate = join(root, entry.name);
+    if (entry.name.startsWith(".install-")) {
+      if (!abandonedInstallStage(candidate, entry.name)) continue;
+      try { rmSync(candidate, { recursive: true, force: true }); }
+      catch (error) { warnings.push(`Could not remove abandoned install stage at ${candidate}: ${errorMessage(error)}. A later registry mutation will retry cleanup.`); }
+      continue;
+    }
     if (registered.some((path) => pathsEqual(path, candidate)) || !existsSync(join(candidate, "weave.json"))) continue;
     try { rmSync(candidate, { recursive: true, force: true }); }
     catch (error) { warnings.push(`Could not remove unregistered owned source at ${candidate}: ${errorMessage(error)}. A later registry mutation will retry cleanup.`); }
   }
   return warnings;
+}
+
+function abandonedInstallStage(path: string, name: string): boolean {
+  const staleMs = 5 * 60_000;
+  let ageMs: number;
+  try { ageMs = Date.now() - statSync(path).mtimeMs; }
+  catch { return false; }
+  if (ageMs <= staleMs) return false;
+  const pid = /^\.install-(\d+)-/.exec(name)?.[1];
+  if (!pid) return true;
+  const ownerPid = Number(pid);
+  if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) return true;
+  try {
+    process.kill(ownerPid, 0);
+    return false;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code !== "EPERM";
+  }
 }
 
 async function removeUnregisteredInstall(candidate: string): Promise<void> {
@@ -604,7 +659,7 @@ async function removeUnregisteredInstall(candidate: string): Promise<void> {
     await withRegistryLock(() => {
       const document = readRegistry();
       if (!document.widgets.some((widget) => pathsEqual(widget.sourcePath, candidate)) && existsSync(candidate)) {
-        const running = hostRunning();
+        const running = hostLifecycleAvailable() && hostRunning();
         if (running) {
           assertHostReloadReady();
           signalHost("--signal-reload");
@@ -628,6 +683,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function upHost(announce: boolean): Promise<void> {
+  assertHostLifecycleAvailable("up");
   assertHostBuilt();
   if (hostRunning()) {
     assertHostReloadReady();
@@ -643,6 +699,7 @@ async function upHost(announce: boolean): Promise<void> {
 }
 
 async function downHost(): Promise<void> {
+  assertHostLifecycleAvailable("down");
   assertHostBuilt();
   if (!hostRunning()) {
     process.stdout.write("weaverd is not running\n");
@@ -656,6 +713,7 @@ async function downHost(): Promise<void> {
 }
 
 function showStatus(json: boolean): void {
+  assertHostLifecycleAvailable("status");
   if (!hostRunning()) throw new WeaverFailure(['weaverd is not running; run "weaver up"']);
   try {
     const document = readStatus();
@@ -666,11 +724,13 @@ function showStatus(json: boolean): void {
 }
 
 function hostRunning(): boolean {
+  if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
   return spawnSync(hostExecutable, ["--probe"], { stdio: "ignore", windowsHide: true }).status === 0;
 }
 
 function hostReloadReady(): boolean {
+  if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
   return spawnSync(hostExecutable, ["--probe-reload-ready"], { stdio: "ignore", windowsHide: true }).status === 0;
 }
@@ -688,6 +748,16 @@ function signalHost(signal: "--signal-down" | "--signal-reload"): void {
 
 function assertHostBuilt(): void {
   if (!existsSync(hostExecutable)) throw new WeaverFailure([`Host not found at ${hostExecutable}`, "Build host/ with zig build -Doptimize=ReleaseFast."]);
+}
+
+function hostLifecycleAvailable(): boolean {
+  return process.platform === "win32";
+}
+
+function assertHostLifecycleAvailable(command: string): void {
+  if (hostLifecycleAvailable()) return;
+  const platform = process.platform === "darwin" ? "macOS" : process.platform;
+  throw new WeaverFailure([`weaver ${command} is unavailable on ${platform} until the native host lands in PR 10.`, "Artifact commands and logs remain available without the host."]);
 }
 
 function assertRuntimeBuilt(): void {

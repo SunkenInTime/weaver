@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const cli = join(repoRoot, "cli", "bin", "weaver.js");
+const tempRoot = realpathSync(tmpdir());
+const scratch = mkdtempSync(join(tempRoot, "weaver-install-smoke-"));
+const environment = { ...process.env, WEAVER_AUTOMATION: "1" };
+const expectedArchiveSha256 = "d4a517dac1e6355bdf6d75e5e828470ec657a82dbfdfcec8efd2903eb88d4bf4";
+
+if (process.platform === "win32") {
+  environment.LOCALAPPDATA = join(scratch, "local");
+} else if (process.platform === "darwin") {
+  environment.HOME = join(scratch, "home");
+} else {
+  throw new Error(`Portable install smoke does not support ${process.platform}`);
+}
+
+const dataRoot = process.platform === "win32"
+  ? join(environment.LOCALAPPDATA, "weaver")
+  : join(environment.HOME, "Library", "Application Support", "Weaver");
+const logsRoot = process.platform === "win32"
+  ? join(dataRoot, "logs")
+  : join(environment.HOME, "Library", "Logs", "Weaver");
+const widgetsRoot = join(dataRoot, "widgets");
+const registryPath = join(dataRoot, "registry.json");
+
+function run(arguments_, extraEnvironment = {}, expectedStatus = 0) {
+  const result = spawnSync(process.execPath, [cli, ...arguments_], {
+    cwd: scratch,
+    env: { ...environment, ...extraEnvironment },
+    encoding: "utf8",
+  });
+  assert.equal(result.status, expectedStatus, `weaver ${arguments_.join(" ")} exited ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  return result;
+}
+
+function registry() {
+  return JSON.parse(readFileSync(registryPath, "utf8"));
+}
+
+function assertOwned(path) {
+  const relation = relative(resolve(widgetsRoot), resolve(path));
+  assert.equal(isAbsolute(relation) || relation === "" || relation === ".." || relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`), false, `install escaped its owned root: ${path}`);
+  assert.equal(existsSync(join(path, "weave.json")), true, `owned install is missing weave.json: ${path}`);
+  assert.equal(existsSync(join(path, "dist", "bundle.js")), true, `owned install is missing its runtime bundle: ${path}`);
+}
+
+function ownedEntries() {
+  return existsSync(widgetsRoot) ? readdirSync(widgetsRoot).sort() : [];
+}
+
+try {
+  run(["init", "clock"]);
+  run(["check", "clock"]);
+  run(["bundle", "clock"]);
+  run(["pack", "clock"]);
+  const artifact = join(scratch, "clock.weave");
+  const archiveHash = createHash("sha256").update(readFileSync(artifact)).digest("hex");
+  assert.equal(archiveHash, expectedArchiveSha256, "identical starter source must pack to identical .weave bytes on Windows and macOS");
+
+  const inspected = run(["inspect", "clock.weave"]);
+  assert.match(inspected.stdout, /^Name: Clock$/m);
+  assert.match(inspected.stdout, /^Format: \.weave v1$/m);
+  assert.match(inspected.stdout, /^Readable source: 1 files, \d+ bytes$/m);
+
+  run(["install", "clock.weave"]);
+  assert.equal(registry().widgets.length, 1);
+  const first = resolve(registry().widgets[0].sourcePath);
+  assertOwned(first);
+
+  const beforeFailedReplacement = ownedEntries();
+  const refused = run(["install", "clock.weave"], { WEAVER_AUTOMATION_FAIL_INSTALL_AFTER_PUBLISH: "1" }, 1);
+  assert.match(refused.stderr, /Automation refused the install after publishing its owned source/);
+  assert.equal(resolve(registry().widgets[0].sourcePath), first, "failed replacement changed the authoritative registration");
+  assert.deepEqual(ownedEntries(), beforeFailedReplacement, "failed replacement left a stage or published directory behind");
+
+  const abandonedStage = join(widgetsRoot, ".install-0-abandoned");
+  mkdirSync(abandonedStage);
+  const old = new Date(Date.now() - 10 * 60_000);
+  utimesSync(abandonedStage, old, old);
+  run(["install", "clock.weave"]);
+  assert.equal(existsSync(abandonedStage), false, "a later registry mutation did not collect an abandoned install stage");
+  const second = resolve(registry().widgets[0].sourcePath);
+  assert.notEqual(second, first, "replacement did not publish a new immutable owned version");
+  assert.equal(existsSync(first), false, "replacement did not collect the old owned version");
+  assertOwned(second);
+
+  mkdirSync(logsRoot, { recursive: true });
+  const logToken = `portable-log-${randomUUID()}`;
+  writeFileSync(join(logsRoot, "Clock.log"), `${logToken}\n`, "utf8");
+  assert.match(run(["logs", "Clock"]).stdout, new RegExp(logToken));
+
+  run(["uninstall", "Clock"]);
+  assert.equal(existsSync(second), false, "uninstall did not remove archive-owned source");
+
+  run(["install", "clock"]);
+  const directoryOwned = resolve(registry().widgets[0].sourcePath);
+  assert.notEqual(directoryOwned, resolve(scratch, "clock"), "directory install registered the developer workspace by reference");
+  assertOwned(directoryOwned);
+  run(["uninstall", "Clock"]);
+  assert.equal(existsSync(directoryOwned), false, "uninstall did not remove directory-owned source");
+  assert.equal(registry().widgets.length, 0, "registry is not empty after uninstall");
+  assert.deepEqual(ownedEntries(), [], "owned widget root retains abandoned install content");
+
+  if (process.platform === "darwin") {
+    for (const command of [["up"], ["down"], ["status"], ["dev", "clock"]]) {
+      assert.match(run(command, {}, 1).stderr, /unavailable on macOS until the native host lands in PR 10/);
+    }
+  }
+} finally {
+  if (process.platform === "win32") spawnSync(process.execPath, [cli, "down"], { cwd: scratch, env: environment, stdio: "ignore" });
+  const resolvedScratch = resolve(scratch);
+  const relation = relative(tempRoot, resolvedScratch);
+  if (isAbsolute(relation) || relation === "" || relation === ".." || relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+    throw new Error(`Refusing cleanup outside the temporary root: ${resolvedScratch}`);
+  }
+  rmSync(resolvedScratch, { recursive: true, force: true });
+}
+
+process.stdout.write(`Portable ${process.platform} install and artifact smoke passed\n`);

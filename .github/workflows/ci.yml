@@ -50,6 +50,9 @@ jobs:
         shell: pwsh
         run: .\cli\test\install-smoke.ps1
 
+      - name: Cross-platform artifact lifecycle smoke
+        run: node cli/test/install-smoke.mjs
+
       - name: Scaffold + check + bundle (headless slice of the v0 gate)
         shell: pwsh
         run: |
@@ -110,6 +113,9 @@ jobs:
       - name: Runtime tests including loopback HTTPS
         working-directory: runtime
         run: zig build test
+
+      - name: Cross-platform artifact lifecycle smoke
+        run: node cli/test/install-smoke.mjs
 
       - name: Native SDK stock profile
         working-directory: runtime/native-sdk

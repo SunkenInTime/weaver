@@ -35,13 +35,15 @@ That file is a complete widget. It is also the *distribution format*: a
 shared Weaver widget is always its source — what you read is what runs, and
 every install is a potential remix.
 
-## Status: v0 (pre-alpha), Windows
+## Status: v0 (pre-alpha), Windows + macOS port in progress
 
-The conjure and source-sharing loops work end to end: scaffold → agent edits
-the TSX → `weaver check` (agent-readable errors) → `weaver dev` → live widget,
-or `weaver pack` → portable source → `weaver install`. Windows only for now;
-macOS follows the full [Lane D implementation plan](docs/macos-port-brief.md);
-see the honest milestone
+The conjure and source-sharing loops work end to end on Windows: scaffold →
+agent edits the TSX → `weaver check` (agent-readable errors) → `weaver dev` →
+live widget. The portable `init` / `check` / `bundle` / `pack` / `inspect` /
+`install` / `uninstall` / `logs` lifecycle works on Windows and macOS with the
+same `.weave` bytes and install-owned source boundary. The macOS supervisor and
+`weaver dev` remain deliberately unavailable until their native host lands in
+PR 10 of the [Lane D implementation plan](docs/macos-port-brief.md). See the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
 [`docs/m1-results.md`](docs/m1-results.md), plus the portable artifact evidence
 in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
@@ -49,7 +51,7 @@ change.
 
 ## Quickstart
 
-Prerequisites: Windows 11, [Node 22+](https://nodejs.org),
+Prerequisites: Windows 11 or macOS 13+, [Node 22+](https://nodejs.org), and
 [Zig 0.16.0](https://ziglang.org/download/) on PATH.
 
 ```powershell
@@ -65,6 +67,10 @@ node cli\bin\weaver.js pack myclock
 node cli\bin\weaver.js install myclock.weave
 ```
 
+On macOS, build the runtime with `cd runtime && zig build
+-Doptimize=ReleaseFast`, use `node cli/bin/weaver.js`, and use the artifact
+commands above. `up`, `down`, `status`, and `dev` become available with PR 10.
+
 Or do it the intended way: point your coding agent at
 [`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it
 for the widget you actually want.
@@ -73,9 +79,9 @@ for the widget you actually want.
 
 | Path | What |
 |---|---|
-| `runtime/` | `weaver-widget.exe` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
+| `runtime/` | `weaver-widget[.exe]` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
 | `sdk/` | `@weaver/sdk` — the authoring API: reconciler, hooks, class compiler. Contract frozen in [`sdk/CONTRACT.md`](sdk/CONTRACT.md) |
-| `cli/` | `weaver` — init / check / bundle / dev / pack / install |
+| `cli/` | `weaver` — init / check / bundle / dev / pack / inspect / install / uninstall / logs |
 | `skills/` | agent skills (conjuring is the primary authoring path) |
 | `docs/adr/` | why things are the way they are — start here to understand the project |
 | `CONTEXT.md` | the domain glossary |
