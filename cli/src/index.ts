@@ -1,12 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
-import { formatStatus, readRegistry, readStatus, statusPath, writeRegistry } from "./host-tools.js";
+import { formatStatus, readRegistry, readStatus, statusPath, widgetsPath, writeRegistry } from "./host-tools.js";
+import { extractWeave, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
@@ -59,21 +61,23 @@ interface BundleResult { project: SourceProject; manifest: RuntimeManifest }
 
 async function main(argv: string[]): Promise<void> {
   const [command, argument, ...rest] = argv;
-  const directoryCommands = ["init", "check", "bundle", "dev", "install"];
+  const directoryCommands = ["init", "check", "bundle", "dev", "pack"];
   const noArgumentCommands = ["up", "down"];
   if (command === "logs") {
     if (!argument || rest.length > 1 || (rest.length === 1 && rest[0] !== "--follow")) throw new WeaverFailure(["Usage: weaver logs <name> [--follow]"]);
     return showLogs(argument, rest[0] === "--follow");
   }
-  if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "uninstall", "status"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|install> <name-or-directory> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
+  if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "install" && !argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "install", "uninstall", "status"].includes(command)) {
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
   }
   if (command === "up") return upHost(true);
   if (command === "down") return downHost();
   if (command === "status") return showStatus(argument === "--json");
   if (command === "uninstall") return uninstallWidget(argument!);
   if (command === "init") return initWidget(argument!);
-  const directory = resolve(argument!);
+  const target = resolve(argument!);
+  if (command === "install") return installWidget(target);
+  const directory = target;
   if (command === "check") {
     checkWidget(directory);
     process.stdout.write(`weaver check passed: ${directory}\n`);
@@ -84,7 +88,7 @@ async function main(argv: string[]): Promise<void> {
     process.stdout.write(`weaver bundle wrote ${join(directory, "dist")}\n`);
     return;
   }
-  if (command === "install") return installWidget(directory);
+  if (command === "pack") return packWidget(directory);
   await devWidget(directory);
 }
 
@@ -97,6 +101,11 @@ function initWidget(name: string): void {
   mkdirSync(directory, { recursive: true });
   const displayName = name.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   writeFileSync(join(directory, "widget.tsx"), starterSource(displayName), "utf8");
+  writeAuthoringTsconfig(directory);
+  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${name}\n`);
+}
+
+function writeAuthoringTsconfig(directory: string): void {
   writeFileSync(join(directory, "tsconfig.json"), `${JSON.stringify({
     compilerOptions: {
       target: "ES2020",
@@ -118,7 +127,6 @@ function initWidget(name: string): void {
     },
     include: ["widget.tsx"],
   }, null, 2)}\n`, "utf8");
-  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${name}\n`);
 }
 
 function starterSource(name: string): string {
@@ -190,6 +198,22 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
   return { project, manifest };
 }
 
+function packWidget(directory: string): void {
+  const project = checkWidget(directory);
+  const packed = packWeave(directory, project.config.name, declaredSurface(project.config));
+  const output = resolve(dirname(directory), `${basename(directory)}.weave`);
+  writeAtomic(output, packed.bytes);
+  process.stdout.write(`Packed ${project.config.name}\nArtifact: ${packed.manifest.artifactId}\nSource: ${packed.manifest.sourceId}\nWrote ${output}\n`);
+}
+
+function declaredSurface(config: WidgetConfigData): DeclaredSurface {
+  return {
+    providers: [...(config.subscribe ?? [])],
+    origins: [...(config.origins ?? [])],
+    capabilities: [...(config.capabilities ?? [])],
+  };
+}
+
 function writeAtomic(path: string, data: string | Uint8Array): void {
   const temporary = `${path}.tmp`;
   writeFileSync(temporary, data);
@@ -215,7 +239,7 @@ function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
 /// directory or source-tree dependency.
 function copyWidgetAssets(sourceDirectory: string, outputDirectory: string): void {
   for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
-    if (["dist", "widget.tsx", "tsconfig.json"].includes(entry.name)) continue;
+    if ([".git", "bundle.js", "dist", "node_modules", "widget.json", "widget.tsx", "tsconfig.json", "weave.json"].includes(entry.name) || entry.name.toLowerCase().endsWith(".weave")) continue;
     const source = join(sourceDirectory, entry.name);
     const destination = join(outputDirectory, entry.name);
     if (entry.isDirectory()) {
@@ -352,26 +376,123 @@ function followLogFile(name: string, startAtEnd: boolean): { stop(): void } {
   return { stop(): void { clearInterval(timer); poll(); } };
 }
 
-async function installWidget(directory: string): Promise<void> {
+async function installWidget(input: string): Promise<void> {
   assertRuntimeBuilt();
-  const project = checkWidget(directory);
-  await bundleWidget(directory);
-  const document = readRegistry();
-  const conflicting = document.widgets.find((widget) => widget.name === project.config.name && resolve(widget.sourcePath) !== directory);
-  if (conflicting) throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${conflicting.sourcePath}`]);
-  writeRegistry({ widgets: [...document.widgets.filter((widget) => widget.name !== project.config.name), {
-    name: project.config.name, sourcePath: directory, enabled: true,
-  }] });
-  await upHost(false);
-  signalHost("--signal-reload");
-  process.stdout.write(`Installed ${project.config.name} from ${directory}\n`);
+  if (!existsSync(input)) throw new WeaverFailure([`Install source does not exist: ${input}`]);
+  let opened: OpenedWeave;
+  try {
+    const inputStat = statSync(input);
+    if (inputStat.isDirectory()) {
+      const sourceProject = checkWidget(input);
+      opened = openWeave(packWeave(input, sourceProject.config.name, declaredSurface(sourceProject.config)).bytes);
+    } else {
+      if (!inputStat.isFile()) throw new WeaverFailure([`Install source must be a regular directory or file: ${input}`]);
+      if (extname(input).toLowerCase() !== ".weave") throw new WeaverFailure([`Install expects a widget directory or .weave file: ${input}`]);
+      if (inputStat.size > MAX_WEAVE_ARCHIVE_BYTES) throw new WeaverFailure([`Archive exceeds the ${MAX_WEAVE_ARCHIVE_BYTES / (1024 * 1024)} MiB .weave limit: ${input}`]);
+      opened = openWeave(readFileSync(input));
+    }
+  } catch (error) {
+    if (error instanceof WeaverFailure) throw error;
+    throw new WeaverFailure([`Cannot open ${input}: ${error instanceof Error ? error.message : String(error)}`]);
+  }
+
+  const root = widgetsPath();
+  mkdirSync(root, { recursive: true });
+  const destination = join(root, installDirectoryName(opened.manifest.name));
+  const stage = mkdtempSync(join(root, ".install-"));
+  let stageExists = true;
+  let backup: string | null = null;
+  const originalRegistry = readRegistry();
+  try {
+    extractWeave(opened, stage);
+    writeAuthoringTsconfig(stage);
+    const project = checkWidget(stage);
+    assertManifestMatchesSource(opened.manifest, project.config);
+    await bundleWidget(stage);
+
+    const conflicting = originalRegistry.widgets.find((widget) => widget.name === project.config.name && resolve(widget.sourcePath) !== resolve(destination));
+    if (conflicting) throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${conflicting.sourcePath}`, `Run "weaver uninstall ${project.config.name}" before replacing a source-linked installation.`]);
+    printInstallAudit(opened.manifest);
+
+    if (existsSync(destination)) {
+      backup = join(root, `.backup-${installDirectoryName(opened.manifest.name)}-${randomUUID()}`);
+      renameSync(destination, backup);
+    }
+    try {
+      renameSync(stage, destination);
+    } catch (error) {
+      if (backup && existsSync(backup)) renameSync(backup, destination);
+      backup = null;
+      throw error;
+    }
+    stageExists = false;
+    try {
+      writeRegistry({ widgets: [...originalRegistry.widgets.filter((widget) => widget.name !== project.config.name), {
+        name: project.config.name, sourcePath: destination, enabled: true,
+      }] });
+      await upHost(false);
+      signalHost("--signal-reload");
+    } catch (error) {
+      if (existsSync(destination)) rmSync(destination, { recursive: true, force: true });
+      if (backup && existsSync(backup)) renameSync(backup, destination);
+      backup = null;
+      writeRegistry(originalRegistry);
+      if (hostRunning()) {
+        try { signalHost("--signal-reload"); }
+        catch { /* Preserve the original failure; the registry is authoritative on the next reload. */ }
+      }
+      throw error;
+    }
+    if (backup && existsSync(backup)) rmSync(backup, { recursive: true, force: true });
+    process.stdout.write(`Installed ${project.config.name}\nSource: ${destination}\n`);
+  } finally {
+    if (stageExists && existsSync(stage)) rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+function assertManifestMatchesSource(manifest: WeaveManifest, config: WidgetConfigData): void {
+  if (manifest.name !== config.name) throw new WeaverFailure([`weave.json names "${manifest.name}" but source declares "${config.name}"`]);
+  const actual = declaredSurface(config);
+  for (const field of ["providers", "origins", "capabilities"] as const) {
+    if (JSON.stringify(manifest.declared[field]) !== JSON.stringify(actual[field])) {
+      throw new WeaverFailure([`weave.json declared.${field} does not match widget.tsx`]);
+    }
+  }
+}
+
+function printInstallAudit(manifest: WeaveManifest): void {
+  const author = manifest.provenance.author ?? "local/unsigned";
+  const providers = manifest.declared.providers.length > 0 ? manifest.declared.providers.join(", ") : "none";
+  const origins = manifest.declared.origins.length > 0 ? manifest.declared.origins.join(", ") : "none";
+  const capabilities = manifest.declared.capabilities.length > 0 ? manifest.declared.capabilities.join(", ") : "none";
+  process.stdout.write(`Reviewing ${manifest.name}\nAuthor: ${author}\nArtifact: ${manifest.artifactId}\nSource: readable · ${manifest.sourceId}\nProviders: ${providers}\nNetwork origins: ${origins}\nSystem capabilities: ${capabilities}\n`);
+}
+
+function installDirectoryName(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "widget";
+  const suffix = createHash("sha256").update(name, "utf8").digest("hex").slice(0, 12);
+  return `${slug}-${suffix}`;
+}
+
+function ownedInstallPath(path: string): boolean {
+  const root = resolve(widgetsPath());
+  const candidate = resolve(path);
+  return candidate.startsWith(`${root}${sep}`) && existsSync(join(candidate, "weave.json"));
 }
 
 function uninstallWidget(name: string): void {
   const document = readRegistry();
-  if (!document.widgets.some((widget) => widget.name === name)) throw new WeaverFailure([`Widget "${name}" is not installed.`]);
+  const registration = document.widgets.find((widget) => widget.name === name);
+  if (!registration) throw new WeaverFailure([`Widget "${name}" is not installed.`]);
   writeRegistry({ widgets: document.widgets.filter((widget) => widget.name !== name) });
-  if (hostRunning()) signalHost("--signal-reload");
+  if (hostRunning()) {
+    try { signalHost("--signal-reload"); }
+    catch (error) {
+      writeRegistry(document);
+      throw error;
+    }
+  }
+  if (ownedInstallPath(registration.sourcePath)) rmSync(registration.sourcePath, { recursive: true, force: true });
   process.stdout.write(`Uninstalled ${name}\n`);
 }
 

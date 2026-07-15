@@ -16,14 +16,21 @@ export interface WidgetStatus {
 }
 export interface StatusDocument { hostPid: number; widgets: WidgetStatus[] }
 
-export function registryPath(localAppData = process.env.LOCALAPPDATA): string {
+export function weaverDataPath(localAppData = process.env.LOCALAPPDATA): string {
   if (!localAppData) throw new Error("LOCALAPPDATA is not available");
-  return join(localAppData, "weaver", "registry.json");
+  return join(localAppData, "weaver");
+}
+
+export function widgetsPath(localAppData = process.env.LOCALAPPDATA): string {
+  return join(weaverDataPath(localAppData), "widgets");
+}
+
+export function registryPath(localAppData = process.env.LOCALAPPDATA): string {
+  return join(weaverDataPath(localAppData), "registry.json");
 }
 
 export function statusPath(localAppData = process.env.LOCALAPPDATA): string {
-  if (!localAppData) throw new Error("LOCALAPPDATA is not available");
-  return join(localAppData, "weaver", "status.json");
+  return join(weaverDataPath(localAppData), "status.json");
 }
 
 export function readRegistry(path = registryPath()): RegistryDocument {

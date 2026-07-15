@@ -1,20 +1,24 @@
 # Roadmap
 
-Ordering set by Dara, 2026-07-15. Current state: M0–M4a merged (conjure loop,
-host, providers, interactive elements, shared GPU renderer); M4b (hybrid
-retained-texture layer, fps=0 idle, source-missing status) in flight.
+Ordering set by Dara, 2026-07-15. Current state: M0–M4b, fork consolidation,
+dev hot-swap/logs, and the Windows per-monitor DPI contract are complete. The
+portable `.weave` pack/install boundary is implemented; capability grants are
+the next trust-boundary work.
 
-1. **Fork consolidation** — consolidate the stacked fork branches into one
+1. **Fork consolidation — complete** — consolidate the stacked fork branches into one
    clean `weaver-main` lineage; make the widget capacity profile a build option
-   so stock fork tests pass; prepare the upstream PRs (TLS fix / #114, widget
-   windowing fields, damage-aware presenter) while rebasing is cheap.
-2. **Dev polish** — state-preserving hot-swap for `weaver dev`, `weaver logs
+   so stock fork tests pass. The general TLS problem from #114 was upstreamed;
+   Weaver's capacity, widget-windowing, and presenter changes remain fork-owned
+   because they serve Weaver rather than Native SDK's product surface.
+2. **Dev polish — complete** — state-preserving hot-swap for `weaver dev`, `weaver logs
    <widget>`, better errors. Multi-monitor anchoring and the per-monitor DPI
    audit are complete; see [Windows DPI scaling](dpi-scaling.md).
-3. **`weaver pack` / `weaver install`** — the `.weave` file: zipped widget
-   source + lineage (source-is-the-artifact, ADR 0004). Includes the
-   capability consent UI (the loud wall from ADR 0002 gets its actual dialog)
-   and the first real implementations of gated capabilities.
+3. **`weaver pack` / `weaver install` — artifact complete, grants next** — the
+   `.weave` file is deterministic zipped source + declared surface + lineage
+   (source-is-the-artifact, ADR 0004). Install validates and builds a
+   Weaver-owned copy, audits quiet capabilities, and never registers the
+   sender's workspace. Next: the loud capability consent UI from ADR 0002 and
+   the first real gated capability.
 4. **`weaver remix`** — copy an installed widget's source to an editable
    folder, bump lineage, hand to your agent. Conjure skill v2 covering the
    full API surface.
