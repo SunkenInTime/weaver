@@ -215,3 +215,12 @@ zero presents. The true-changing canvas-only control is 7.53-7.83%, one mixed
 widget is 8.03%, and three simultaneous mixed widgets are 8.08-8.51% each.
 The <=10% performance gate is closed. A native-mapped command writer may still
 be worthwhile later, but it is no longer required to repair an M4b regression.
+
+## DPI follow-up resolution
+
+The high-DPI shared-surface strip observed after M4b is fully resolved. The
+shared renderer now uses explicit physical source extents, explicit logical and
+physical destination geometry, geometry generations, and a child-HWND
+DirectComposition target. Retained/immediate alignment, GPU/software parity,
+all four edges, input, demotion/recovery, and 100%-200% transitions pass the
+production-path fixture documented in [Windows DPI scaling](dpi-scaling.md).

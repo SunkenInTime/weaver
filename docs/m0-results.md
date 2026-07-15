@@ -99,8 +99,10 @@ correction retry or the Windows layered-present path and remove it where safe.
   JSON can position and name this one desktop-widget class, but M0 intentionally
   rejects opaque or non-desktop manifests rather than pretending arbitrary
   per-widget chrome is dynamic.
-- Anchor math uses the primary Win32 work area. Multi-monitor selection and a
-  physical-pixel versus per-monitor-DPI audit remain follow-up work.
+- Historical M0 note: anchor math originally used the primary Win32 work area
+  without a complete unit contract. The current API's target-monitor work
+  area, negative-coordinate, corner, and per-monitor DPI audit is now complete;
+  see [Windows DPI scaling](dpi-scaling.md).
 - QuickJS runs on the UI thread and has neither a memory limit nor an interrupt
   deadline yet. A malicious or accidental infinite loop can hang the widget;
   process isolation limits the blast radius but does not make that acceptable.

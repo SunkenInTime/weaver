@@ -1,0 +1,1075 @@
+{
+    "startedUtc":  "2026-07-14T21:54:20.0857331Z",
+    "repoRoot":  "E:\\Projects\\weaver-dpi-scaling",
+    "outputDirectory":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15",
+    "monitors":  [
+                     "0,0,2560,1440;dpi=96;hr=0"
+                 ],
+    "commands":  [
+                     {
+                         "name":  "gpu-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\dpi-diagnostic",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "gpu-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "software-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\dpi-diagnostic",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "software-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "current-monitor-install",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js install E:\\Projects\\weaver-dpi-scaling\\examples\\dpi-diagnostic",
+                         "exitCode":  0
+                     },
+                     {
+                         "name":  "current-monitor-down",
+                         "command":  "node E:\\Projects\\weaver-dpi-scaling\\cli\\dist\\index.js down",
+                         "exitCode":  0
+                     }
+                 ],
+    "gpu":  [
+                {
+                    "percent":  100,
+                    "dpi":  96,
+                    "width":  480,
+                    "height":  320,
+                    "pid":  49160,
+                    "hwnd":  "0x1c3c1186",
+                    "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\gpu-100.png"
+                },
+                {
+                    "percent":  125,
+                    "dpi":  120,
+                    "width":  600,
+                    "height":  400,
+                    "pid":  49160,
+                    "hwnd":  "0x1c3c1186",
+                    "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\gpu-125.png"
+                },
+                {
+                    "percent":  150,
+                    "dpi":  144,
+                    "width":  720,
+                    "height":  480,
+                    "pid":  49160,
+                    "hwnd":  "0x1c3c1186",
+                    "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\gpu-150.png"
+                },
+                {
+                    "percent":  175,
+                    "dpi":  168,
+                    "width":  840,
+                    "height":  560,
+                    "pid":  49160,
+                    "hwnd":  "0x1c3c1186",
+                    "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\gpu-175.png"
+                },
+                {
+                    "percent":  200,
+                    "dpi":  192,
+                    "width":  960,
+                    "height":  640,
+                    "pid":  49160,
+                    "hwnd":  "0x1c3c1186",
+                    "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\gpu-200.png"
+                }
+            ],
+    "software":  [
+                     {
+                         "percent":  100,
+                         "dpi":  96,
+                         "width":  480,
+                         "height":  320,
+                         "pid":  54908,
+                         "hwnd":  "0x8c41328",
+                         "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\software-100.png"
+                     },
+                     {
+                         "percent":  125,
+                         "dpi":  120,
+                         "width":  600,
+                         "height":  400,
+                         "pid":  54908,
+                         "hwnd":  "0x8c41328",
+                         "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\software-125.png"
+                     },
+                     {
+                         "percent":  150,
+                         "dpi":  144,
+                         "width":  720,
+                         "height":  480,
+                         "pid":  54908,
+                         "hwnd":  "0x8c41328",
+                         "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\software-150.png"
+                     },
+                     {
+                         "percent":  175,
+                         "dpi":  168,
+                         "width":  840,
+                         "height":  560,
+                         "pid":  54908,
+                         "hwnd":  "0x8c41328",
+                         "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\software-175.png"
+                     },
+                     {
+                         "percent":  200,
+                         "dpi":  192,
+                         "width":  960,
+                         "height":  640,
+                         "pid":  54908,
+                         "hwnd":  "0x8c41328",
+                         "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\software-200.png"
+                     }
+                 ],
+    "currentMonitor":  {
+                           "dpi":  96,
+                           "width":  480,
+                           "height":  320,
+                           "pid":  39216,
+                           "hwnd":  "0x1e409de",
+                           "screenshot":  "E:\\Projects\\weaver-dpi-scaling\\artifacts\\dpi-verification-run15\\current-monitor-gpu.png"
+                       },
+    "checks":  [
+                   {
+                       "name":  "gpu-window",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-raise",
+                       "passed":  true,
+                       "detail":  "SetWindowPos(HWND_TOPMOST)"
+                   },
+                   {
+                       "name":  "gpu-message-100",
+                       "passed":  true,
+                       "detail":  "dpi=96"
+                   },
+                   {
+                       "name":  "gpu-100-extent",
+                       "passed":  true,
+                       "detail":  "actual=480x320 expected=480x320"
+                   },
+                   {
+                       "name":  "gpu-100-identity",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-100-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-100-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(240,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-100-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,100) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-100-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(479,100) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(475,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-100-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(440,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(100,319) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,315) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,280) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(475,315) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(440,280) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(419,230) actual=#00D9FF expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "gpu-100-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(420,230) actual=#1FB4FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-125",
+                       "passed":  true,
+                       "detail":  "dpi=120"
+                   },
+                   {
+                       "name":  "gpu-125-extent",
+                       "passed":  true,
+                       "detail":  "actual=600x400 expected=600x400"
+                   },
+                   {
+                       "name":  "gpu-125-identity",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-125-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-125-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(300,0) actual=#EB0654 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-125-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,125) actual=#06EB64 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-125-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(599,125) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(595,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-125-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(560,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(125,399) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,395) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,360) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(595,395) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(560,360) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(524,288) actual=#00D5FB expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "gpu-125-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(525,288) actual=#13C2FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-150",
+                       "passed":  true,
+                       "detail":  "dpi=144"
+                   },
+                   {
+                       "name":  "gpu-150-extent",
+                       "passed":  true,
+                       "detail":  "actual=720x480 expected=720x480"
+                   },
+                   {
+                       "name":  "gpu-150-identity",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-150-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-150-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(360,0) actual=#DE0B54 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-150-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,150) actual=#0ADF62 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-150-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(719,150) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(715,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-150-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(680,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(150,479) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,475) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,440) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(715,475) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(680,440) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(629,345) actual=#02C5E8 expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "gpu-150-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(630,345) actual=#21B0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-175",
+                       "passed":  true,
+                       "detail":  "dpi=168"
+                   },
+                   {
+                       "name":  "gpu-175-extent",
+                       "passed":  true,
+                       "detail":  "actual=840x560 expected=840x560"
+                   },
+                   {
+                       "name":  "gpu-175-identity",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-175-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-175-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(420,0) actual=#D40E54 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-175-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,175) actual=#0CD661 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-175-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(839,175) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(835,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-175-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(800,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(175,559) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,555) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,520) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(835,555) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(800,520) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(734,403) actual=#02C6EA expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "gpu-175-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(735,403) actual=#19BAFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-200",
+                       "passed":  true,
+                       "detail":  "dpi=192"
+                   },
+                   {
+                       "name":  "gpu-200-extent",
+                       "passed":  true,
+                       "detail":  "actual=960x640 expected=960x640"
+                   },
+                   {
+                       "name":  "gpu-200-identity",
+                       "passed":  true,
+                       "detail":  "pid=49160 hwnd=0x1c3c1186"
+                   },
+                   {
+                       "name":  "gpu-200-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-200-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(480,0) actual=#CD1054 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-200-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,200) actual=#0ECF60 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "gpu-200-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(959,200) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(955,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-200-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(920,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(200,639) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,635) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,600) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(955,635) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(920,600) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(839,460) actual=#03B5D6 expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "gpu-200-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(840,460) actual=#23AEFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-child-window",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-message-100",
+                       "passed":  true,
+                       "detail":  "dpi=96"
+                   },
+                   {
+                       "name":  "gpu-100-child-stable",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-100-right-click",
+                       "passed":  true,
+                       "detail":  "at=(479,100) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-100-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(100,319) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-125",
+                       "passed":  true,
+                       "detail":  "dpi=120"
+                   },
+                   {
+                       "name":  "gpu-125-child-stable",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-125-right-click",
+                       "passed":  true,
+                       "detail":  "at=(599,125) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-125-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(125,399) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-150",
+                       "passed":  true,
+                       "detail":  "dpi=144"
+                   },
+                   {
+                       "name":  "gpu-150-child-stable",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-150-right-click",
+                       "passed":  true,
+                       "detail":  "at=(719,150) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-150-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(150,479) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-175",
+                       "passed":  true,
+                       "detail":  "dpi=168"
+                   },
+                   {
+                       "name":  "gpu-175-child-stable",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-175-right-click",
+                       "passed":  true,
+                       "detail":  "at=(839,175) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-175-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(175,559) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-200",
+                       "passed":  true,
+                       "detail":  "dpi=192"
+                   },
+                   {
+                       "name":  "gpu-200-child-stable",
+                       "passed":  true,
+                       "detail":  "child=0x8c11328"
+                   },
+                   {
+                       "name":  "gpu-200-right-click",
+                       "passed":  true,
+                       "detail":  "at=(959,200) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-200-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(200,639) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "gpu-message-100",
+                       "passed":  true,
+                       "detail":  "dpi=96"
+                   },
+                   {
+                       "name":  "gpu-handle-stability",
+                       "passed":  true,
+                       "detail":  "start=234 end=234"
+                   },
+                   {
+                       "name":  "gpu-no-continuous-geometry-churn",
+                       "passed":  true,
+                       "detail":  "bytesBefore=11389 bytesAfter=11389"
+                   },
+                   {
+                       "name":  "software-window",
+                       "passed":  true,
+                       "detail":  "pid=54908 hwnd=0x8c41328"
+                   },
+                   {
+                       "name":  "software-raise",
+                       "passed":  true,
+                       "detail":  "SetWindowPos(HWND_TOPMOST)"
+                   },
+                   {
+                       "name":  "software-message-100",
+                       "passed":  true,
+                       "detail":  "dpi=96"
+                   },
+                   {
+                       "name":  "software-100-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-100-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(240,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-100-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,100) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "software-100-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(479,100) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-100-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(475,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-100-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(440,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-100-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(100,319) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-100-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,315) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-100-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,280) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-100-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(475,315) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-100-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(440,280) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "software-100-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(419,230) actual=#00A2BE expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "software-100-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(420,230) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-message-125",
+                       "passed":  true,
+                       "detail":  "dpi=120"
+                   },
+                   {
+                       "name":  "software-125-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-125-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(300,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-125-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,125) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "software-125-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(599,125) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-125-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(595,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-125-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(560,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-125-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(125,399) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-125-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,395) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-125-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,360) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-125-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(595,395) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-125-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(560,360) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "software-125-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(524,288) actual=#009FBB expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "software-125-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(525,288) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-message-150",
+                       "passed":  true,
+                       "detail":  "dpi=144"
+                   },
+                   {
+                       "name":  "software-150-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-150-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(360,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-150-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,150) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "software-150-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(719,150) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-150-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(715,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-150-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(680,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-150-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(150,479) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-150-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,475) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-150-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,440) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-150-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(715,475) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-150-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(680,440) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "software-150-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(629,345) actual=#009DB9 expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "software-150-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(630,345) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-message-175",
+                       "passed":  true,
+                       "detail":  "dpi=168"
+                   },
+                   {
+                       "name":  "software-175-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-175-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(420,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-175-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,175) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "software-175-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(839,175) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-175-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(835,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-175-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(800,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-175-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(175,559) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-175-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,555) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-175-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,520) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-175-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(835,555) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-175-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(800,520) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "software-175-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(734,403) actual=#009CB7 expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "software-175-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(735,403) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-message-200",
+                       "passed":  true,
+                       "detail":  "dpi=192"
+                   },
+                   {
+                       "name":  "software-200-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-200-top-edge",
+                       "passed":  true,
+                       "detail":  "at=(480,0) actual=#FF0055 expected=#FF0055 tolerance=64"
+                   },
+                   {
+                       "name":  "software-200-left-edge",
+                       "passed":  true,
+                       "detail":  "at=(0,200) actual=#00FF66 expected=#00FF66 tolerance=64"
+                   },
+                   {
+                       "name":  "software-200-right-edge",
+                       "passed":  true,
+                       "detail":  "at=(959,200) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-top-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(955,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-200-top-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(920,40) actual=#00A0FF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-bottom-edge",
+                       "passed":  true,
+                       "detail":  "at=(200,639) actual=#FFDA24 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-bottom-left-occupied",
+                       "passed":  true,
+                       "detail":  "at=(5,635) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-200-bottom-left-marker",
+                       "passed":  true,
+                       "detail":  "at=(40,600) actual=#FFD400 expected=#FFD400 tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-bottom-right-occupied",
+                       "passed":  true,
+                       "detail":  "at=(955,635) actual=#A855F7 minimumPeak=50"
+                   },
+                   {
+                       "name":  "software-200-bottom-right-marker",
+                       "passed":  true,
+                       "detail":  "at=(920,600) actual=#A855F7 expected=#A855F7 tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-immediate-seam",
+                       "passed":  true,
+                       "detail":  "at=(839,460) actual=#009CB7 expected=#00D9FF tolerance=96"
+                   },
+                   {
+                       "name":  "software-200-retained-seam",
+                       "passed":  true,
+                       "detail":  "at=(840,460) actual=#24ADFF expected=#00A0FF tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-right-click",
+                       "passed":  true,
+                       "detail":  "at=(959,200) actual=#FFFFFF expected=#FFFFFF tolerance=48"
+                   },
+                   {
+                       "name":  "software-200-bottom-click",
+                       "passed":  true,
+                       "detail":  "at=(200,639) actual=#24FF7C expected=#00FF66 tolerance=48"
+                   },
+                   {
+                       "name":  "current-monitor-window",
+                       "passed":  true,
+                       "detail":  "pid=39216 hwnd=0x1e409de"
+                   },
+                   {
+                       "name":  "current-monitor-raise",
+                       "passed":  true,
+                       "detail":  "SetWindowPos(HWND_TOPMOST)"
+                   },
+                   {
+                       "name":  "current-monitor-top-left",
+                       "passed":  true,
+                       "detail":  "at=(5,5) actual=#FF0055 expected=#FF0055 tolerance=12"
+                   },
+                   {
+                       "name":  "current-monitor-top-right",
+                       "passed":  true,
+                       "detail":  "at=(475,5) actual=#00A0FF minimumPeak=50"
+                   },
+                   {
+                       "name":  "current-monitor-bottom-left",
+                       "passed":  true,
+                       "detail":  "at=(5,315) actual=#FFD400 minimumPeak=50"
+                   },
+                   {
+                       "name":  "current-monitor-bottom-right",
+                       "passed":  true,
+                       "detail":  "at=(475,315) actual=#A855F7 minimumPeak=50"
+                   }
+               ],
+    "finishedUtc":  "2026-07-14T21:54:48.4562616Z"
+}
