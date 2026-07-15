@@ -73,9 +73,11 @@ jobs:
           - arch: apple-silicon
             runner: macos-15
             zig_arch: aarch64
+            real_widget_smoke: true
           - arch: intel
             runner: macos-15-intel
             zig_arch: x86_64
+            real_widget_smoke: false
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -123,8 +125,16 @@ jobs:
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs
 
-      - name: macOS daemon and dev lifecycle smoke
+      - name: Record hosted display capability
+        run: system_profiler SPDisplaysDataType
+
+      - name: macOS daemon and real Widget lifecycle smoke
+        if: matrix.real_widget_smoke
         run: node cli/test/macos-host-smoke.mjs
+
+      - name: macOS daemon non-visual lifecycle smoke
+        if: ${{ !matrix.real_widget_smoke }}
+        run: node cli/test/macos-host-control-smoke.mjs
 
       - name: Native SDK stock profile
         working-directory: runtime/native-sdk

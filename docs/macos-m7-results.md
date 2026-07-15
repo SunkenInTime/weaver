@@ -34,6 +34,16 @@ performance improvement claim.
 | `node cli/test/install-smoke.mjs` | 0 | deterministic artifact/install/replace/uninstall lifecycle passes with acknowledged macOS reloads |
 | `node cli/test/macos-host-smoke.mjs` | 0 | dev hot swap/restart, concurrent mutations, provider endpoint, host/Widget crash orders, backoff/recovery, and cleanup pass |
 
+CI separates two claims that the runner hardware cannot honestly combine. The
+Apple-silicon runner executes `cli/test/macos-host-smoke.mjs` with real AppKit
+Widgets. The hosted Intel runner still builds and tests the x86_64 runtime,
+Native SDK, host, and CLI, then executes
+`cli/test/macos-host-control-smoke.mjs`: three concurrent starts converge on
+one reload-ready singleton, status remains machine-readable, a `SIGKILL`ed
+host is replaced, acknowledged shutdown succeeds, and no runtime root or lock
+remains. Its `system_profiler SPDisplaysDataType` output is retained in CI so
+this non-visual route cannot be mistaken for physical Intel renderer evidence.
+
 The physical Conjure run started host PID 20702 and Clock PID 20747. Changing
 only a rendered class produced `dev hot swap applied (preserved root hook
 state)` while PID 20747 remained live. Changing size `[240, 110]` to
