@@ -22,6 +22,11 @@ export interface ProviderStatus {
   audioCaptureActive: boolean;
   audioSilent: boolean;
   audioPipeFrames: number;
+  audioAvailability: "idle" | "authorization-required" | "starting" | "live" | "permission-denied" | "permission-revoked" | "device-unavailable" | "capture-failed";
+  audioSubscribers: number;
+  audioCaptureStarts: number;
+  audioProviderFrames: number;
+  audioLastError: number;
   mediaPipeFrames: number;
 }
 export interface StatusDocument { hostPid: number; providers: ProviderStatus; widgets: WidgetStatus[] }

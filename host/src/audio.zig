@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-const native = @cImport({
-    @cInclude("windows_providers.h");
-});
+const native = if (builtin.os.tag == .macos)
+    @cImport({ @cInclude("macos_audio.h"); })
+else
+    @cImport({ @cInclude("windows_providers.h"); });
 
 pub const fft_size: usize = 2048;
 pub const band_count: usize = 32;
@@ -14,9 +16,33 @@ pub const Frame = struct {
     bands: [band_count]f64 = [_]f64{0} ** band_count,
 };
 
-/// The analyzer owns one rolling 2048-sample window. WASAPI conversion and
-/// mono mixdown stop at the C boundary; windowing, FFT, log-band projection,
-/// and AGC remain deterministic Zig with no DSP dependency.
+pub const Availability = enum {
+    idle,
+    authorization_required,
+    starting,
+    live,
+    permission_denied,
+    permission_revoked,
+    device_unavailable,
+    capture_failed,
+
+    pub fn label(self: Availability) []const u8 {
+        return switch (self) {
+            .idle => "idle",
+            .authorization_required => "authorization-required",
+            .starting => "starting",
+            .live => "live",
+            .permission_denied => "permission-denied",
+            .permission_revoked => "permission-revoked",
+            .device_unavailable => "device-unavailable",
+            .capture_failed => "capture-failed",
+        };
+    }
+};
+
+/// The analyzer owns one rolling 2048-sample window. Platform capture and mono
+/// mixdown stop at the C boundary; windowing, FFT, log-band projection, and
+/// AGC remain deterministic Zig with no DSP dependency.
 pub const Analyzer = struct {
     samples: [fft_size]f64 = [_]f64{0} ** fft_size,
     cursor: usize = 0,
@@ -86,9 +112,24 @@ pub const Provider = struct {
     silent: bool = true,
     zero_sent: bool = false,
     frame_count: u64 = 0,
+    capture_starts: u64 = 0,
+    authorized: bool = true,
+    was_live: bool = false,
+    availability: Availability = .idle,
+    last_error: i32 = 0,
 
     pub fn deinit(self: *Provider) void {
         self.close();
+    }
+
+    pub fn setAuthorized(self: *Provider, authorized: bool) void {
+        if (self.authorized == authorized) return;
+        self.authorized = authorized;
+        self.close();
+        self.next_open_ms = 0;
+        self.was_live = false;
+        self.availability = if (authorized) .idle else .authorization_required;
+        self.last_error = 0;
     }
 
     pub fn setActive(self: *Provider, active: bool, now_ms: u64) void {
@@ -97,6 +138,16 @@ pub const Provider = struct {
             self.analyzer = .{};
             self.silent = true;
             self.zero_sent = false;
+            self.was_live = false;
+            self.availability = .idle;
+            return;
+        }
+        if (!self.authorized) {
+            self.availability = .authorization_required;
+            return;
+        }
+        if (self.next_open_ms == std.math.maxInt(u64)) {
+            self.availability = if (self.was_live) .permission_revoked else .permission_denied;
             return;
         }
         if (self.capture == null and now_ms >= self.next_open_ms) self.open(now_ms);
@@ -106,9 +157,42 @@ pub const Provider = struct {
     /// while an audio subscriber exists, so no COM endpoint, FFT, or JSON
     /// serialization survives after the last subscriber exits.
     pub fn poll(self: *Provider, now_ms: u64) ?Frame {
+        if (!self.authorized or self.next_open_ms == std.math.maxInt(u64)) return null;
         if (self.capture == null) {
             if (now_ms >= self.next_open_ms) self.open(now_ms);
             return null;
+        }
+        if (builtin.os.tag == .macos) {
+            switch (native.weaver_audio_status(self.capture.?)) {
+                native.WEAVER_AUDIO_STARTING => {
+                    self.availability = .starting;
+                    return null;
+                },
+                native.WEAVER_AUDIO_RUNNING => {
+                    self.availability = .live;
+                    self.was_live = true;
+                    if (self.sample_rate == 0) self.sample_rate = native.weaver_audio_sample_rate(self.capture.?);
+                },
+                native.WEAVER_AUDIO_PERMISSION_DENIED => {
+                    self.last_error = native.weaver_audio_error(self.capture.?);
+                    self.availability = if (self.was_live) .permission_revoked else .permission_denied;
+                    self.close();
+                    self.next_open_ms = std.math.maxInt(u64);
+                    return null;
+                },
+                native.WEAVER_AUDIO_DEVICE_UNAVAILABLE => {
+                    self.last_error = native.weaver_audio_error(self.capture.?);
+                    self.availability = .device_unavailable;
+                    self.reopen(now_ms);
+                    return null;
+                },
+                else => {
+                    self.last_error = native.weaver_audio_error(self.capture.?);
+                    self.availability = .capture_failed;
+                    self.reopen(now_ms);
+                    return null;
+                },
+            }
         }
         if (now_ms >= self.next_device_check_ms) {
             self.next_device_check_ms = now_ms + 1000;
@@ -120,6 +204,19 @@ pub const Provider = struct {
         var input: [8192]f32 = undefined;
         var count: usize = 0;
         if (native.weaver_audio_poll(self.capture, &input, input.len, &count) < 0) {
+            if (builtin.os.tag == .macos) {
+                self.last_error = native.weaver_audio_error(self.capture.?);
+                switch (native.weaver_audio_status(self.capture.?)) {
+                    native.WEAVER_AUDIO_PERMISSION_DENIED => {
+                        self.availability = if (self.was_live) .permission_revoked else .permission_denied;
+                        self.close();
+                        self.next_open_ms = std.math.maxInt(u64);
+                        return null;
+                    },
+                    native.WEAVER_AUDIO_DEVICE_UNAVAILABLE => self.availability = .device_unavailable,
+                    else => self.availability = .capture_failed,
+                }
+            }
             self.reopen(now_ms);
             return null;
         }
@@ -130,24 +227,21 @@ pub const Provider = struct {
         // preserves a 30 Hz long-run rate without emitting catch-up bursts.
         self.next_frame_ms = advanceDeadline(self.next_frame_ms, now_ms);
         const rms = self.analyzer.rms();
-        if (rms < silence_floor) {
-            if (self.silence_started_ms == 0) self.silence_started_ms = now_ms;
-            if (now_ms -| self.silence_started_ms < silence_hold_ms) {
+        switch (self.silenceAction(rms, now_ms)) {
+            .decay => {
                 // Zero frames during the hold give subscribers time to decay
                 // visibly. At two seconds one final zero is sent and the
                 // provider becomes completely quiet until signal returns.
                 self.frame_count += 1;
                 return .{};
-            }
-            self.silent = true;
-            if (self.zero_sent) return null;
-            self.zero_sent = true;
-            self.frame_count += 1;
-            return .{};
+            },
+            .final_zero => {
+                self.frame_count += 1;
+                return .{};
+            },
+            .suppress => return null,
+            .active => {},
         }
-        self.silence_started_ms = 0;
-        self.silent = false;
-        self.zero_sent = false;
         self.frame_count += 1;
         return self.analyzer.spectrum(self.sample_rate);
     }
@@ -158,8 +252,12 @@ pub const Provider = struct {
             self.sample_rate = native.weaver_audio_sample_rate(capture);
             self.next_device_check_ms = now_ms + 1000;
             self.next_frame_ms = now_ms;
+            self.capture_starts += 1;
+            self.availability = if (builtin.os.tag == .macos) .starting else .live;
+            if (builtin.os.tag != .macos) self.was_live = true;
             return;
         }
+        self.availability = .capture_failed;
         self.next_open_ms = now_ms + 1000;
     }
 
@@ -173,6 +271,23 @@ pub const Provider = struct {
         self.close();
         self.next_open_ms = now_ms + 250;
         self.analyzer = .{};
+    }
+
+    const SilenceAction = enum { active, decay, final_zero, suppress };
+
+    fn silenceAction(self: *Provider, rms: f64, now_ms: u64) SilenceAction {
+        if (rms >= silence_floor) {
+            self.silence_started_ms = 0;
+            self.silent = false;
+            self.zero_sent = false;
+            return .active;
+        }
+        if (self.silence_started_ms == 0) self.silence_started_ms = now_ms;
+        if (now_ms -| self.silence_started_ms < silence_hold_ms) return .decay;
+        self.silent = true;
+        if (self.zero_sent) return .suppress;
+        self.zero_sent = true;
+        return .final_zero;
     }
 };
 
@@ -263,4 +378,16 @@ test "audio deadline does not accumulate late Windows waits" {
     try std.testing.expectEqual(@as(u64, 1066), deadline);
     deadline = advanceDeadline(deadline, 1094);
     try std.testing.expectEqual(@as(u64, 1099), deadline);
+}
+
+test "audio silence decays once, parks, and resumes on signal" {
+    var provider: Provider = .{};
+    try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.2, 100));
+    try std.testing.expectEqual(Provider.SilenceAction.decay, provider.silenceAction(0, 200));
+    try std.testing.expectEqual(Provider.SilenceAction.decay, provider.silenceAction(0, 2199));
+    try std.testing.expectEqual(Provider.SilenceAction.final_zero, provider.silenceAction(0, 2200));
+    try std.testing.expectEqual(Provider.SilenceAction.suppress, provider.silenceAction(0, 2300));
+    try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.1, 2400));
+    try std.testing.expect(!provider.silent);
+    try std.testing.expect(!provider.zero_sent);
 }

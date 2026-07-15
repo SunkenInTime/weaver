@@ -1,4 +1,5 @@
 const std = @import("std");
+const audio = @import("audio.zig");
 const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
 const provider_protocol = @import("provider_protocol.zig");
@@ -261,6 +262,10 @@ const Host = struct {
     previous_memory: [512]u8 = undefined,
     previous_memory_len: usize = 0,
     system_frames: u64 = 0,
+    audio_provider: audio.Provider = .{},
+    audio_authorization_marker: []const u8,
+    audio_authorization_mtime: i128 = 0,
+    audio_pipe_frames: u64 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -271,6 +276,16 @@ const Host = struct {
         const parsed = try registry.parse(self.allocator, owned_bytes orelse "{\"widgets\":[]}");
         defer parsed.deinit();
         try supervisor.reconcile(&self.slots, parsed.value.widgets, self);
+        if (authorizationMtime(self.io, self.audio_authorization_marker)) |mtime| {
+            if (mtime != self.audio_authorization_mtime) {
+                self.audio_authorization_mtime = mtime;
+                self.audio_provider.setAuthorized(false);
+                self.audio_provider.setAuthorized(true);
+            }
+        } else {
+            self.audio_authorization_mtime = 0;
+            self.audio_provider.setAuthorized(false);
+        }
     }
 
     pub fn running(self: *const Host, index: usize) bool {
@@ -494,6 +509,25 @@ const Host = struct {
         self.previous_memory_len = memory.len;
     }
 
+    fn hasAudioSubscribers(self: *const Host) bool {
+        return supervisor.hasSubscription(&self.slots, .audio, self);
+    }
+
+    fn sampleAudio(self: *Host, now_ms: u64) void {
+        const active = self.hasAudioSubscribers();
+        self.audio_provider.setActive(active, now_ms);
+        if (!active) return;
+        const frame = self.audio_provider.poll(now_ms) orelse return;
+        var buffer: [512]u8 = undefined;
+        const encoded = audio.formatFrame(frame, &buffer) catch return;
+        var delivered = false;
+        for (&self.slots) |*slot| {
+            const endpoint = slot.platform.endpoint orelse continue;
+            if (slot.wants_audio and endpoint.write(encoded)) delivered = true;
+        }
+        if (delivered) self.audio_pipe_frames += 1;
+    }
+
     fn writeStatus(self: *Host, now_ms: u64) void {
         var entries: [max_widgets]supervisor.StatusEntry = undefined;
         var entry_count: usize = 0;
@@ -526,10 +560,15 @@ const Host = struct {
             .system_subscribers = supervisor.systemSubscriberCount(&self.slots, self),
             .system_sample_count = self.sampler.sample_calls,
             .system_frames = self.system_frames,
-            .audio_capture_active = false,
-            .audio_silent = true,
-            .audio_pipe_frames = 0,
+            .audio_capture_active = self.audio_provider.availability == .live,
+            .audio_silent = self.audio_provider.silent,
+            .audio_pipe_frames = self.audio_pipe_frames,
             .media_pipe_frames = 0,
+            .audio_availability = self.audio_provider.availability.label(),
+            .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
+            .audio_capture_starts = self.audio_provider.capture_starts,
+            .audio_provider_frames = self.audio_provider.frame_count,
+            .audio_last_error = self.audio_provider.last_error,
         }, entries[0..entry_count]) catch return;
         var cwd = std.Io.Dir.cwd();
         cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch return;
@@ -550,6 +589,12 @@ fn run(init: std.process.Init) !void {
     const home = init.environ_map.get("HOME") orelse return error.MissingHome;
     const data_root = try std.fs.path.join(allocator, &.{ home, "Library", "Application Support", "Weaver" });
     defer allocator.free(data_root);
+    const audio_authorization_marker = try std.fs.path.join(allocator, &.{ data_root, "audio-authorization" });
+    defer allocator.free(audio_authorization_marker);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--authorize-audio")) {
+        try std.Io.Dir.cwd().createDirPath(init.io, data_root);
+        return authorizeAudio(init.io, audio_authorization_marker);
+    }
     const runtime_root = try runtimeRoot(allocator, data_root, init.environ_map.get("TMPDIR"));
     defer allocator.free(runtime_root);
     const control_path = try std.fs.path.join(allocator, &.{ runtime_root, "control.sock" });
@@ -575,7 +620,10 @@ fn run(init: std.process.Init) !void {
     defer std.Io.Dir.cwd().deleteFile(init.io, lock_path) catch {};
     defer lock.close(init.io);
 
-    const repo_root = try repositoryRoot(init.io, allocator);
+    const repo_root = if (init.environ_map.get("WEAVER_REPO_ROOT")) |path|
+        try allocator.dupe(u8, path)
+    else
+        try repositoryRoot(init.io, allocator);
     defer allocator.free(repo_root);
     const runtime_exe = try std.fs.path.join(allocator, &.{ repo_root, "runtime", "zig-out", "bin", "weaver-widget" });
     defer allocator.free(runtime_exe);
@@ -608,11 +656,14 @@ fn run(init: std.process.Init) !void {
         .runtime_exe = runtime_exe,
         .cli_script = cli_script,
         .runtime_root = runtime_root,
+        .audio_authorization_marker = audio_authorization_marker,
     };
+    defer host.audio_provider.deinit();
     try host.loadRegistry();
     var stopping = false;
     var next_cost_ms: u64 = 0;
     var next_provider_ms: u64 = 0;
+    var audio_availability = host.audio_provider.availability;
     while (!stopping) {
         var acknowledge_reload = false;
         if (control.take()) |command| switch (command) {
@@ -630,20 +681,57 @@ fn run(init: std.process.Init) !void {
         };
         const now = monotonicMilliseconds();
         host.supervise(now);
+        host.sampleAudio(now);
+        const audio_availability_changed = audio_availability != host.audio_provider.availability;
+        audio_availability = host.audio_provider.availability;
         if (now >= next_provider_ms) {
             host.sampleProviders();
             next_provider_ms = now + 1000;
         }
-        if (acknowledge_reload or now >= next_cost_ms) {
+        if (acknowledge_reload or audio_availability_changed or now >= next_cost_ms) {
             host.sampleCosts(now);
             host.writeStatus(now);
             next_cost_ms = now + 2000;
         }
         if (acknowledge_reload) control.complete(.ok);
-        if (!stopping) try std.Io.sleep(init.io, .fromMilliseconds(50), .awake);
+        if (!stopping) try std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 10 else 50), .awake);
     }
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
+    host.audio_provider.setActive(false, monotonicMilliseconds());
     host.writeStatus(monotonicMilliseconds());
+}
+
+fn authorizeAudio(io: std.Io, marker_path: []const u8) !void {
+    var provider: audio.Provider = .{};
+    defer provider.deinit();
+    provider.setAuthorized(true);
+    const deadline = monotonicMilliseconds() + 5 * 60 * 1000;
+    while (monotonicMilliseconds() < deadline) {
+        const now = monotonicMilliseconds();
+        provider.setActive(true, now);
+        _ = provider.poll(now);
+        switch (provider.availability) {
+            .live => {
+                try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = marker_path, .data = "authorized\n" });
+                std.debug.print("Weaver system audio authorized\n", .{});
+                return;
+            },
+            .permission_denied => return error.AudioPermissionDenied,
+            .device_unavailable => return error.AudioDeviceUnavailable,
+            .capture_failed => return error.AudioCaptureFailed,
+            else => {},
+        }
+        try std.Io.sleep(io, .fromMilliseconds(20), .awake);
+    }
+    return error.AudioAuthorizationTimedOut;
+}
+
+fn authorizationMtime(io: std.Io, marker_path: []const u8) ?i128 {
+    const marker = std.Io.Dir.cwd().statFile(io, marker_path, .{}) catch return null;
+    const executable = std.process.executablePathAlloc(io, std.heap.page_allocator) catch return null;
+    defer std.heap.page_allocator.free(executable);
+    const binary = std.Io.Dir.cwd().statFile(io, executable, .{}) catch return null;
+    return if (marker.mtime.nanoseconds >= binary.mtime.nanoseconds) marker.mtime.nanoseconds else null;
 }
 
 fn controlRequest(io: std.Io, path: []const u8, request: []const u8) !void {

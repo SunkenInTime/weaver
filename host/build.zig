@@ -21,8 +21,19 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
+        addMacosAudio(exe.root_module, b);
         exe.root_module.linkSystemLibrary("c", .{});
         b.installArtifact(exe);
+        const bundle_executable = b.addInstallFile(exe.getEmittedBin(), "Weaverd.app/Contents/MacOS/weaverd");
+        const bundle_plist = b.addInstallFile(b.path("macos/Info.plist"), "Weaverd.app/Contents/Info.plist");
+        const bundle_path = b.getInstallPath(.prefix, "Weaverd.app");
+        const sign_bundle = b.addSystemCommand(&.{
+            "codesign", "--force", "--deep", "--sign", "-", "--identifier",
+            "com.sunkenintime.weaver.host", bundle_path,
+        });
+        sign_bundle.step.dependOn(&bundle_executable.step);
+        sign_bundle.step.dependOn(&bundle_plist.step);
+        b.getInstallStep().dependOn(&sign_bundle.step);
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
@@ -30,6 +41,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
+        addMacosAudio(tests.root_module, b);
         tests.root_module.linkSystemLibrary("c", .{});
         const test_step = b.step("test", "Run macOS host and portable supervisor tests");
         test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -97,4 +109,14 @@ pub fn build(b: *std.Build) void {
     tests.root_module.linkSystemLibrary("windowsapp", .{});
     const test_step = b.step("test", "Run weaverd unit tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+}
+
+fn addMacosAudio(module: *std.Build.Module, b: *std.Build) void {
+    module.addCSourceFile(.{
+        .file = b.path("src/macos_audio.m"),
+        .flags = &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2" },
+    });
+    module.addIncludePath(b.path("src"));
+    module.linkFramework("CoreAudio", .{});
+    module.linkFramework("Foundation", .{});
 }
