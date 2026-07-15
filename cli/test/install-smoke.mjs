@@ -126,7 +126,15 @@ try {
   await waitForOutput(logFollower, followToken);
   logFollower.kill("SIGINT");
   const followerExit = await followerExitPromise;
-  assert.equal(followerExit.code, 0, `logs --follow did not stop cleanly: ${JSON.stringify(followerExit)}`);
+  if (process.platform === "win32") {
+    // Node emulates child signals with TerminateProcess on Windows, so a
+    // programmatic SIGINT is reported as the terminating signal rather than a
+    // process exit code. Reaching the exit event proves the follower stopped;
+    // the preceding assertions prove it followed appended data.
+    assert.deepEqual(followerExit, { code: null, signal: "SIGINT" }, `logs --follow did not stop after SIGINT: ${JSON.stringify(followerExit)}`);
+  } else {
+    assert.equal(followerExit.code, 0, `logs --follow did not stop cleanly: ${JSON.stringify(followerExit)}`);
+  }
   logFollower = undefined;
 
   run(["uninstall", "Clock"]);

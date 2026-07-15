@@ -104,7 +104,7 @@ Stop `dev` with Ctrl-C. The portable artifact loop is the same on both systems:
 node cli/bin/weaver.js pack myclock
 node cli/bin/weaver.js inspect myclock.weave
 node cli/bin/weaver.js install myclock.weave
-node cli/bin/weaver.js uninstall Clock
+node cli/bin/weaver.js uninstall Myclock
 ```
 
 On Windows, use backslashes in the CLI path. Before running an audio-reactive
