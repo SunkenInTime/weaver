@@ -10,6 +10,7 @@
     "cli"
   ],
   "scripts": {
+    "audit:release": "node scripts/release-audit.mjs",
     "build": "node cli/build.mjs",
     "postinstall": "npm run build",
     "test": "node --test test/all.test.mjs",
