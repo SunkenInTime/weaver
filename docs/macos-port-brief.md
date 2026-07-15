@@ -63,9 +63,48 @@ Every PR description in either stack must include:
 - the capability added at this layer and explicit non-goals;
 - the fork commit/submodule pointer when applicable;
 - automated commands and results on macOS and Windows;
-- manual evidence required by the layer;
+- computer-use/manual evidence required by the layer;
 - measured performance or a statement that the PR makes no performance claim;
 - known risks, rollback boundary, and the next PR in the stack.
+
+## Computer-use and physical verification
+
+Agents MUST use the available computer-use tooling when a claim depends on
+visible or interactive macOS state that a headless test cannot prove. This is
+especially important for window level, transparency, click-through, focus and
+activation, Dock/Command-Tab presence, Mission Control, Show Desktop, Spaces,
+Stage Manager, fullscreen behavior, permission prompts, input, renderer
+fallback, and display changes.
+
+Computer use is an evidence driver, not an oracle. Every interactive gate must
+correlate what is visible with machine-readable state:
+
+1. Record the macOS build, hardware, display arrangement/scaling, relevant
+   System Settings state, Weaver commit, submodule commit, and starting PIDs.
+2. Start a deterministic fixture and capture its manifest/configuration.
+3. Drive the real UI with semantic controls or stable keyboard shortcuts where
+   possible; avoid fragile coordinate clicks when macOS exposes a better verb.
+4. Capture before/during/after screenshots for static geometry and a short
+   recording for temporal behavior such as animation, hot-swap, Space changes,
+   demotion/recovery, or focus retention.
+5. Correlate the capture timestamps with `weaver status --json`, Widget/host/
+   renderer logs, activation/focus events, frame counters, and process metrics.
+6. Restore changed desktop state, close fixtures, and prove that no Weaver
+   process, socket, permission helper, or temporary registration remains.
+
+A screenshot alone cannot prove click-through, no activation, cadence, or
+recovery. For example, click-through verification must show a known control
+behind the Widget receiving the click while the Widget remains unchanged;
+no-activation verification must show the previously frontmost application and
+the activation log remaining stable. Performance samples must be script-timed
+after computer use has established the workload so automation overhead is not
+charged to Weaver.
+
+Computer use must not approve privacy/security prompts, change persistent
+permissions, sign in, install system components, or alter security policy
+without explicit human authorization. If the necessary computer-use session,
+physical display operation, or permission is unavailable, mark that gate
+`UNVERIFIED` with the exact blocker; never infer a pass from code inspection.
 
 ## Product and platform invariants
 
@@ -314,7 +353,8 @@ and any testable pure policy conversion.
 
 **Gate:** a small Native SDK harness shows one transparent chromeless window
 with each layer/input combination; stock Native SDK macOS examples still act
-like normal applications; manual behavior matrix is attached.
+like normal applications; a computer-use recording and correlated behavior
+matrix are attached.
 
 ### PR 03 — Portable runtime and direct software Clock
 
@@ -349,7 +389,8 @@ empirical AppKit layer/collection policy from PR 02 based on physical tests.
 **Gate:** anchor screenshots and logged frames on Retina and scaled modes;
 multi-display arrangements on every side of the primary; Show Desktop,
 Mission Control, Stage Manager, Space switching, sleep/wake, and display
-disconnect/reconnect matrix. No focus theft or Dock tile.
+disconnect/reconnect matrix. Computer-use evidence is correlated with the
+window/activation logs. No focus theft or Dock tile.
 
 ### PR 05 — Network fetch parity
 
@@ -563,9 +604,10 @@ leaks, Windows regressions, orphaned processes, stale sockets, unsupported
 claims, and accidental packaging commitments.
 
 **Gate:** all automated suites green on Windows and macOS; every manual gate
-below has current evidence; a clean clone on the supported Mac can complete
-the Quickstart; no `weaverd`, `weaver-widget`, endpoint, temp install, or
-permission helper remains after teardown.
+below has current computer-use or explicitly required physical evidence; a
+clean clone on the supported Mac can complete the Quickstart; no `weaverd`,
+`weaver-widget`, endpoint, temp install, or permission helper remains after
+teardown.
 
 ## Required final verification matrix
 
