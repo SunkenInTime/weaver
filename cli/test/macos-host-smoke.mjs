@@ -124,6 +124,33 @@ try {
   devProcess = undefined;
   await waitFor("dev registration removal acknowledgement", () => status()?.widgets?.length === 0);
 
+  run(["install", join(repoRoot, "examples", "now-playing")]);
+  const unavailableMedia = await waitFor("explicit unavailable macOS media status", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    const providers = document?.providers;
+    return widget?.name === "Now Playing" && widget.state === "running" &&
+      providers?.mediaAvailability === "unavailable" && providers.mediaSubscribers === 1 &&
+      providers.mediaPipeFrames === 0 && { document, widget, providers };
+  });
+  trackedPids.add(unavailableMedia.widget.pid);
+  const mediaRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
+    .filter((name) => name.startsWith(runtimeRootPrefix))
+    .map((name) => join(root, name)))
+    .filter((path) => !runtimeEntriesBefore.has(path))
+    .find((path) => existsSync(join(path, "control.sock")));
+  assert.ok(mediaRuntimeRoot, "macOS media test could not find the host runtime root");
+  const mediaProviderSockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
+  assert.equal(mediaProviderSockets.length, 0, "unavailable media allocated a provider socket or reader thread");
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
+  assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
+  run(["uninstall", "Now Playing"]);
+  await waitFor("unavailable media teardown", () => {
+    const document = status();
+    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 && document;
+  });
+
   run(["init", "alpha"]);
   run(["init", "beta"]);
   const installs = await Promise.all([runAsync(["install", "alpha"]), runAsync(["install", "beta"])]);

@@ -536,9 +536,9 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   if (binding.timerId === 0) {
     // Sub-vsync canvases own one exact-rate SDK effect timer. Provider frames
     // are drained immediately before this callback in the same native update,
-    // so their state and canvas commands commit as one generation. The Win32
-    // host uses a timer queue below 40 ms; the old one-quantum lead over-drove
-    // that precise clock and made a requested 30 Hz canvas contend at ~50 Hz.
+    // so their state and canvas commands commit as one generation. The native
+    // clock is precise below 40 ms; the old one-quantum lead over-drove that
+    // clock and made a requested 30 Hz canvas contend at ~50 Hz.
     const interval = Math.max(1, Math.round(1000 / fps));
     binding.timerId = native.setInterval(interval);
     native.onTimer(binding.timerId, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds ?? Date.now() / 1000));

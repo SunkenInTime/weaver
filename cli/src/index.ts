@@ -779,11 +779,11 @@ function hostLifecycleAvailable(): boolean {
 function assertHostLifecycleAvailable(command: string): void {
   if (hostLifecycleAvailable()) return;
   const platform = process.platform === "darwin" ? "macOS" : process.platform;
-  throw new WeaverFailure([`weaver ${command} is unavailable on ${platform} until the native host lands in PR 10.`, "Artifact commands and logs remain available without the host."]);
+  throw new WeaverFailure([`weaver ${command} is not supported on ${platform}.`, "Weaver's native host supports Windows and macOS; artifact commands remain portable only across those supported development targets."]);
 }
 
 function assertRuntimeBuilt(): void {
-  if (!existsSync(runtimeExecutable)) throw new WeaverFailure([`Runtime not found at ${runtimeExecutable}`, "Build runtime/ with the ReleaseFast command in docs/m2a-results.md."]);
+  if (!existsSync(runtimeExecutable)) throw new WeaverFailure([`Runtime not found at ${runtimeExecutable}`, "Build runtime/ with the platform command in the README Quickstart."]);
 }
 
 function delay(milliseconds: number): Promise<void> {

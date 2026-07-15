@@ -330,7 +330,10 @@ const Host = struct {
         defer manifest.deinit();
         supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.renderBackend, false);
 
-        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media;
+        // ADR 0015 makes media explicitly unavailable on macOS. A media-only
+        // Widget keeps its no-data state without a socket, reader thread, or
+        // provider timer; supported providers still share one endpoint.
+        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio;
         var endpoint_path: ?[]u8 = null;
         defer if (endpoint_path) |path| self.allocator.free(path);
         if (needs_endpoint) {
@@ -558,6 +561,8 @@ const Host = struct {
             .audio_silent = self.audio_provider.silent,
             .audio_pipe_frames = self.audio_pipe_frames,
             .media_pipe_frames = 0,
+            .media_availability = "unavailable",
+            .media_subscribers = supervisor.subscriptionCount(&self.slots, .media, self),
             .audio_availability = self.audio_provider.availability.label(),
             .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
             .audio_capture_starts = self.audio_provider.capture_starts,

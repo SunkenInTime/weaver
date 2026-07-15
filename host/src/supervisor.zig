@@ -223,6 +223,8 @@ pub const ProviderStatus = struct {
     audio_silent: bool,
     audio_pipe_frames: u64,
     media_pipe_frames: u64,
+    media_availability: []const u8,
+    media_subscribers: u32,
     audio_availability: []const u8 = "idle",
     audio_subscribers: u32 = 0,
     audio_capture_starts: u64 = 0,
@@ -273,6 +275,10 @@ pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: Provi
     try json.write(provider_status.audio_last_error);
     try json.objectField("mediaPipeFrames");
     try json.write(provider_status.media_pipe_frames);
+    try json.objectField("mediaAvailability");
+    try json.write(provider_status.media_availability);
+    try json.objectField("mediaSubscribers");
+    try json.write(provider_status.media_subscribers);
     try json.endObject();
     try json.objectField("widgets");
     try json.beginArray();
@@ -384,7 +390,19 @@ test "portable status serializer keeps the public state spelling" {
         .state = .source_missing,
         .reason = "registered source path does not exist",
     }};
-    try writeStatus(&output.writer, 7, .{ .system_subscribers = 0, .system_sample_count = 0, .system_frames = 0, .audio_capture_active = false, .audio_silent = true, .audio_pipe_frames = 0, .media_pipe_frames = 0 }, &entries);
+    try writeStatus(&output.writer, 7, .{
+        .system_subscribers = 0,
+        .system_sample_count = 0,
+        .system_frames = 0,
+        .audio_capture_active = false,
+        .audio_silent = true,
+        .audio_pipe_frames = 0,
+        .media_pipe_frames = 0,
+        .media_availability = "unavailable",
+        .media_subscribers = 1,
+    }, &entries);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"state\": \"source missing\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"hostPid\": 7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"mediaAvailability\": \"unavailable\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"mediaSubscribers\": 1") != null);
 }
