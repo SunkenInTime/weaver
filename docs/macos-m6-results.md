@@ -200,6 +200,59 @@ from the published 16.704 ms to 17.961 ms. That trade was rejected rather than
 buy memory with input/frame latency. The machine-readable follow-up is
 [`macos-m6-memory-data.json`](macos-m6-memory-data.json).
 
+## Active renderer CPU and retained-target follow-up
+
+Sampling the corrected production binary under the 60 Hz synthetic fixture
+showed that its largest remaining CPU cost was not JavaScript or packet decode.
+Twenty-eight changing solid rounded bars were rebuilt through CoreGraphics,
+allocated as transient command rasters, and uploaded as Metal textures every
+frame. A five-second stack sample attributed most active main-thread work to
+`rasterCacheBuildEntryForCommand` and CoreGraphics path antialiasing.
+
+Native `91949e15` makes an untransformed, solid rounded rectangle one analytic
+Metal quad. The fragment shader uses per-corner signed-distance coverage and
+premultiplied source-over color; transformed, gradient, or fractionally clipped
+commands still use the reference raster path. The same change keeps the normal
+retained canvas in private GPU storage. Backdrop blur, incremental verification,
+GPU comparison, screenshot capture, and pixel fallback explicitly allocate a
+CPU-readable shared target instead. A patch that introduces blur over a private
+baseline refuses before mutation and takes the engine's normal full-resync path.
+
+An interleaved A/B used the exact pre-change production executable recovered
+from Zig's content-addressed cache, then alternated baseline/candidate twice.
+Every run used the same 480x320-point Retina-2x fixture, three-second warmup,
+eight-second sample, 34 descriptors, and a clean exit:
+
+| Production renderer | CPU mean | Physical mean | Frame mean | Frame p50 |
+|---|---:|---:|---:|---:|
+| CPU-raster rounded bars | 17.29% | 51.856 MB | 16.656 ms | 16.666 ms |
+| Analytic Metal + private target | 8.61% | 41.493 MB | 16.646 ms | 16.664 ms |
+
+That is 8.68 percentage points / 50.22% less CPU and 10.363 MB / 19.98%
+less physical memory under the active workload. The native composite phase's
+draw-time mean fell from 1.253 ms to 0.143 ms; traces changed from 28 fresh
+raster fills per frame to zero fills and 29 direct primitives. The two
+candidate frame-p90 values (16.725 and 18.142 ms) were no worse than their
+interleaved baselines (17.344 and 18.263 ms), so the saving did not buy a
+headline by stretching cadence.
+
+The private-target change was also isolated from the rounded-rectangle change.
+On this unified-memory M2 its physical saving is deliberately reported as
+small: 0.238 MB / 0.57% in the active fixture and 0.197 MB / 0.69% across two
+interleaved quiet Clock pairs. The final quiet Clock mean was 0.32% of one core
+and 28.452 MB physical. The mapping change remains useful architecture and may
+matter more on discrete-memory Intel, but it is not counted as the main win.
+
+The analytic silhouette was inspected from the actual GPU target at 960x640,
+and the full AppKit GPU-dashboard smoke passed pointer input, resize, byte-exact
+incremental verification, accessibility, teardown, and zero new WebKit helper
+processes. The analytic edge intentionally does not byte-match AppKit's cubic
+CoreGraphics antialiasing: the diagnostic CPU comparator reports differences
+only for that changed rounded-edge raster contract (12,398-14,532 pixels of
+614,400 in the sampled synthetic frames, maximum channel delta 35). This is not
+reported as zero; the unchanged raster fallback remains the parity reference
+for commands outside the direct primitive.
+
 ## Instruments and physical-environment boundary
 
 The required before/after Instruments capture cannot launch on this machine.

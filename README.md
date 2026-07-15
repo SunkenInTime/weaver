@@ -8,8 +8,8 @@ for 2026): widgets are single TypeScript components rendered by a native
 runtime — no browser, no webview. Each widget is its own crash-isolated
 process, drawn with per-pixel transparency on the desktop layer. Current
 platform-specific cost measurements are published with the milestone results;
-the macOS retained renderer is roughly 100–110 MB for a quiet Widget and is not
-represented by the older Windows memory number.
+the corrected macOS retained renderer is roughly 28.5 MB for the measured quiet
+Clock Widget and is not represented by the older Windows memory number.
 
 ```tsx
 import { useProvider, widget } from "@weaver/sdk";

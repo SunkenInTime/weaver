@@ -11,7 +11,7 @@
   "build": {
     "weaver_branch": "macos/16-ci-regression-closure",
     "native_branch": "macos/06-composite-presenter-closure",
-    "native_commit": "73b6e20e",
+    "native_commit": "91949e15",
     "optimize": "ReleaseFast",
     "widget_profile": true,
     "automation": false
@@ -78,6 +78,74 @@
       ".zig-cache/ab-candidate-2.json",
       ".zig-cache/ab-candidate-3.json",
       ".zig-cache/ab-candidate-4.json"
+    ]
+  },
+  "active_renderer_follow_up": {
+    "native_commit": "91949e15e3a17870de970242cfedfcfd0554504e",
+    "workload": "examples/m4b-synthetic/dist, 480x320 points at Retina 2x, 60 Hz",
+    "method": "interleaved exact production-binary A/B; baseline, candidate, baseline, candidate; 3 second warmup and 8 second sample",
+    "baseline_runs": [
+      {"physical_bytes": 52495272, "cpu_percent_one_core_mean": 17.2625, "frame_interval_ms": {"mean": 16.650, "p50": 16.667, "p90": 17.344, "p99": 18.493}, "file_descriptors": 34},
+      {"physical_bytes": 51217248, "cpu_percent_one_core_mean": 17.3125, "frame_interval_ms": {"mean": 16.661, "p50": 16.665, "p90": 18.263, "p99": 18.604}, "file_descriptors": 34}
+    ],
+    "candidate_runs": [
+      {"physical_bytes": 41550688, "cpu_percent_one_core_mean": 9.475, "frame_interval_ms": {"mean": 16.655, "p50": 16.664, "p90": 16.725, "p99": 17.129}, "file_descriptors": 34},
+      {"physical_bytes": 41436000, "cpu_percent_one_core_mean": 7.7375, "frame_interval_ms": {"mean": 16.636, "p50": 16.664, "p90": 18.142, "p99": 18.517}, "file_descriptors": 34}
+    ],
+    "baseline_cpu_percent_one_core_mean": 17.2875,
+    "candidate_cpu_percent_one_core_mean": 8.60625,
+    "cpu_saved_percentage_points": 8.68125,
+    "cpu_saved_percent": 50.216919739696315,
+    "baseline_physical_bytes_mean": 51856260,
+    "candidate_physical_bytes_mean": 41493344,
+    "physical_saved_bytes_mean": 10362916,
+    "physical_saved_percent": 19.9839363794458,
+    "native_draw_time_us": {
+      "baseline_mean": 1253.0,
+      "candidate_mean": 143.2,
+      "baseline_fresh_raster_fills_per_frame": 28,
+      "candidate_fresh_raster_fills_per_frame": 0,
+      "candidate_direct_primitives_per_frame": 29
+    },
+    "private_target_isolation": {
+      "active_shared_physical_bytes_mean": 41616236,
+      "active_private_physical_bytes_mean": 41378644,
+      "active_saved_bytes_mean": 237592,
+      "active_saved_percent": 0.5709114454793036,
+      "quiet_clock_shared_physical_bytes_mean": 28648300,
+      "quiet_clock_private_physical_bytes_mean": 28451656,
+      "quiet_clock_saved_bytes_mean": 196644,
+      "quiet_clock_saved_percent": 0.686404109842118
+    },
+    "quiet_clock": {
+      "cpu_percent_one_core_mean": 0.32,
+      "physical_bytes_mean": 28451656,
+      "file_descriptors": 34
+    },
+    "validation": {
+      "native_test": "pass",
+      "gpu_dashboard_smoke": "pass",
+      "new_webkit_helper_processes": 0,
+      "incremental_mismatches": 0,
+      "gpu_screenshot_dimensions": [960, 640],
+      "appkit_reference_comparator_frames": 67,
+      "appkit_reference_differing_pixels_range": [12398, 14532],
+      "appkit_reference_max_channel_delta": 35,
+      "comparator_note": "analytic signed-distance rounded edges intentionally differ from AppKit cubic CoreGraphics antialiasing"
+    },
+    "sources": [
+      ".zig-cache/cpu-final-ab-baseline-1.json",
+      ".zig-cache/cpu-final-ab-candidate-1.json",
+      ".zig-cache/cpu-final-ab-baseline-2.json",
+      ".zig-cache/cpu-final-ab-candidate-2.json",
+      ".zig-cache/cpu-storage-ab-shared-1.json",
+      ".zig-cache/cpu-storage-ab-private-1.json",
+      ".zig-cache/cpu-storage-ab-shared-2.json",
+      ".zig-cache/cpu-storage-ab-private-2.json",
+      ".zig-cache/clock-storage-ab-shared-1.json",
+      ".zig-cache/clock-storage-ab-private-1.json",
+      ".zig-cache/clock-storage-ab-shared-2.json",
+      ".zig-cache/clock-storage-ab-private-2.json"
     ]
   },
   "rejected_drawable_pool_reduction": {
