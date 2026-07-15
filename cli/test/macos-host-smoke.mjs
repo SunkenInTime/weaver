@@ -22,7 +22,9 @@ const environment = {
   WEAVER_AUDIO_TEST_CONTROL: audioControl,
 };
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
+const registryFile = join(dataRoot, "registry.json");
 const statusFile = join(dataRoot, "status.json");
+const hostExecutable = join(repoRoot, "host", "zig-out", "Weaverd.app", "Contents", "MacOS", "weaverd");
 const clockSource = join(scratch, "clock", "widget.tsx");
 const runtimeRootPrefix = `weaver-${process.getuid()}-`;
 const runtimeSearchRoots = [...new Set([tempRoot, realpathSync("/tmp")])];
@@ -150,6 +152,17 @@ try {
     const document = status();
     return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 && document;
   });
+
+  const validEmptyRegistry = readFileSync(registryFile, "utf8");
+  writeFileSync(registryFile, "{ malformed\n", "utf8");
+  const rejectedReload = spawnSync(hostExecutable, ["--signal-reload"], { cwd: repoRoot, env: environment, encoding: "utf8" });
+  assert.equal(rejectedReload.status, 1, `malformed registry reload unexpectedly passed\n${rejectedReload.stderr}`);
+  assert.match(rejectedReload.stderr, /RegistryReloadFailed/);
+  assert.equal(alive(status().hostPid), true, "malformed registry killed the host");
+  assert.deepEqual(status().widgets, [], "malformed registry changed the live supervisor slots");
+  writeFileSync(registryFile, validEmptyRegistry, "utf8");
+  const recoveredReload = spawnSync(hostExecutable, ["--signal-reload"], { cwd: repoRoot, env: environment, encoding: "utf8" });
+  assert.equal(recoveredReload.status, 0, `valid registry did not recover acknowledged reload\n${recoveredReload.stderr}`);
 
   run(["init", "alpha"]);
   run(["init", "beta"]);

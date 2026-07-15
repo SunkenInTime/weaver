@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ const logsRoot = process.platform === "win32"
   : join(environment.HOME, "Library", "Logs", "Weaver");
 const widgetsRoot = join(dataRoot, "widgets");
 const registryPath = join(dataRoot, "registry.json");
+let logFollower;
 
 function run(arguments_, extraEnvironment = {}, expectedStatus = 0) {
   const result = spawnSync(process.execPath, [cli, ...arguments_], {
@@ -53,6 +54,24 @@ function assertOwned(path) {
 
 function ownedEntries() {
   return existsSync(widgetsRoot) ? readdirSync(widgetsRoot).sort() : [];
+}
+
+function waitForOutput(child, token, timeoutMs = 5_000) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let output = "";
+    const timeout = setTimeout(() => rejectPromise(new Error(`Timed out waiting for log follower token ${token}\noutput:\n${output}`)), timeoutMs);
+    child.stdout.on("data", (bytes) => {
+      output += bytes;
+      if (!output.includes(token)) return;
+      clearTimeout(timeout);
+      resolvePromise(output);
+    });
+    child.once("exit", (code, signal) => {
+      if (output.includes(token)) return;
+      clearTimeout(timeout);
+      rejectPromise(new Error(`Log follower exited before ${token}: ${JSON.stringify({ code, signal })}\noutput:\n${output}`));
+    });
+  });
 }
 
 try {
@@ -95,6 +114,20 @@ try {
   const logToken = `portable-log-${randomUUID()}`;
   writeFileSync(join(logsRoot, "Clock.log"), `${logToken}\n`, "utf8");
   assert.match(run(["logs", "Clock"]).stdout, new RegExp(logToken));
+  logFollower = spawn(process.execPath, [cli, "logs", "Clock", "--follow"], {
+    cwd: scratch,
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const followerExitPromise = new Promise((resolvePromise) => logFollower.once("exit", (code, signal) => resolvePromise({ code, signal })));
+  await waitForOutput(logFollower, logToken);
+  const followToken = `follow-${randomUUID()}`;
+  appendFileSync(join(logsRoot, "Clock.log"), `${followToken}\n`, "utf8");
+  await waitForOutput(logFollower, followToken);
+  logFollower.kill("SIGINT");
+  const followerExit = await followerExitPromise;
+  assert.equal(followerExit.code, 0, `logs --follow did not stop cleanly: ${JSON.stringify(followerExit)}`);
+  logFollower = undefined;
 
   run(["uninstall", "Clock"]);
   assert.equal(existsSync(second), false, "uninstall did not remove archive-owned source");
@@ -115,6 +148,7 @@ try {
     assert.match(run(["up"]).stdout, /already running/);
   }
 } finally {
+  if (logFollower && logFollower.exitCode === null && logFollower.signalCode === null) logFollower.kill("SIGKILL");
   if (process.platform === "win32" || process.platform === "darwin") spawnSync(process.execPath, [cli, "down"], { cwd: scratch, env: environment, stdio: "ignore" });
   const resolvedScratch = resolve(scratch);
   const relation = relative(tempRoot, resolvedScratch);

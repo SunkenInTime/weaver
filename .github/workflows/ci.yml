@@ -56,6 +56,9 @@ jobs:
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs
 
+      - name: Portable example surface gate
+        run: node cli/test/example-surface-smoke.mjs
+
       - name: Scaffold + check + bundle (headless slice of the v0 gate)
         shell: pwsh
         run: |
@@ -131,6 +134,9 @@ jobs:
 
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs
+
+      - name: Portable example surface gate
+        run: node cli/test/example-surface-smoke.mjs
 
       - name: macOS daemon non-visual lifecycle smoke
         run: node cli/test/macos-host-control-smoke.mjs
