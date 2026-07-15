@@ -133,7 +133,7 @@ padding, borders, shadows, gradients, hover/state variants, transitions.
 weaver init <name>       scaffold: <name>/widget.tsx (working starter clock) + tsconfig
 weaver check <dir>       tsc --noEmit + config/class/subscribe validation; agent-readable errors
 weaver dev <dir>         bundle → run in weaver-widget.exe → watch → rebundle+restart on change
-weaver bundle <dir>      esbuild → dist/bundle.js (what `install` will use later)
+weaver bundle <dir>      esbuild → dist/bundle.js (local output; install rebuilds an owned copy)
 ```
 
 `weaver dev` restart-on-change is acceptable for M1 (state loss OK); true

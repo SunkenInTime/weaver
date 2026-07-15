@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { inflateRawSync } from "node:zlib";
 
 const FORMAT_VERSION = 1;
 export const MAX_WEAVE_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
+const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const MAX_WEAVE_MANIFEST_BYTES = 64 * 1024;
 const MAX_ENTRIES = 1024;
+const MAX_DISPLAY_NAME_BYTES = 256;
+const MAX_AUTHOR_BYTES = 256;
 const UTF8_FLAG = 0x0800;
 const ZIP_LOCAL_HEADER = 0x04034b50;
 const ZIP_CENTRAL_HEADER = 0x02014b50;
@@ -45,6 +49,7 @@ interface SourceEntry { path: string; data: Buffer }
 interface ZipEntry extends SourceEntry { crc: number; compressed: Buffer; method: 0 | 8; offset: number }
 
 export function packWeave(sourceDirectory: string, name: string, declared: DeclaredSurface): PackedWeave {
+  validateDisplayString(name, "widget name", MAX_DISPLAY_NAME_BYTES);
   const sourceEntries = collectSourceEntries(sourceDirectory);
   if (!sourceEntries.some((entry) => entry.path === "widget.tsx")) throw new Error("A .weave source must contain widget.tsx");
   const sourceId = `sha256:${sourceFingerprint(sourceEntries)}`;
@@ -116,7 +121,7 @@ function collectSourceEntries(sourceDirectory: string): SourceEntry[] {
     const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"));
     for (const entry of entries) {
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (shouldSkipSourceEntry(entry.name, prefix === "")) continue;
+      if (!isWeaveSourceEntryIncluded(entry.name, prefix === "")) continue;
       validateSourcePath(relativePath);
       const source = join(directory, entry.name);
       const stat = lstatSync(source);
@@ -142,9 +147,9 @@ function collectSourceEntries(sourceDirectory: string): SourceEntry[] {
   return output;
 }
 
-function shouldSkipSourceEntry(name: string, root: boolean): boolean {
-  if ([".git", "node_modules"].includes(name) || name.toLowerCase().endsWith(".weave")) return true;
-  return root && ["bundle.js", "dist", "tsconfig.json", "weave.json", "widget.json"].includes(name);
+export function isWeaveSourceEntryIncluded(name: string, root: boolean): boolean {
+  if ([".git", "node_modules"].includes(name) || name.toLowerCase().endsWith(".weave")) return false;
+  return !root || !["bundle.js", "dist", "tsconfig.json", "weave.json", "widget.json"].includes(name);
 }
 
 function sourceFingerprint(entries: SourceEntry[]): string {
@@ -163,7 +168,19 @@ function sourceFingerprint(entries: SourceEntry[]): string {
 }
 
 function artifactIdentity(identity: Omit<WeaveManifest, "artifactId">): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(identity), "utf8").digest("hex")}`;
+  const canonical: Omit<WeaveManifest, "artifactId"> = {
+    formatVersion: identity.formatVersion,
+    sourceId: identity.sourceId,
+    name: identity.name,
+    provenance: { author: identity.provenance.author },
+    lineage: { root: identity.lineage.root, parent: identity.lineage.parent },
+    declared: {
+      providers: [...identity.declared.providers],
+      origins: [...identity.declared.origins],
+      capabilities: [...identity.declared.capabilities],
+    },
+  };
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex")}`;
 }
 
 function manifestBytes(manifest: WeaveManifest): Buffer {
@@ -177,9 +194,9 @@ function writeZip(sourceEntries: SourceEntry[]): Buffer {
   for (const source of [...sourceEntries].sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)))) {
     validateArchivePath(source.path);
     const name = Buffer.from(source.path, "utf8");
-    const deflated = source.data.length === 0 ? source.data : deflateRawSync(source.data, { level: 9 });
-    const method: 0 | 8 = deflated.length < source.data.length ? 8 : 0;
-    const compressed = method === 8 ? deflated : source.data;
+    if (source.path === "weave.json" && source.data.length > MAX_WEAVE_MANIFEST_BYTES) throw new Error(`weave.json exceeds the ${formatKiB(MAX_WEAVE_MANIFEST_BYTES)} manifest limit`);
+    const method: 0 | 8 = 0;
+    const compressed = source.data;
     const crc = crc32(source.data);
     const header = Buffer.alloc(30);
     header.writeUInt32LE(ZIP_LOCAL_HEADER, 0);
@@ -274,6 +291,7 @@ function readZip(bytes: Buffer): Map<string, Buffer> {
     requireRange(bytes, cursor + 46, nameLength + extraLength + commentLength, "central directory payload");
     const path = decodeUtf8(bytes.subarray(cursor + 46, cursor + 46 + nameLength), "archive path");
     validateArchivePath(path);
+    if (extraLength !== 0 || commentLength !== 0) throw new Error(`Archive entry contains unsupported ZIP extra data or a comment: ${path}`);
     if (seen.has(path.toLowerCase())) throw new Error(`Archive contains a duplicate or case-colliding path: ${path}`);
     seen.add(path.toLowerCase());
     if ((flags & ~UTF8_FLAG) !== 0) throw new Error(`Archive entry uses unsupported ZIP flags: ${path}`);
@@ -284,10 +302,9 @@ function readZip(bytes: Buffer): Map<string, Buffer> {
       if (fileType !== 0 && fileType !== 0o100000) throw new Error(`Archive contains a link or special file: ${path}`);
     }
     if (uncompressedSize > MAX_FILE_BYTES) throw new Error(`${path} exceeds the ${formatMiB(MAX_FILE_BYTES)} per-file limit`);
-    if (path.startsWith("source/")) {
-      totalBytes += uncompressedSize;
-      if (totalBytes > MAX_SOURCE_BYTES) throw new Error(`Archive exceeds the ${formatMiB(MAX_SOURCE_BYTES)} unpacked limit`);
-    }
+    if (path === "weave.json" && uncompressedSize > MAX_WEAVE_MANIFEST_BYTES) throw new Error(`weave.json exceeds the ${formatKiB(MAX_WEAVE_MANIFEST_BYTES)} manifest limit`);
+    totalBytes += uncompressedSize;
+    if (totalBytes > MAX_UNPACKED_BYTES) throw new Error(`Archive exceeds the ${formatMiB(MAX_UNPACKED_BYTES)} unpacked limit`);
 
     requireRange(bytes, localOffset, 30, "local file header");
     if (bytes.readUInt32LE(localOffset) !== ZIP_LOCAL_HEADER) throw new Error(`Archive local header is invalid: ${path}`);
@@ -300,6 +317,7 @@ function readZip(bytes: Buffer): Map<string, Buffer> {
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
     requireRange(bytes, localOffset + 30, localNameLength + localExtraLength, "local file header payload");
     const localPath = decodeUtf8(bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength), "local archive path");
+    if (localExtraLength !== 0) throw new Error(`Archive local entry contains unsupported ZIP extra data: ${path}`);
     if (localPath !== path || localFlags !== flags || localMethod !== method || localCrc !== crc || localCompressedSize !== compressedSize || localUncompressedSize !== uncompressedSize) {
       throw new Error(`Archive local and central metadata disagree: ${path}`);
     }
@@ -311,7 +329,18 @@ function readZip(bytes: Buffer): Map<string, Buffer> {
     const compressed = bytes.subarray(dataOffset, dataEnd);
     let data: Buffer;
     try {
-      data = method === 0 ? Buffer.from(compressed) : Buffer.from(inflateRawSync(compressed, { maxOutputLength: Math.max(1, uncompressedSize) }));
+      if (method === 0) {
+        data = Buffer.from(compressed);
+      } else {
+        // Node's runtime returns this shape for `info: true`, although the
+        // current @types/node sync overload still declares a bare Buffer.
+        const inflated = inflateRawSync(compressed, { info: true, maxOutputLength: Math.max(1, uncompressedSize) }) as unknown as {
+          buffer: Buffer;
+          engine: { bytesWritten: number };
+        };
+        if (inflated.engine.bytesWritten !== compressed.length) throw new Error("trailing compressed data");
+        data = Buffer.from(inflated.buffer);
+      }
     } catch {
       throw new Error(`Archive entry could not be decompressed: ${path}`);
     }
@@ -323,19 +352,27 @@ function readZip(bytes: Buffer): Map<string, Buffer> {
   if (cursor !== endOffset) throw new Error("Archive central directory entry count is invalid");
   rejectCaseCollisions([...output.keys()]);
   ranges.sort((a, b) => a[0] - b[0]);
-  for (let index = 1; index < ranges.length; index += 1) {
-    if (ranges[index][0] < ranges[index - 1][1]) throw new Error("Archive file ranges overlap");
+  let expectedOffset = 0;
+  for (const [start, end] of ranges) {
+    if (start !== expectedOffset) throw new Error("Archive local file records must be contiguous and start at byte zero");
+    expectedOffset = end;
   }
+  if (expectedOffset !== centralOffset) throw new Error("Archive local file records do not end at the central directory");
   return output;
 }
 
 function findEndRecord(bytes: Buffer): number {
   if (bytes.length < 22) throw new Error("File is not a complete ZIP archive");
+  const exactOffset = bytes.length - 22;
+  if (bytes.readUInt32LE(exactOffset) === ZIP_END) {
+    if (bytes.readUInt16LE(exactOffset + 20) !== 0) throw new Error("ZIP comments are not valid in a .weave file");
+    return exactOffset;
+  }
   const minimum = Math.max(0, bytes.length - 65_557);
   for (let offset = bytes.length - 22; offset >= minimum; offset -= 1) {
     if (bytes.readUInt32LE(offset) !== ZIP_END) continue;
     const commentLength = bytes.readUInt16LE(offset + 20);
-    if (offset + 22 + commentLength === bytes.length) return offset;
+    if (offset + 22 + commentLength === bytes.length) throw new Error("ZIP comments are not valid in a .weave file");
   }
   throw new Error("File is not a complete ZIP archive");
 }
@@ -349,10 +386,14 @@ function parseManifest(data: Buffer): WeaveManifest {
   requireKeys(value, ["formatVersion", "artifactId", "sourceId", "name", "provenance", "lineage", "declared"], "weave.json");
   if (!isArtifactId(value.artifactId)) throw new Error("weave.json artifactId must be a sha256 identity");
   if (!isArtifactId(value.sourceId)) throw new Error("weave.json sourceId must be a sha256 identity");
-  if (typeof value.name !== "string" || value.name.trim() === "") throw new Error("weave.json name must be a non-empty string");
+  if (typeof value.name !== "string") throw new Error("weave.json name must be a string");
+  validateDisplayString(value.name, "weave.json name", MAX_DISPLAY_NAME_BYTES);
   if (!isRecord(value.provenance)) throw new Error("weave.json provenance must be an object");
   requireKeys(value.provenance, ["author"], "weave.json provenance");
-  if (value.provenance.author !== null && typeof value.provenance.author !== "string") throw new Error("weave.json provenance.author must be a string or null");
+  if (value.provenance.author !== null) {
+    if (typeof value.provenance.author !== "string") throw new Error("weave.json provenance.author must be a string or null");
+    validateDisplayString(value.provenance.author, "weave.json provenance.author", MAX_AUTHOR_BYTES);
+  }
   if (!isRecord(value.lineage)) throw new Error("weave.json lineage must be an object");
   requireKeys(value.lineage, ["root", "parent"], "weave.json lineage");
   if (!isArtifactId(value.lineage.root) || (value.lineage.parent !== null && !isArtifactId(value.lineage.parent))) throw new Error("weave.json lineage identities must be sha256 identities or null");
@@ -383,16 +424,37 @@ function validatePortablePath(path: string, kind: string): void {
 
 function rejectCaseCollisions(paths: string[]): void {
   const seen = new Map<string, string>();
+  const files = new Map<string, string>();
   for (const path of paths) {
+    const fileKey = path.normalize("NFC").toLowerCase();
+    const previousFile = files.get(fileKey);
+    if (previousFile !== undefined) {
+      if (previousFile === path) throw new Error(`Archive contains a duplicate path: ${path}`);
+      throw new Error(`Paths collide on a case-insensitive filesystem: ${previousFile} and ${path}`);
+    }
+    files.set(fileKey, path);
     const parts = path.split("/");
     for (let length = 1; length <= parts.length; length += 1) {
       const spelling = parts.slice(0, length).join("/");
       const folded = spelling.normalize("NFC").toLowerCase();
       const previous = seen.get(folded);
       if (previous !== undefined && previous !== spelling) throw new Error(`Paths collide on a case-insensitive filesystem: ${previous} and ${spelling}`);
-      if (length === parts.length && previous === spelling) throw new Error(`Archive contains a duplicate path: ${spelling}`);
       seen.set(folded, spelling);
     }
+  }
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let length = 1; length < parts.length; length += 1) {
+      const ancestor = parts.slice(0, length).join("/").normalize("NFC").toLowerCase();
+      const file = files.get(ancestor);
+      if (file !== undefined) throw new Error(`Archive file path is also used as a directory: ${file} and ${path}`);
+    }
+  }
+}
+
+function validateDisplayString(value: string, label: string, maximumBytes: number): void {
+  if (value.trim() === "" || Buffer.byteLength(value, "utf8") > maximumBytes || /[\p{C}\p{Zl}\p{Zp}]/u.test(value)) {
+    throw new Error(`${label} must be a non-empty string of at most ${maximumBytes} UTF-8 bytes without control characters`);
   }
 }
 
@@ -420,6 +482,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function formatMiB(bytes: number): string { return `${bytes / (1024 * 1024)} MiB`; }
+function formatKiB(bytes: number): string { return `${bytes / 1024} KiB`; }
 
 const CRC_TABLE = new Uint32Array(256).map((_, index) => {
   let value = index;
