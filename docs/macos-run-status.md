@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 13 production audio locally green; publish pending`
+- State: `IN PROGRESS — PR 13 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T07:42:00-07:00
+- Last updated: 2026-07-15T07:46:00-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,7 +20,7 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/13-production-audio` | `4ed9195` | pending | [#14](https://github.com/SunkenInTime/weaver/pull/14) |
+| Weaver | `macos/13-production-audio` | `8b7f211` | [#15](https://github.com/SunkenInTime/weaver/pull/15) | [#14](https://github.com/SunkenInTime/weaver/pull/14) |
 
 ## Last reproducible capability
 
@@ -113,10 +113,10 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, PR 13 Visualizers/control/authorization markers, isolated CLI home/data/log trees, registry locks, install stages, owned versions, scoped audio TCC decision, and temporary audio taps/aggregates removed after recording evidence; ignored spike builds and raw renderer run reports remain only as reproducible local build products
 - Reversible System Settings restored: unchanged
 - Working trees/submodule clean: clean after this PR 13 ledger commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-12 and Native SDK fork PRs 01-05 pushed; PR 13 publish is next
+- Latest stack branches pushed: Weaver PRs 01-13 and Native SDK fork PRs 01-05 pushed; PR 12 is green and PR 13 CI is running
 
 ## Next executable task
 
-1. Commit/push `macos/13-production-audio`, open draft PR 15 against `macos/12-audio-decision`, and attach the M10 evidence.
-2. Inspect PR 12-13 CI and correct actionable failures without weakening coverage.
-3. Create `macos/14-media-decision` from PR 13 and complete the public media-provider feasibility/ADR gate.
+1. Inspect PR 13 CI and correct actionable failures without weakening coverage.
+2. Create `macos/14-media-decision` from PR 13 and complete the public media-provider feasibility/ADR gate.
+3. If public system-wide media observation is unavailable, record the honest unavailable decision and omit PR 15 rather than introducing private MediaRemote dependencies.
