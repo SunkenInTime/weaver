@@ -122,8 +122,9 @@ try {
   const followerExitPromise = new Promise((resolvePromise) => logFollower.once("exit", (code, signal) => resolvePromise({ code, signal })));
   await waitForOutput(logFollower, logToken);
   const followToken = `follow-${randomUUID()}`;
+  const followOutputPromise = waitForOutput(logFollower, followToken);
   appendFileSync(join(logsRoot, "Clock.log"), `${followToken}\n`, "utf8");
-  await waitForOutput(logFollower, followToken);
+  await followOutputPromise;
   logFollower.kill("SIGINT");
   const followerExit = await followerExitPromise;
   if (process.platform === "win32") {
