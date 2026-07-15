@@ -22,6 +22,14 @@ Widget (system stats, media, time, weather). Distinct from a Widget's own
 direct API access: Providers are shared and curated; direct API access is
 per-Widget and declared.
 
+## Provider availability
+
+A Provider is either live, silent, or unavailable. Silence is valid live data;
+unavailable means the host cannot honestly collect the source because the OS,
+hardware, permission, or route is missing. An unavailable Provider sends no
+fabricated live frames. Platform permission language stays in host diagnostics
+and setup UX rather than entering Widget source.
+
 ## Renderer
 
 The internal path that turns a Widget's retained display operations into

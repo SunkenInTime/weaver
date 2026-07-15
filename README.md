@@ -51,12 +51,13 @@ in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
 change.
 
 Host-owned CPU and memory providers now run on both platforms and stay fully
-off with no subscriber. Audio and media are still explicit macOS port work,
-not stubbed capabilities.
+off with no subscriber. macOS audio has selected the public Core Audio process
+tap route; production capture and media remain explicit port work, not stubbed
+capabilities.
 
 ## Quickstart
 
-Prerequisites: Windows 11 or macOS 13+, [Node 22+](https://nodejs.org), and
+Prerequisites: Windows 11 or macOS 14.2+, [Node 22+](https://nodejs.org), and
 [Zig 0.16.0](https://ziglang.org/download/) on PATH.
 
 ```powershell
