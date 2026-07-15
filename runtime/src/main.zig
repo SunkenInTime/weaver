@@ -298,10 +298,10 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         logged_backend = true;
         std.log.info("widget host surface backend={s}", .{@tagName(frame.backend)});
     } else if (frame.backend != last_backend) {
-        if (last_backend == .d3d11 and frame.backend == .software) {
-            std.log.warn("widget renderer demoted d3d11 -> software", .{});
-        } else if (last_backend == .software and frame.backend == .d3d11) {
-            std.log.info("widget renderer promoted software -> d3d11", .{});
+        if ((last_backend == .d3d11 or last_backend == .metal) and frame.backend == .software) {
+            std.log.warn("widget renderer demoted {s} -> software", .{@tagName(last_backend)});
+        } else if (last_backend == .software and (frame.backend == .d3d11 or frame.backend == .metal)) {
+            std.log.info("widget renderer promoted software -> {s}", .{@tagName(frame.backend)});
         } else {
             std.log.info("widget renderer backend changed {s} -> {s}", .{ @tagName(last_backend), @tagName(frame.backend) });
         }
@@ -460,6 +460,11 @@ pub fn main(init: std.process.Init) !void {
     }
     const directory = args[if (dev) 2 else 1];
     const loaded = try manifest_mod.load(init.io, allocator, directory);
+    const force_software = if (init.environ_map.get("WEAVER_FORCE_SOFTWARE")) |value|
+        std.mem.eql(u8, value, "1")
+    else
+        false;
+    const renderer_backend = declaredGpuBackend(loaded.manifest.renderBackend, force_software);
     const local_app_data = init.environ_map.get("LOCALAPPDATA");
     const home = init.environ_map.get("HOME");
     const data_root = try platform.dataRoot(allocator, local_app_data, home);
@@ -479,7 +484,7 @@ pub fn main(init: std.process.Init) !void {
         .fill = true,
         .role = "Weaver widget canvas",
         .accessibility_label = loaded.manifest.name,
-        .gpu_backend = declaredGpuBackend(loaded.manifest.renderBackend),
+        .gpu_backend = renderer_backend,
         .gpu_pixel_format = .bgra8_unorm,
         .gpu_present_mode = .timer,
         .gpu_alpha_mode = .premultiplied,
@@ -538,7 +543,7 @@ pub fn main(init: std.process.Init) !void {
     try engine.evaluate(loaded.bundle, "bundle.js");
     try loadLocalImages(init.io, allocator, directory, &app_state.model);
 
-    requested_software_backend = std.mem.eql(u8, loaded.manifest.renderBackend, "software");
+    requested_software_backend = renderer_backend == .software;
     var app = app_state.app();
     app.start_fn = startRendererDiagnostics;
     try runner.runWithOptions(app, .{
@@ -552,7 +557,12 @@ pub fn main(init: std.process.Init) !void {
     }, init);
 }
 
-fn declaredGpuBackend(render_backend: []const u8) native_sdk.app_manifest.GpuSurfaceBackend {
+fn declaredGpuBackend(render_backend: []const u8, force_software: bool) native_sdk.app_manifest.GpuSurfaceBackend {
+    if (force_software) return .software;
+    // ADR 0012: every healthy macOS Widget takes the measured Metal path.
+    // `renderBackend` is generated internal metadata, not Widget source; it
+    // remains the Windows retained/canvas selector until that lane changes.
+    if (@import("builtin").os.tag == .macos) return .metal;
     if (std.mem.eql(u8, render_backend, "software")) return .software;
     return switch (@import("builtin").os.tag) {
         .windows => .d3d11,
@@ -566,7 +576,7 @@ fn declaredGpuBackend(render_backend: []const u8) native_sdk.app_manifest.GpuSur
 fn startRendererDiagnostics(_: *anyopaque, runtime: *native_sdk.Runtime) !void {
     diagnostic_runtime = runtime;
     if (!requested_software_backend) {
-        std.log.info("widget renderer selected=gpu presenter=host", .{});
+        std.log.info("widget renderer selected={s} presenter=host", .{if (@import("builtin").os.tag == .macos) "metal-composite" else "gpu"});
         return;
     }
     std.log.info("widget renderer selected=software presenter=pixels", .{});
@@ -596,11 +606,14 @@ test {
     _ = @import("storage.zig");
     _ = @import("provider.zig");
     _ = @import("widget_log.zig");
-    try std.testing.expectEqual(native_sdk.app_manifest.GpuSurfaceBackend.software, declaredGpuBackend("software"));
+    const automatic_software_backend: native_sdk.app_manifest.GpuSurfaceBackend =
+        if (@import("builtin").os.tag == .macos) .metal else .software;
+    try std.testing.expectEqual(automatic_software_backend, declaredGpuBackend("software", false));
+    try std.testing.expectEqual(native_sdk.app_manifest.GpuSurfaceBackend.software, declaredGpuBackend("gpu", true));
     const native_gpu_backend: native_sdk.app_manifest.GpuSurfaceBackend = switch (@import("builtin").os.tag) {
         .windows => .d3d11,
         .macos => .metal,
         else => .none,
     };
-    try std.testing.expectEqual(native_gpu_backend, declaredGpuBackend("gpu"));
+    try std.testing.expectEqual(native_gpu_backend, declaredGpuBackend("gpu", false));
 }
