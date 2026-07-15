@@ -14,7 +14,13 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const cli = join(repoRoot, "cli", "bin", "weaver.js");
 const tempRoot = realpathSync(tmpdir());
 const scratch = mkdtempSync(join(tempRoot, "weaver-macos-host-smoke-"));
-const environment = { ...process.env, HOME: join(scratch, "home"), WEAVER_AUTOMATION: "1" };
+const audioControl = join(scratch, "audio-control");
+const environment = {
+  ...process.env,
+  HOME: join(scratch, "home"),
+  WEAVER_AUTOMATION: "1",
+  WEAVER_AUDIO_TEST_CONTROL: audioControl,
+};
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
 const statusFile = join(dataRoot, "status.json");
 const clockSource = join(scratch, "clock", "widget.tsx");
@@ -157,6 +163,88 @@ try {
   const providerSamplesAfterStop = status().providers.systemSampleCount;
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 2200));
   assert.equal(status().providers.systemSampleCount, providerSamplesAfterStop, "host continued sampling after the final system subscriber stopped");
+
+  run(["init", "visualizer-two"]);
+  const visualizerSource = readFileSync(join(repoRoot, "examples", "visualizer", "widget.tsx"), "utf8");
+  writeFileSync(join(scratch, "visualizer-two", "widget.tsx"), visualizerSource
+    .replace('name: "Visualizer"', 'name: "Visualizer 2"')
+    .replace("offset: [24, 24]", "offset: [336, 24]"), "utf8");
+  writeFileSync(audioControl, "s", "utf8");
+  const visualizerInstalls = await Promise.all([
+    runAsync(["install", join(repoRoot, "examples", "visualizer")]),
+    runAsync(["install", "visualizer-two"]),
+  ]);
+  for (const result of visualizerInstalls) assert.equal(result.code, 0, `concurrent Visualizer install failed\n${result.stderr}`);
+  await waitFor("explicit audio authorization boundary", () => {
+    const providers = status()?.providers;
+    return providers?.audioSubscribers === 2 && providers.audioAvailability === "authorization-required" &&
+      providers.audioCaptureStarts === 0 && providers;
+  });
+
+  writeFileSync(audioControl, "p", "utf8");
+  const denied = run(["audio", "authorize"], 1);
+  assert.match(denied.stderr, /could not authorize macOS system audio/i);
+  writeFileSync(audioControl, "a", "utf8");
+  run(["audio", "authorize"]);
+  const liveAudio = await waitFor("one audio capture fanning out to two Visualizers", () => {
+    const providers = status()?.providers;
+    const logs = ["Visualizer.log", "Visualizer 2.log"]
+      .map((name) => join(environment.HOME, "Library", "Logs", "Weaver", name));
+    return providers?.audioSubscribers === 2 && providers.audioAvailability === "live" &&
+      providers.audioCaptureStarts === 1 && providers.audioProviderFrames >= 2 && providers.audioPipeFrames >= 2 &&
+      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied")) && providers;
+  });
+
+  writeFileSync(audioControl, "s", "utf8");
+  await waitFor("audio decay and final zero", () => {
+    const providers = status()?.providers;
+    return providers?.audioAvailability === "live" && providers.audioSilent === true &&
+      providers.audioProviderFrames > liveAudio.audioProviderFrames && providers;
+  }, 15_000);
+  const parkedFrames = status().providers.audioProviderFrames;
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 2500));
+  assert.equal(status().providers.audioProviderFrames, parkedFrames, "silent audio provider did not park after its final zero");
+
+  writeFileSync(audioControl, "a", "utf8");
+  await waitFor("audio resume after parked silence", () => {
+    const providers = status()?.providers;
+    return providers?.audioSilent === false && providers.audioProviderFrames > parkedFrames && providers;
+  });
+  const startsBeforeRevocation = status().providers.audioCaptureStarts;
+  writeFileSync(audioControl, "r", "utf8");
+  await waitFor("audio permission revocation", () => {
+    const providers = status()?.providers;
+    return providers?.audioAvailability === "permission-revoked" && providers.audioLastError !== 0 && providers;
+  });
+  writeFileSync(audioControl, "a", "utf8");
+  run(["audio", "authorize"]);
+  await waitFor("audio reauthorization", () => {
+    const providers = status()?.providers;
+    return providers?.audioAvailability === "live" && providers.audioCaptureStarts === startsBeforeRevocation + 1 && providers;
+  });
+
+  const startsBeforeDeviceLoss = status().providers.audioCaptureStarts;
+  writeFileSync(audioControl, "f", "utf8");
+  await waitFor("audio device loss", () => status()?.providers?.audioAvailability === "device-unavailable");
+  writeFileSync(audioControl, "a", "utf8");
+  await waitFor("audio device recovery", () => {
+    const providers = status()?.providers;
+    return providers?.audioAvailability === "live" && providers.audioCaptureStarts > startsBeforeDeviceLoss && providers;
+  });
+
+  const visualizerUninstalls = await Promise.all([
+    runAsync(["uninstall", "Visualizer"]),
+    runAsync(["uninstall", "Visualizer 2"]),
+  ]);
+  for (const result of visualizerUninstalls) assert.equal(result.code, 0, `concurrent Visualizer uninstall failed\n${result.stderr}`);
+  await waitFor("audio provider teardown", () => {
+    const providers = status()?.providers;
+    return status()?.widgets?.length === 0 && providers?.audioSubscribers === 0 &&
+      providers.audioAvailability === "idle" && providers.audioCaptureActive === false && providers;
+  });
+  const audioFramesAfterStop = status().providers.audioProviderFrames;
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1000));
+  assert.equal(status().providers.audioProviderFrames, audioFramesAfterStop, "host continued producing audio after the final subscriber stopped");
 
   run(["install", "clock"]);
   await waitFor("installed Clock", () => status()?.widgets?.[0]?.state === "running" && status().widgets[0]);
