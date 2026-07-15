@@ -178,19 +178,19 @@ pub const Provider = struct {
                     self.availability = if (self.was_live) .permission_revoked else .permission_denied;
                     self.close();
                     self.next_open_ms = std.math.maxInt(u64);
-                    return null;
+                    return self.finalFailureFrame();
                 },
                 native.WEAVER_AUDIO_DEVICE_UNAVAILABLE => {
                     self.last_error = native.weaver_audio_error(self.capture.?);
                     self.availability = .device_unavailable;
                     self.reopen(now_ms);
-                    return null;
+                    return self.finalFailureFrame();
                 },
                 else => {
                     self.last_error = native.weaver_audio_error(self.capture.?);
                     self.availability = .capture_failed;
                     self.reopen(now_ms);
-                    return null;
+                    return self.finalFailureFrame();
                 },
             }
         }
@@ -211,14 +211,14 @@ pub const Provider = struct {
                         self.availability = if (self.was_live) .permission_revoked else .permission_denied;
                         self.close();
                         self.next_open_ms = std.math.maxInt(u64);
-                        return null;
+                        return self.finalFailureFrame();
                     },
                     native.WEAVER_AUDIO_DEVICE_UNAVAILABLE => self.availability = .device_unavailable,
                     else => self.availability = .capture_failed,
                 }
             }
             self.reopen(now_ms);
-            return null;
+            return self.finalFailureFrame();
         }
         self.analyzer.push(input[0..count]);
         if (now_ms < self.next_frame_ms) return null;
@@ -288,6 +288,14 @@ pub const Provider = struct {
         if (self.zero_sent) return .suppress;
         self.zero_sent = true;
         return .final_zero;
+    }
+
+    fn finalFailureFrame(self: *Provider) ?Frame {
+        self.silent = true;
+        if (!self.was_live or self.zero_sent) return null;
+        self.zero_sent = true;
+        self.frame_count += 1;
+        return .{};
     }
 };
 
@@ -390,4 +398,14 @@ test "audio silence decays once, parks, and resumes on signal" {
     try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.1, 2400));
     try std.testing.expect(!provider.silent);
     try std.testing.expect(!provider.zero_sent);
+}
+
+test "live capture failure emits one final zero and then parks" {
+    var provider: Provider = .{ .was_live = true, .silent = false };
+    try std.testing.expect(provider.finalFailureFrame() != null);
+    try std.testing.expect(provider.silent);
+    try std.testing.expect(provider.zero_sent);
+    try std.testing.expectEqual(@as(u64, 1), provider.frame_count);
+    try std.testing.expect(provider.finalFailureFrame() == null);
+    try std.testing.expectEqual(@as(u64, 1), provider.frame_count);
 }

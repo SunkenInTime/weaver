@@ -211,10 +211,12 @@ try {
     return providers?.audioSilent === false && providers.audioProviderFrames > parkedFrames && providers;
   });
   const startsBeforeRevocation = status().providers.audioCaptureStarts;
+  const framesBeforeRevocation = status().providers.audioProviderFrames;
   writeFileSync(audioControl, "r", "utf8");
   await waitFor("audio permission revocation", () => {
     const providers = status()?.providers;
-    return providers?.audioAvailability === "permission-revoked" && providers.audioLastError !== 0 && providers;
+    return providers?.audioAvailability === "permission-revoked" && providers.audioLastError !== 0 &&
+      providers.audioSilent === true && providers.audioProviderFrames === framesBeforeRevocation + 1 && providers;
   });
   writeFileSync(audioControl, "a", "utf8");
   run(["audio", "authorize"]);
