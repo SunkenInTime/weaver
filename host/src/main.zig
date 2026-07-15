@@ -15,12 +15,15 @@ const c = @cImport({
 const mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostSingletonV2");
 const shutdown_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostShutdownV2");
 const reload_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadV2");
+const reload_signal_mutex_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadSignalV2");
+const reload_success_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadSuccessV2");
+const reload_failure_event_name = std.unicode.utf8ToUtf16LeStringLiteral("Local\\WeaverHostReloadFailureV2");
 const env_pipe_name = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_HOST_PIPE");
 const env_backend_file = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_BACKEND_FILE");
 const env_renderer_pipe = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_PIPE");
 const env_renderer_log = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_LOG");
 const max_widgets: usize = 32;
-const max_name_bytes: usize = 128;
+const max_name_bytes: usize = 256;
 const max_path_bytes: usize = 2048;
 const invalid_handle = c.INVALID_HANDLE_VALUE;
 
@@ -666,15 +669,31 @@ test "source-missing state has the status contract spelling" {
     try std.testing.expectEqualStrings("source missing", runStateLabel(.source_missing));
 }
 
-pub fn main(init: std.process.Init) !void {
+pub fn main(init: std.process.Init) void {
+    run(init) catch |err| {
+        std.debug.print("error: {s}\n", .{@errorName(err)});
+        std.process.exit(1);
+    };
+}
+
+fn run(init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len == 2 and std.mem.eql(u8, args[1], "--signal-down")) return signalEvent(shutdown_event_name);
-    if (args.len == 2 and std.mem.eql(u8, args[1], "--signal-reload")) return signalEvent(reload_event_name);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--signal-reload")) return signalReloadAndWait();
     if (args.len == 2 and std.mem.eql(u8, args[1], "--probe")) {
         const handle = c.OpenMutexW(c.SYNCHRONIZE, 0, mutex_name);
         if (handle == null) return error.HostNotRunning;
         _ = c.CloseHandle(handle);
+        return;
+    }
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--probe-reload-ready")) {
+        const handle = c.OpenMutexW(c.SYNCHRONIZE, 0, mutex_name);
+        if (handle == null) return error.HostNotRunning;
+        _ = c.CloseHandle(handle);
+        const ready = c.OpenEventW(c.SYNCHRONIZE, 0, reload_failure_event_name);
+        if (ready == null) return error.HostNotRunning;
+        _ = c.CloseHandle(ready);
         return;
     }
     const mutex = c.CreateMutexW(null, 0, mutex_name) orelse return error.CreateMutexFailed;
@@ -684,6 +703,10 @@ pub fn main(init: std.process.Init) !void {
     defer _ = c.CloseHandle(shutdown_event);
     const reload_event = c.CreateEventW(null, 0, 0, reload_event_name) orelse return error.CreateEventFailed;
     defer _ = c.CloseHandle(reload_event);
+    const reload_success_event = c.CreateEventW(null, 1, 0, reload_success_event_name) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(reload_success_event);
+    const reload_failure_event = c.CreateEventW(null, 1, 0, reload_failure_event_name) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(reload_failure_event);
     const local_app_data = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
     const directory = try std.fs.path.join(allocator, &.{ local_app_data, "weaver" });
     defer allocator.free(directory);
@@ -731,7 +754,13 @@ pub fn main(init: std.process.Init) !void {
         const wait_ms: c.DWORD = if (host.hasAudioSubscribers()) 10 else 250;
         const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, wait_ms);
         if (wait == c.WAIT_OBJECT_0) break;
-        if (wait == c.WAIT_OBJECT_0 + 1) host.loadRegistry() catch {};
+        if (wait == c.WAIT_OBJECT_0 + 1) {
+            host.loadRegistry() catch {
+                _ = c.SetEvent(reload_failure_event);
+                continue;
+            };
+            _ = c.SetEvent(reload_success_event);
+        }
         const now = c.GetTickCount64();
         host.supervise(now);
         host.sampleAudio(now);
@@ -760,6 +789,29 @@ fn signalEvent(name: [*:0]const u16) !void {
     const event = c.OpenEventW(c.EVENT_MODIFY_STATE, 0, name) orelse return error.HostNotRunning;
     defer _ = c.CloseHandle(event);
     if (c.SetEvent(event) == 0) return error.SignalFailed;
+}
+
+fn signalReloadAndWait() !void {
+    const signal_mutex = c.CreateMutexW(null, 0, reload_signal_mutex_name) orelse return error.CreateMutexFailed;
+    defer _ = c.CloseHandle(signal_mutex);
+    const mutex_wait = c.WaitForSingleObject(signal_mutex, 10_000);
+    if (mutex_wait != c.WAIT_OBJECT_0 and mutex_wait != c.WAIT_ABANDONED) return error.ReloadSignalBusy;
+    defer _ = c.ReleaseMutex(signal_mutex);
+
+    const desired_access = c.SYNCHRONIZE | c.EVENT_MODIFY_STATE;
+    const success_event = c.OpenEventW(desired_access, 0, reload_success_event_name) orelse return error.HostNotRunning;
+    defer _ = c.CloseHandle(success_event);
+    const failure_event = c.OpenEventW(desired_access, 0, reload_failure_event_name) orelse return error.HostNotRunning;
+    defer _ = c.CloseHandle(failure_event);
+    const reload_event = c.OpenEventW(c.EVENT_MODIFY_STATE, 0, reload_event_name) orelse return error.HostNotRunning;
+    defer _ = c.CloseHandle(reload_event);
+    if (c.ResetEvent(success_event) == 0 or c.ResetEvent(failure_event) == 0) return error.SignalFailed;
+    if (c.SetEvent(reload_event) == 0) return error.SignalFailed;
+    const acknowledgements = [_]c.HANDLE{ success_event, failure_event };
+    const wait = c.WaitForMultipleObjects(acknowledgements.len, &acknowledgements, 0, 10_000);
+    if (wait == c.WAIT_OBJECT_0) return;
+    if (wait == c.WAIT_OBJECT_0 + 1) return error.RegistryReloadFailed;
+    return error.RegistryReloadTimedOut;
 }
 
 fn repositoryRoot(allocator: std.mem.Allocator) ![]u8 {

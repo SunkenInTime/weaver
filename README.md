@@ -37,11 +37,14 @@ every install is a potential remix.
 
 ## Status: v0 (pre-alpha), Windows
 
-The conjure loop works end to end: scaffold → agent edits the TSX →
-`weaver check` (agent-readable errors) → `weaver dev` → live widget with
-watch-restart. Windows only for now; macOS is next; see the honest milestone
+The conjure and source-sharing loops work end to end: scaffold → agent edits
+the TSX → `weaver check` (agent-readable errors) → `weaver dev` → live widget,
+or `weaver pack` → portable source → `weaver install`. Windows only for now;
+macOS is next; see the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
-[`docs/m1-results.md`](docs/m1-results.md). Expect everything to change.
+[`docs/m1-results.md`](docs/m1-results.md), plus the portable artifact evidence
+in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
+change.
 
 ## Quickstart
 
@@ -56,6 +59,9 @@ cd runtime; zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off; cd
 
 node cli\bin\weaver.js init myclock
 node cli\bin\weaver.js dev myclock
+
+node cli\bin\weaver.js pack myclock
+node cli\bin\weaver.js install myclock.weave
 ```
 
 Or do it the intended way: point your coding agent at
@@ -68,7 +74,7 @@ for the widget you actually want.
 |---|---|
 | `runtime/` | `weaver-widget.exe` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
 | `sdk/` | `@weaver/sdk` — the authoring API: reconciler, hooks, class compiler. Contract frozen in [`sdk/CONTRACT.md`](sdk/CONTRACT.md) |
-| `cli/` | `weaver` — init / check / bundle / dev |
+| `cli/` | `weaver` — init / check / bundle / dev / pack / install |
 | `skills/` | agent skills (conjuring is the primary authoring path) |
 | `docs/adr/` | why things are the way they are — start here to understand the project |
 | `CONTEXT.md` | the domain glossary |
@@ -76,6 +82,7 @@ for the widget you actually want.
 The substrate is a fork of
 [vercel-labs/native](https://github.com/vercel-labs/native)
 ([our fork](https://github.com/SunkenInTime/native), branch `weaver-main`)
-adding desktop-widget windowing and a widget-scale capacity profile — work we
-intend to offer upstream
-([vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114)).
+adding Weaver-owned desktop-widget windowing, capacity, and presentation
+semantics. The general static-TLS problem discovered while profiling the fork
+was reported as [vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114)
+and fixed upstream separately; the Weaver product surface remains in the fork.

@@ -133,7 +133,7 @@ padding, borders, shadows, gradients, hover/state variants, transitions.
 weaver init <name>       scaffold: <name>/widget.tsx (working starter clock) + tsconfig
 weaver check <dir>       tsc --noEmit + config/class/subscribe validation; agent-readable errors
 weaver dev <dir>         bundle → run in weaver-widget.exe → watch → rebundle+restart on change
-weaver bundle <dir>      esbuild → dist/bundle.js (what `install` will use later)
+weaver bundle <dir>      esbuild → dist/bundle.js (local output; install rebuilds an owned copy)
 ```
 
 `weaver dev` restart-on-change is acceptable for M1 (state loss OK); true
@@ -257,10 +257,17 @@ without the host running is a runtime error that names the fix (`weaver up`);
 
 ```
 weaver up | down            start/stop weaverd (singleton, tray-less in M2)
-weaver install <dir>        register a widget (by source path — ADR 0004) and run it
+weaver pack <dir>           write portable source to <dir>.weave
+weaver install <dir|file.weave> validate, own, build, register, and run source
 weaver uninstall <name>     stop + unregister
 weaver status               table: name · pid · private-MB · cpu% · uptime (ADR 0005 billing)
 ```
+
+Portable install amendment: `weaver pack <dir>` writes a deterministic
+`.weave` containing source, assets, declared surface, provenance, and lineage.
+`weaver install <dir|file.weave>` validates that artifact, builds a
+Weaver-owned source copy, and registers the owned path. Only `weaver dev`
+registers a developer workspace by reference (ADR 0011).
 
 weaverd supervises widget processes (crash → restart with backoff, 3 strikes
 → stopped + noted in status), fans out providers over local IPC, and samples

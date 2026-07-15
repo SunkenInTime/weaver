@@ -22,8 +22,9 @@ that CLI only when `widget.tsx` is newer than `dist/bundle.js` or the dist
 manifest is missing; it never grows a second TSX pipeline.
 
 Operational state lives under `%LOCALAPPDATA%\weaver`: `registry.json` is the
-persistent source-path registry and `status.json` is the atomically replaced
-two-second cost snapshot consumed by `weaver status`. The supervisor uses a
+persistent registration index, `widgets/` contains validated install-owned
+source copies, and `status.json` is the atomically replaced two-second cost
+snapshot consumed by `weaver status`. The supervisor uses a
 named mutex for singleton ownership and named events for reload/shutdown.
 Provider data has a separate outbound named pipe per subscribed widget.
 

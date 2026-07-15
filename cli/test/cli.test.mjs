@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -47,6 +47,43 @@ test("status table is aligned and includes crash reasons", () => {
   assert.match(table, /Broken\s+-\s+-\s+0\.0 MB\s+0\.0%\s+0\s+0s\s+stopped: crashed 3 times/);
 });
 
+test("path helpers follow Windows case rules without weakening POSIX containment", () => {
+  const root = "C:\\Users\\Dara\\AppData\\Local\\weaver\\widgets";
+  assert.equal(hostTools.pathsEqual(`${root}\\Clock`, "c:/users/dara/appdata/local/weaver/widgets/clock", "win32"), true);
+  assert.equal(hostTools.pathInside(root, "c:/users/dara/appdata/local/weaver/widgets/Clock", "win32"), true);
+  assert.equal(hostTools.pathInside(root, "C:\\Users\\Dara\\AppData\\Local\\weaver\\widgets-old\\Clock", "win32"), false);
+  assert.equal(hostTools.pathsEqual("/var/lib/Weaver", "/var/lib/weaver", "linux"), false);
+  assert.equal(hostTools.pathInside("/var/lib/weaver", "/var/lib/weaver/../outside", "linux"), false);
+});
+
+test("registry mutations are serialized across processes and leave no shared temp file", async () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-registry-lock-"));
+  const registry = join(root, "registry.json");
+  const modulePath = join(root, "host-tools.mjs");
+  const workerPath = join(root, "worker.mjs");
+  try {
+    writeFileSync(modulePath, hostToolsBundle.outputFiles[0].contents);
+    writeFileSync(workerPath, `import { readRegistry, withRegistryLock, writeRegistry } from "./host-tools.mjs";
+const [registry, name, hold] = process.argv.slice(2);
+await withRegistryLock(async () => {
+  const document = readRegistry(registry);
+  await new Promise((resolve) => setTimeout(resolve, Number(hold)));
+  writeRegistry({ widgets: [...document.widgets, { name, sourcePath: "/" + name, enabled: true }] }, registry);
+}, registry, { timeoutMs: 5000, retryMs: 5, staleMs: 30000 });
+`);
+    const first = spawn(process.execPath, [workerPath, registry, "first", "150"], { stdio: ["ignore", "pipe", "pipe"] });
+    await waitForPath(`${registry}.lock`);
+    const second = spawn(process.execPath, [workerPath, registry, "second", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+    const [firstResult, secondResult] = await Promise.all([childResult(first), childResult(second)]);
+    assert.equal(firstResult.code, 0, firstResult.stderr);
+    assert.equal(secondResult.code, 0, secondResult.stderr);
+    assert.deepEqual(hostTools.readRegistry(registry).widgets.map((widget) => widget.name), ["first", "second"]);
+    assert.deepEqual(readdirSync(root).filter((name) => name.endsWith(".tmp") || name.endsWith(".lock")), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("bundle manifest is the subscription origin of truth", () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-subscriptions-"));
   const widget = join(root, "system-card");
@@ -62,13 +99,37 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
 });
 `;
     writeFileSync(sourcePath, source, "utf8");
+    mkdirSync(join(widget, "data"));
+    writeFileSync(join(widget, "data", "widget.json"), "nested manifest asset", "utf8");
+    mkdirSync(join(widget, "assets", "dist"), { recursive: true });
+    writeFileSync(join(widget, "assets", "dist", "pixel.bin"), "nested dist asset", "utf8");
     const result = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
     const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
     assert.deepEqual(manifest.subscribe, ["cpu", "memory", "audio", "media"]);
     assert.equal(manifest.renderBackend, "software");
+    assert.equal(readFileSync(join(widget, "dist", "data", "widget.json"), "utf8"), "nested manifest asset");
+    assert.equal(readFileSync(join(widget, "dist", "assets", "dist", "pixel.bin"), "utf8"), "nested dist asset");
+    assert.equal(existsSync(join(widget, "dist", "widget.tsx")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+async function waitForPath(path) {
+  const deadline = Date.now() + 5000;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function childResult(child) {
+  return new Promise((resolve) => {
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("exit", (code) => resolve({ code, stderr }));
+  });
+}
 

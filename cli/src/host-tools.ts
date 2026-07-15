@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 
 export interface Registration { name: string; sourcePath: string; enabled: boolean; dev?: boolean }
 export interface RegistryDocument { widgets: Registration[] }
@@ -15,15 +16,23 @@ export interface WidgetStatus {
   reason: string;
 }
 export interface StatusDocument { hostPid: number; widgets: WidgetStatus[] }
+export interface RegistryLockOptions { timeoutMs?: number; retryMs?: number; staleMs?: number }
+
+export function weaverDataPath(localAppData = process.env.LOCALAPPDATA): string {
+  if (!localAppData) throw new Error("LOCALAPPDATA is not available");
+  return join(localAppData, "weaver");
+}
+
+export function widgetsPath(localAppData = process.env.LOCALAPPDATA): string {
+  return join(weaverDataPath(localAppData), "widgets");
+}
 
 export function registryPath(localAppData = process.env.LOCALAPPDATA): string {
-  if (!localAppData) throw new Error("LOCALAPPDATA is not available");
-  return join(localAppData, "weaver", "registry.json");
+  return join(weaverDataPath(localAppData), "registry.json");
 }
 
 export function statusPath(localAppData = process.env.LOCALAPPDATA): string {
-  if (!localAppData) throw new Error("LOCALAPPDATA is not available");
-  return join(localAppData, "weaver", "status.json");
+  return join(weaverDataPath(localAppData), "status.json");
 }
 
 export function readRegistry(path = registryPath()): RegistryDocument {
@@ -37,9 +46,68 @@ export function readRegistry(path = registryPath()): RegistryDocument {
 
 export function writeRegistry(document: RegistryDocument, path = registryPath()): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    renameSync(temporary, path);
+  } finally {
+    if (existsSync(temporary)) rmSync(temporary, { force: true });
+  }
+}
+
+export async function withRegistryLock<T>(operation: () => T | Promise<T>, path = registryPath(), options: RegistryLockOptions = {}): Promise<T> {
+  // A transaction may spend up to five seconds starting the host and ten
+  // seconds waiting for its reload acknowledgement. Contenders must wait
+  // longer than the longest valid critical section before declaring failure.
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const retryMs = options.retryMs ?? 25;
+  const staleMs = options.staleMs ?? 5 * 60_000;
+  const lockDirectory = `${path}.lock`;
+  const ownerPath = join(lockDirectory, "owner.json");
+  const token = randomUUID();
+  const deadline = Date.now() + timeoutMs;
+  mkdirSync(dirname(path), { recursive: true });
+  while (true) {
+    try {
+      mkdirSync(lockDirectory);
+      try {
+        writeFileSync(ownerPath, `${JSON.stringify({ pid: process.pid, token })}\n`, "utf8");
+      } catch (error) {
+        rmSync(lockDirectory, { recursive: true, force: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      if (reclaimAbandonedLock(lockDirectory, ownerPath, staleMs)) continue;
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for Weaver registry lock at ${lockDirectory}`);
+      await delay(retryMs);
+    }
+  }
+
+  const heartbeat = setInterval(() => {
+    if (!lockOwnedBy(ownerPath, token)) return;
+    const now = new Date();
+    try { utimesSync(lockDirectory, now, now); }
+    catch { /* A later owner reclaimed the lease; release must not remove it. */ }
+  }, Math.max(1_000, Math.floor(staleMs / 3)));
+  heartbeat.unref();
+  try {
+    return await operation();
+  } finally {
+    clearInterval(heartbeat);
+    if (lockOwnedBy(ownerPath, token)) rmSync(lockDirectory, { recursive: true, force: true });
+  }
+}
+
+export function pathsEqual(left: string, right: string, platform: NodeJS.Platform = process.platform): boolean {
+  return comparablePath(left, platform) === comparablePath(right, platform);
+}
+
+export function pathInside(root: string, candidate: string, platform: NodeJS.Platform = process.platform): boolean {
+  const implementation = platform === "win32" ? win32 : posix;
+  const relative = implementation.relative(comparablePath(root, platform), comparablePath(candidate, platform));
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${implementation.sep}`) && !implementation.isAbsolute(relative);
 }
 
 export function readStatus(path = statusPath()): StatusDocument {
@@ -68,4 +136,59 @@ function formatUptime(seconds: number): string {
   const minutes = Math.floor((total % 3600) / 60);
   const remainder = total % 60;
   return hours > 0 ? `${hours}h${String(minutes).padStart(2, "0")}m` : minutes > 0 ? `${minutes}m${String(remainder).padStart(2, "0")}s` : `${remainder}s`;
+}
+
+function comparablePath(path: string, platform: NodeJS.Platform): string {
+  const implementation = platform === "win32" ? win32 : posix;
+  const normalized = implementation.resolve(path);
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function reclaimAbandonedLock(lockDirectory: string, ownerPath: string, staleMs: number): boolean {
+  let ageMs: number;
+  try { ageMs = Date.now() - statSync(lockDirectory).mtimeMs; }
+  catch { return true; }
+  let pid: number | null = null;
+  try {
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as { pid?: unknown };
+    if (typeof owner.pid === "number" && Number.isInteger(owner.pid) && owner.pid > 0) pid = owner.pid;
+  } catch { /* A creator may still be publishing a fresh owner file. */ }
+  if (pid !== null && processIsRunning(pid) && ageMs <= staleMs) return false;
+  if (pid === null && ageMs <= staleMs) return false;
+  try {
+    rmSync(lockDirectory, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isNoSuchProcess(error);
+  }
+}
+
+function lockOwnedBy(ownerPath: string, token: string): boolean {
+  try {
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown };
+    return owner.token === token;
+  } catch {
+    return false;
+  }
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
+}
+
+function isNoSuchProcess(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ESRCH";
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }

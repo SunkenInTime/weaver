@@ -45,9 +45,16 @@ special case, not the norm.
 
 ## .weave file
 
-The packed, shareable form of a Widget: its source folder (TSX + manifest +
-assets) plus provenance/lineage, zipped. Never a compiled artifact — opening
-a .weave IS reading the widget (ADR 0004).
+The portable, shareable form of a Widget: readable source and assets plus an
+auditable declared surface, provenance, and lineage. Never a compiled artifact
+or a pointer to its author's workspace — opening a .weave IS reading the
+Widget (ADR 0004).
+
+## Installed Widget
+
+A Widget Weaver has accepted into the local library. Its runnable source is a
+Weaver-owned copy made from a .weave, never the sender's working directory;
+changing it begins a Remix.
 
 ## Remix
 

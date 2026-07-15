@@ -1,0 +1,3 @@
+# Installation owns a source copy
+
+A `.weave` is a deterministic ZIP containing readable source plus its audit and lineage envelope. `weaver install` validates it, builds a new immutable version in Weaver-owned storage, and atomically switches the registry to that owned path; the previous version is collected only after the host acknowledges the switch. Cross-process registry mutations are serialized, and only `weaver dev` runs a developer workspace by reference. This costs an extra copy and retained version during replacement, but prevents later workspace edits, moves, generated output, sender-controlled paths, process interruption, or concurrent installs from silently changing an Installed Widget, and gives Remix a stable source boundary.

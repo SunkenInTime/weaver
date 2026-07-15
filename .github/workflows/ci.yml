@@ -40,6 +40,16 @@ jobs:
         working-directory: runtime
         run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
 
+      - name: Build and test host
+        working-directory: host
+        run: |
+          zig build -Doptimize=ReleaseFast
+          zig build test -Doptimize=ReleaseFast
+
+      - name: Portable install ownership smoke
+        shell: pwsh
+        run: .\cli\test\install-smoke.ps1
+
       - name: Scaffold + check + bundle (headless slice of the v0 gate)
         shell: pwsh
         run: |

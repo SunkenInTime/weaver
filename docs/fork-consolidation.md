@@ -59,19 +59,19 @@ compiles the presenter's C++ source directly. The capacity constants live in
 the Zig runtime, so there is no meaningful `-Dwidget-profile` option to pass
 to either host or renderer.
 
-## Plausible upstream boundaries
+## Repository ownership boundary
 
-The four commits are also the review boundaries most likely to work upstream:
+The four commits are review boundaries inside the Weaver fork, not a queue of
+upstream pull requests. The capacity profile, desktop-widget windowing,
+damage-aware presenter, and shared-renderer protocol exist for Weaver's product
+model and stay owned on `SunkenInTime/native:weaver-main`.
 
-- The capacity option can stand alone because its default preserves upstream
-  behavior.
-- Desktop-widget windowing is the focused boundary for
-  [vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114).
-- The immediate-canvas/damage-aware presenter change can be reviewed without
-  the D3D11 shared-renderer protocol.
-- The D3D11 presenter and shared protocol form one coherent Windows renderer
-  boundary, although the protocol is the most Weaver-specific part and may
-  need an upstream-facing proposal before a pull request.
+The general Native SDK concern discovered during this work was the Windows
+static-TLS memory multiplier in
+[vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114).
+That concern was fixed upstream separately by Native SDK PR #117. Do not infer
+from the clean Weaver commit stack that the remaining product-specific changes
+should be proposed upstream.
 
 ## Verification
 
