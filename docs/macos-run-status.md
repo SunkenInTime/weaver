@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 14 pushed; PR 15 omitted by ADR; PR 16 next`
+- State: `CAPABILITY COMPLETE — PR 16/Native closure pushed; final CI running`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T08:07:00-07:00
+- Last updated: 2026-07-15T09:45:00-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -19,16 +19,16 @@ blocker and the next executable command.
 
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
-| Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/14-media-decision` | `68d7b99` | [#16](https://github.com/SunkenInTime/weaver/pull/16) | [#15](https://github.com/SunkenInTime/weaver/pull/15) |
+| Native SDK fork | `macos/06-composite-presenter-closure` | `9cb7cd98` | [#6](https://github.com/SunkenInTime/native/pull/6) | [#5](https://github.com/SunkenInTime/native/pull/5) |
+| Weaver | `macos/16-ci-regression-closure` | `359be90` plus final evidence ledger | [#17](https://github.com/SunkenInTime/weaver/pull/17) | [#16](https://github.com/SunkenInTime/weaver/pull/16) |
 
 ## Last reproducible capability
 
-- Capability: the macOS v0 media boundary is explicit and reproducible: public Now Playing APIs publish only the current application's session, the Apple Music controller is compiler-unavailable, private MediaRemote and incomplete per-player automation are rejected, and PR 15 is omitted
-- Checkout/pointer: `macos/14-media-decision` decision/spike head `4fe97f8`, restacked ledger `68d7b99`; Native SDK remains `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `spikes/macos-media-observation/build.sh`; `npm run build`; `npm run typecheck`; `npm test`; `python3 -m json.tool docs/macos-m11-data.json`; `git diff --check`
-- Visible result: no visible player claim is made; the deterministic publisher reads back its own title/state while a concurrent process reports no Now Playing dictionary, and the negative Music-controller source fails with the SDK's exact macOS-unavailable diagnostic
-- Machine-readable evidence: `docs/macos-m11-results.md`, `docs/macos-m11-data.json`, ADR 0015, probe JSON/compiler log, 22/22 root tests, and no production media dependency
+- Capability: permissioned physical closure now proves the retained Metal Clock reaches the real drawable with per-pixel transparency, remains visible through Show Desktop, and a real signed Core Audio tap drives the production Visualizer through audible, silent parked, and resumed states
+- Checkout/pointer: Weaver implementation `359be90` on `macos/16-ci-regression-closure`; Native SDK `9cb7cd98` on `macos/06-composite-presenter-closure`
+- Commands: direct `screencapture`; `NATIVE_SDK_SMOKE_BUDGET_MS=1000 zig build test-gpu-dashboard-smoke -Dwidget-profile=true`; `zig build test-example-macos-widget-windowing test-webview-system-link`; release audit; fresh recursive clone plus the complete README Quickstart/artifact loop
+- Visible result: 480 x 220 OS Clock capture has transparent corner RGBA `0,0,0,0`; the attached 9-second OS recording shows Show Desktop expose the correctly composited production Clock and restore the prior frontmost app
+- Machine-readable evidence: `docs/macos-m12-results.md`, `docs/macos-m12-data.json`, `docs/macos-m12-clock-os.png`, `docs/macos-m12-show-desktop.mov`, all four required CI jobs on the previous code head, and a clean-clone pass at `359be90`
 
 ## Gates
 
@@ -36,17 +36,17 @@ blocker and the next executable command.
 |---|---|---|
 | Build/toolchain | PASS | Zig 0.16.0 installed; M0 commands and exact runtime blockers recorded in `docs/macos-m0-results.md` |
 | Direct software Clock | PASS | Direct production launch plus correlated CG-window/log/automation evidence in `docs/macos-m2-results.md` |
-| AppKit window contract | UNVERIFIED | PR 02 implementation and automated/CG/focus gates pass; required OS recording blocked by ScreenCaptureKit TCC `-3801` (`The user declined TCCs for application, window, display capture`) |
-| Display/Spaces behavior | UNVERIFIED | All four anchors physically pass at Retina 2x and Mission Control/focus policy pass; only one display is attached, Stage Manager is disabled, Show Desktop automation is permission-blocked, sleep cannot be safely completed unattended, and OS capture fails with `could not create image from display` |
+| AppKit window contract | PASS | User-granted recording plus fresh Chronicle/direct OS capture exposed and closed the real presenter/alpha/desktop-level defects; exact drawable sample and transparent OS corner pass |
+| Display/Spaces behavior | UNVERIFIED | Primary Retina anchors, Mission Control trigger, focus policy, and Show Desktop pass; external displays, Stage Manager, other Spaces/fullscreen/lock, and sleep/wake remain unverified |
 | Network parity | PASS | Ephemeral NSURLSession transport plus 12/12 runtime suite; deterministic loopback TLS covers success, timeout, caps, redirect denial, malformed URL, certificate failure, and active-request cancellation; production probe returned 200 |
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
 | CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
 | macOS daemon / `weaver dev` | PASS | Weaver #12; `macos-host-smoke.mjs` proves init/dev/edit preserved-state hot swap/config restart/stop, concurrent mutations, provider UDS, host + Widget adverse kills, backoff/recovery/status, and zero process/socket/lock remnants |
 | CPU/memory providers | UNVERIFIED | Weaver #13 functional/fan-out/cost/zero-collection gates pass; required sleep/wake remains unsafe on the only unattended machine and is not inferred |
-| Audio decision/implementation | UNVERIFIED | ADR 0014 decision PASS; PR 13 production code, deterministic end-to-end Visualizers, denial/allow/revoke/device-loss state machine, one-capture fan-out, final-zero parking, injected cost, and teardown PASS. Real TCC grant, callback/mix/cost, physical routes, Bluetooth, and AirPlay remain unverified |
+| Audio decision/implementation | UNVERIFIED | Real integrated-output grant/callback/mix plus production Visualizer audible → silence → parked → resume PASS. Physical revoke, default-route loss/recovery, Bluetooth/AirPlay, protected streams, and sustained callback cost remain unverified |
 | Media decision/implementation | PASS | Weaver #16; ADR 0015 and M11 cross-process/header/compiler evidence decide that no public distributable system-wide provider exists at 14.2, mark macOS media unavailable, reject private MediaRemote/per-player Automation, and explicitly omit PR 15 |
-| Full CI/regression closure | pending | — |
+| Full CI/regression closure | PASS | Windows gate, Apple-silicon and Intel headless, and Apple-silicon AppKit session passed at `8a473bf`; clean-clone Quickstart passes at the final `359be90` implementation; final evidence-head rerun is tracked on PR #17 |
 
 Use `PASS`, `FAIL`, `BLOCKED`, `UNVERIFIED`, or `pending`. A blocked gate does
 not stop independent work.
@@ -78,7 +78,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - The final macOS floor is 14.2 because the selected public Core Audio process-tap function is available from 14.2. Weaver rejects ScreenCaptureKit and virtual-driver fallbacks rather than retain the provisional 13.0 floor.
 - `macos-15` (Apple silicon) and `macos-15-intel` are the initial CI runners; physical Intel behavior/performance remains unverified.
 - PR 01 carries no visible/runtime performance claim and therefore requires no computer-use capture.
-- PR 02 uses desktop-icon-minus-one as the provisional bottom level after measuring desktop/icon/normal/floating levels on the physical M2. PR 04 revalidates it under macOS desktop-management modes.
+- PR 02's desktop-icon-minus-one level was provisional while recording was unavailable. The permissioned final gate showed that boundary flattening transparent backing against white, so Native #6 uses wallpaper-plus-one: below Finder desktop items, above wallpaper, and correctly premultiplied.
 - An unbundled Widget process returns transient AppKit startup activation to the first visible regular application in the public front-to-back CG window list. The signed host gained stable agent-app metadata in PR 13; Widget app bundling remains outside this developer-build port rather than being misassigned to media PR 14.
 - PR 03 discovered that Weaver's software choice could not be reported honestly while the Native SDK hard-coded AppKit frames to Metal. Native SDK PR 02 is an explicit extra stacked dependency; it carries the requested backend/alpha contract and forces CPU pixel presentation for software surfaces.
 - Clock's once-per-second update makes its recorded CPU a 1 Hz steady-state baseline, not a static-idle claim. The 86 MB footprint misses the aspirational 15 MiB investigation target and remains an explicit PR 06–07 optimization input.
@@ -100,24 +100,23 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 ## Exact blockers
 
-- Computer-use recording is unavailable: Chronicle is not running and ScreenCaptureKit returned TCC error `-3801`. Independent layers continue; a permissioned rerun must attach PR 02's recording.
-- PR 04 physical topology coverage is hardware-limited to the integrated display. Scaled modes, secondaries on every side, and disconnect/reconnect require external display hardware; Stage Manager, Show Desktop, Space switching, and sleep/wake require a permissioned supervised run that may safely alter desktop state.
+- Physical topology coverage is hardware-limited to the integrated display. Scaled modes, secondaries on every side, and disconnect/reconnect require external display hardware; Stage Manager, Space switching, fullscreen/lock, and sleep/wake remain unexercised. Show Desktop now passes with an attached OS recording.
 - The optional Native SDK Chromium host cannot be linked locally because the CEF SDK layout is absent (`missing CEF dependency for -Dweb-engine=chromium`; install hint: `native cef install --dir ../../third_party/cef/macos`). The system-engine host and its ABI link pass.
 - Whole-SoC process/GPU power attribution is unavailable unattended: `powermetrics --show-process-energy` exits `powermetrics must be invoked as the superuser`. The run records the narrower public `proc_pid_rusage(RUSAGE_INFO_V6)` process counters.
 - Instruments Energy and Metal System Trace are blocked before launch: AMFI kills `xcrun xctrace` with exit 137 and records `dynamic: com.apple.dt.InstrumentsCLI disallowed with com.apple.private.tcc.allow entitlement` followed by `load code signature error 4 for file "xctrace"`. Xcode 16.0's on-disk signature verifies; the exact host failure is retained in `docs/macos-m6-results.md`.
-- Fresh System Audio Recording permission is unavailable unattended: the signed, usage-described spike remained blocked in `AudioDeviceCreateIOProcIDWithBlock` after six seconds, Chronicle was not running, and System Events automation also blocked. Real denial/revocation, audible mix, callback latency/cost, and physical route recovery remain `UNVERIFIED`; no Bluetooth or AirPlay route is attached, and no Developer ID identity is installed. Deterministic denial/revoke/device transitions pass but are not substituted for those physical gates.
+- System Audio Recording is granted and real integrated-output callback/mix plus production fan-out pass. Actual post-grant denial/revocation, physical route loss/recovery, protected-stream policy, Bluetooth/AirPlay, and sustained callback cost remain `UNVERIFIED`; no alternate route or Developer ID identity is installed.
 
 ## Cleanup state
 
 - Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, both injected Visualizer fixtures, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, loopback HTTPS server, every audio spike, both short-lived M11 media probe processes, and blocked System Events helper terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, PR 13 Visualizers/control/authorization markers, isolated CLI home/data/log trees, registry locks, install stages, owned versions, scoped audio TCC decision, and temporary audio taps/aggregates removed after recording evidence; ignored spike builds and raw renderer run reports remain only as reproducible local build products
-- Reversible System Settings restored: unchanged
-- Working trees/submodule clean: decision commit clean before this PR 14 ledger update; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-14 and Native SDK fork PRs 01-05 pushed; PR 13 Apple-silicon CI passed while gate/Intel remain pending, and PR 14 CI is running
+- Reversible System Settings restored: Show Desktop toggled back and T3 Code returned frontmost; System Settings is closed during final cleanup; user-granted TCC decisions are intentionally retained
+- Working trees/submodule clean: final evidence commit pending; Native SDK clean at `9cb7cd98`
+- Latest stack branches pushed: Weaver PRs 01-17 and Native SDK fork PRs 01-06 pushed; PR #17 CI reruns from the final pin/evidence head
 
 ## Next executable task
 
-1. Inspect PR 13 and PR 14 CI and correct actionable failures without weakening coverage.
-2. Omit PR 15 as required by ADR 0015; create `macos/16-ci-regression-closure` directly from PR 14.
-3. Add explicit unavailable media diagnostics, complete the required CI/regression/clean-clone matrix, audit the full stack, and leave the final reproducible cleanup handoff.
+1. Wait for the final PR #17 rerun and route any actionable failure without weakening coverage.
+2. Confirm zero Weaver/permission-helper processes and remove the isolated clean-clone/temp roots.
+3. Push the evidence ledger and hand off draft PR #17 plus Native PR #6 with only the explicitly listed hardware/distribution boundaries open.

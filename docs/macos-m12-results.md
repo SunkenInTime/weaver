@@ -2,8 +2,8 @@
 
 Recorded 2026-07-15 on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS
 26.5.1 (25F80), arm64, Zig 0.16.0, Node 23.11.0 locally, and Node 22 in CI.
-The implementation under test is Weaver commit `771042f` on
-`macos/16-ci-regression-closure`, pinned to Native SDK commit `359f5c9c`.
+The implementation under test is Weaver commit `359be90` on
+`macos/16-ci-regression-closure`, pinned to Native SDK commit `9cb7cd98`.
 Machine-readable gate state is in
 [`macos-m12-data.json`](macos-m12-data.json).
 
@@ -48,6 +48,14 @@ the existing provider as `available`.
 | Nonvisual singleton/crash replacement/cleanup | PASS | Both Mac architectures |
 | Real AppKit dev/provider/crash/teardown smoke | PASS | Apple-silicon session job |
 
+The exact `359be90` implementation commit also passed a fresh source-checkout
+Quickstart on this Mac: recursive clone at Native `9cb7cd98`, `npm ci`, both
+ReleaseFast builds, `init`, `check`, real Metal `dev`, Ctrl-C teardown,
+`pack`, `inspect`, `.weave` install, `uninstall Myclock`, `down`, and the
+release audit. No process remained. The earlier `8a473bf` CI run passed the
+Windows gate, both macOS headless architectures, and the Apple-silicon AppKit
+session; the final documentation/pin head repeats the same required workflow.
+
 The final local session required a current host rebuild after branch switching.
 The first attempt correctly timed out because an older PR13 binary did not
 contain `mediaAvailability`; `zig build` on the PR16 checkout replaced it and
@@ -59,6 +67,17 @@ it sampled the frame counter while live frames were still in flight. PR13 fix
 `2001014` now waits for the revoked state, then proves the counter remains
 stable for a later status interval. The unit gate still proves the loss path
 emits exactly one final zero.
+
+Permissioned screen capture then exposed a defect that automation's old
+`gpu_nonblank` assertion could not see: the retained Metal texture contained
+the Clock, but the AppKit presenter had never initialized its texture pipeline
+or sampler and therefore cleared the real drawable to near-white. Native PR #6
+now initializes the presenter before the compositor and requires the dashboard
+drawable sample to be `0xff171717`. A second physical issue was the provisional
+desktop-icon-minus-one level flattening transparent windows against white;
+wallpaper-plus-one retains the same below-Finder-items policy and composes the
+premultiplied Clock correctly. The standalone WebView example now links the
+same embedded metallib as generated applications.
 
 ## Required functional and reliability matrix
 
@@ -94,24 +113,30 @@ that miss is explicit and not relabeled as Windows `PrivateUsage` parity.
 
 | Gate | State | Exact boundary |
 |---|---|---|
-| Primary Retina placement / four anchors / Mission Control trigger | PASS | M1–M3 correlated AppKit/CG/log evidence |
-| Full OS screen recording | UNVERIFIED | ScreenCaptureKit TCC `-3801`; Chronicle unavailable |
+| Primary Retina placement / four anchors / Mission Control trigger | PASS | M1–M3 correlated AppKit/CG/log evidence; final Clock is 240 x 110 points / 480 x 220 pixels with transparent corner RGBA `0,0,0,0` |
+| Full OS screen recording | PASS | User-granted permission; fresh Chronicle frame plus direct 3420 x 2224 `screencapture` succeeded |
 | External displays on every side and reconnect | UNVERIFIED | Only the integrated display is attached |
-| Show Desktop, Stage Manager, Space switching, fullscreen, lock/unlock | UNVERIFIED | Automation permission/session changes unavailable; no visual result inferred |
+| Show Desktop | PASS | System Events key 103 exposed the production Metal Clock beneath Finder items and restored the prior frontmost app; attached OS recording |
+| Stage Manager, Space switching, fullscreen, lock/unlock | UNVERIFIED | Stage Manager is disabled and the remaining desktop/session transitions were not exercised |
 | Sleep/wake | UNVERIFIED | Unsafe to sleep the only unattended machine without a guaranteed wake path |
-| Real System Audio Recording consent/mix/revoke/routes | UNVERIFIED | Permission call blocks awaiting UI; deterministic production-seam injection is not relabeled as real capture |
+| Real System Audio Recording consent/mix | PASS | Signed spike captured 240,640 real 48 kHz mono frames; production authorization and Visualizer audible → silence → park → resume passed |
+| Real permission revoke/default-route loss/recovery | UNVERIFIED | The permission remained granted and only integrated output was attached |
 | Bluetooth / AirPlay | UNVERIFIED | No physical route is attached |
 | Physical Intel runtime/performance | UNVERIFIED | Intel CI is build/headless only |
 | Instruments / whole-SoC energy | UNVERIFIED | `xctrace` is AMFI-blocked; `powermetrics` requires privilege |
 | Developer ID, notarization, App Sandbox, universal installer/login item | OUT OF SCOPE | Initial distribution is the ad-hoc-signed source-checkout developer build |
 
-These boundaries prevent the stack from satisfying the brief's strongest
-physical definition of done on this unattended machine. The implementation,
-automated regression stack, and reproducible developer handoff are closed;
-the listed physical/distribution claims remain open rather than fabricated.
+![Production Metal Clock captured by macOS](macos-m12-clock-os.png)
+
+[Show Desktop OS recording](macos-m12-show-desktop.mov) demonstrates the real
+desktop transition, correctly composited transparent Clock, and restoration.
+
+The implementation, automated regression stack, real integrated-display/audio
+paths, and reproducible developer handoff are closed. Hardware- or
+session-dependent claims still listed as `UNVERIFIED`, plus the deliberately
+out-of-scope distribution work, remain open rather than inferred.
 
 Rollback is this Weaver PR: remove the explicit media diagnostic/idle path,
 release audit, split CI/session gates, and documentation while retaining the
 PR14 shipping decision and every earlier capability. There is no PR15. The
 top branch is the handoff entry point.
-

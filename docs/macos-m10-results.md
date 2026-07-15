@@ -68,21 +68,34 @@ parked result from 2.18% to 0.87% of one core. The active number includes both
 isolated runtime processes, two live Metal canvases, the host, injected sample
 generation, one FFT/AGC pipeline, serialization, UDS delivery, and rendering.
 
-## Physical gate and honest limitations
+## Permissioned physical rerun
 
-The public tap, format, aggregate, signing identity, and authorization call site
-were established in M9. Fresh real System Audio Recording consent is still
-`UNVERIFIED`: `AudioDeviceCreateIOProcIDWithBlock` blocks in HAL waiting for the
-permission interaction, while Chronicle is not running and System Events cannot
-control the dialog. This layer does not relabel injected audio as a successful
-TCC grant or real callback.
+The original M10 run reached the real authorization boundary but could not
+interact with the System Audio Recording prompt. After the user granted the
+permission, the final release-closure rerun at Weaver `359be90` and Native SDK
+`9cb7cd98` closed the real integrated-output path:
 
-Consequently audible system mix, protected-stream policy, real callback
-latency/cost, actual allow/deny/revoke transitions, physical default-route
-recovery, Bluetooth, and AirPlay remain `UNVERIFIED`. No Bluetooth or AirPlay
-route is attached. The cost table measures the complete production seam with
-deterministic injection, not Core Audio callback overhead. ScreenCaptureKit,
-virtual drivers, private APIs, and fake unavailable frames remain rejected.
+- the signed `com.sunkenintime.weaver.audio-tap-spike` process completed every
+  create/start/stop call with OSStatus zero and captured 240,640 real mono
+  frames at 48 kHz across 470 callbacks in five seconds;
+- playing known system audio produced mean RMS `0.0037366`, peak `0.09918`, a
+  first callback at 2459.87 ms, and detected signal 390.68 ms after playback;
+- `weaver audio authorize` exited zero for the production
+  `com.sunkenintime.weaver.host` identity;
+- a real production Visualizer reported one subscriber, one capture start,
+  `captureActive: true`, `availability: "live"`, Metal rendering, and provider
+  frames that changed from silent to non-silent when the system audio played;
+- the extended audible → silence → parked → resume run advanced to 60 frames,
+  parked at 94 with a stable counter for 2.5 seconds, then resumed to 120.
+
+That is real callback/mix and production fan-out evidence, not deterministic
+injection. The recorded M10 cost table remains the injected repeatable ledger;
+the short physical rerun does not replace it with an uncaptured cost claim.
+
+Actual TCC denial/revocation after the grant, protected-stream policy, physical
+default-route loss/recovery, Bluetooth, and AirPlay remain `UNVERIFIED`. Only
+the integrated output was attached. ScreenCaptureKit, virtual drivers, private
+APIs, and fake unavailable frames remain rejected.
 
 Rollback is this Weaver PR only: remove the macOS capture adapter/app bundle and
 CLI authorization mode while retaining ADR 0014's explicit unavailable behavior.

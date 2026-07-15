@@ -6,8 +6,10 @@ shared as source, remixed by anyone's agent.
 Weaver is a cross-platform desktop widget platform (think Rainmeter, rebuilt
 for 2026): widgets are single TypeScript components rendered by a native
 runtime — no browser, no webview. Each widget is its own crash-isolated
-process at **~13 MB of private memory and 0% idle CPU**, drawn with per-pixel
-transparency on the desktop layer.
+process, drawn with per-pixel transparency on the desktop layer. Current
+platform-specific cost measurements are published with the milestone results;
+the macOS retained renderer is roughly 100–110 MB for a quiet Widget and is not
+represented by the older Windows memory number.
 
 ```tsx
 import { useProvider, widget } from "@weaver/sdk";
@@ -150,9 +152,11 @@ disabling SIP, Gatekeeper, the firewall, or any global security control.
 The initial distribution is a source checkout and ad-hoc-signed developer host,
 not a notarized installer, login item, App Store product, or universal package.
 The remaining physical limits are explicit: external-display arrangements,
-Stage Manager/Show Desktop/Space and sleep/wake coverage, real System Audio
-Recording consent/mix/routes, Bluetooth/AirPlay, and Developer ID notarization
-are not inferred from automation. macOS media is unavailable by ADR 0015.
+Stage Manager/Space/fullscreen/lock and sleep/wake coverage, post-grant System
+Audio revocation and physical route recovery, Bluetooth/AirPlay, and Developer
+ID notarization are not inferred from automation. OS screen capture, Show
+Desktop, and integrated-output System Audio capture now have physical evidence.
+macOS media is unavailable by ADR 0015.
 See [`macos-m12-results.md`](docs/macos-m12-results.md) and the live
 [`macos-run-status.md`](docs/macos-run-status.md) for the exact gates and
 blockers.
