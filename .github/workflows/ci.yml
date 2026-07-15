@@ -114,6 +114,10 @@ jobs:
         working-directory: runtime
         run: zig build test
 
+      - name: Portable supervisor core
+        working-directory: host
+        run: zig build test-supervisor
+
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs
 
