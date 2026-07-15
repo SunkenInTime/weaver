@@ -11,10 +11,7 @@ pub const Client = implementation.Client;
 test "provider client is inert only without an endpoint" {
     const std = @import("std");
     var client: Client = .{};
-    try client.init(null);
+    try client.init(std.testing.io, null);
     defer client.deinit();
     try std.testing.expect(!client.available);
-    if (builtin.os.tag == .macos) {
-        try std.testing.expectError(error.UnsupportedHostEndpoint, client.init("/tmp/weaver-host.sock"));
-    }
 }

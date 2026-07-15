@@ -1,11 +1,16 @@
+const builtin = @import("builtin");
 const supervisor = @import("supervisor.zig");
-const windows_host = @import("windows_host.zig");
+const platform_host = switch (builtin.os.tag) {
+    .windows => @import("windows_host.zig"),
+    .macos => @import("macos_host.zig"),
+    else => @compileError("weaverd supports only Windows and macOS"),
+};
 
 pub fn main(init: @import("std").process.Init) void {
-    windows_host.main(init);
+    platform_host.main(init);
 }
 
 test {
     _ = supervisor;
-    _ = windows_host;
+    _ = platform_host;
 }

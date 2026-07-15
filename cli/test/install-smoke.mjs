@@ -109,12 +109,13 @@ try {
   assert.deepEqual(ownedEntries(), [], "owned widget root retains abandoned install content");
 
   if (process.platform === "darwin") {
-    for (const command of [["up"], ["down"], ["status"], ["dev", "clock"]]) {
-      assert.match(run(command, {}, 1).stderr, /unavailable on macOS until the native host lands in PR 10/);
-    }
+    const status = JSON.parse(run(["status", "--json"]).stdout);
+    assert.equal(typeof status.hostPid, "number");
+    assert.deepEqual(status.widgets, [], "uninstall acknowledgement left a Widget in host status");
+    assert.match(run(["up"]).stdout, /already running/);
   }
 } finally {
-  if (process.platform === "win32") spawnSync(process.execPath, [cli, "down"], { cwd: scratch, env: environment, stdio: "ignore" });
+  if (process.platform === "win32" || process.platform === "darwin") spawnSync(process.execPath, [cli, "down"], { cwd: scratch, env: environment, stdio: "ignore" });
   const resolvedScratch = resolve(scratch);
   const relation = relative(tempRoot, resolvedScratch);
   if (isAbsolute(relation) || relation === "" || relation === ".." || relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {

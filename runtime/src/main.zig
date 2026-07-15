@@ -71,6 +71,8 @@ var logged_present_path: bool = false;
 var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
 var requested_software_backend: bool = false;
 var diagnostic_runtime: ?*native_sdk.Runtime = null;
+var backend_status_io: ?std.Io = null;
+var backend_status_path: ?[]const u8 = null;
 
 fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
@@ -297,6 +299,7 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
     if (!logged_backend) {
         logged_backend = true;
         std.log.info("widget host surface backend={s}", .{@tagName(frame.backend)});
+        publishBackendStatus(frame.backend);
     } else if (frame.backend != last_backend) {
         if ((last_backend == .d3d11 or last_backend == .metal) and frame.backend == .software) {
             std.log.warn("widget renderer demoted {s} -> software", .{@tagName(last_backend)});
@@ -305,6 +308,7 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         } else {
             std.log.info("widget renderer backend changed {s} -> {s}", .{ @tagName(last_backend), @tagName(frame.backend) });
         }
+        publishBackendStatus(frame.backend);
     }
     last_backend = frame.backend;
     if (!logged_present_path) {
@@ -465,6 +469,10 @@ pub fn main(init: std.process.Init) !void {
     else
         false;
     const renderer_backend = declaredGpuBackend(loaded.manifest.renderBackend, force_software);
+    if (@import("builtin").os.tag == .macos) {
+        backend_status_io = init.io;
+        backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
+    }
     const local_app_data = init.environ_map.get("LOCALAPPDATA");
     const home = init.environ_map.get("HOME");
     const data_root = try platform.dataRoot(allocator, local_app_data, home);
@@ -523,7 +531,7 @@ pub fn main(init: std.process.Init) !void {
         .on_frame = onFrame,
     });
     defer app_state.destroy();
-    try app_state.model.provider.init(platform.providerEndpoint(
+    try app_state.model.provider.init(init.io, platform.providerEndpoint(
         init.environ_map.get("WEAVER_HOST_PIPE"),
         init.environ_map.get("WEAVER_HOST_ENDPOINT"),
     ));
@@ -555,6 +563,22 @@ pub fn main(init: std.process.Init) !void {
         .primary_display_anchor = if (@import("builtin").os.tag == .macos) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
         .js_window_api = false,
     }, init);
+}
+
+fn publishBackendStatus(backend: native_sdk.platform.GpuSurfaceBackend) void {
+    const io = backend_status_io orelse return;
+    const path = backend_status_path orelse return;
+    std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = backendStatusLabel(backend) }) catch |err| {
+        std.log.warn("widget could not publish renderer status: {s}", .{@errorName(err)});
+    };
+}
+
+fn backendStatusLabel(backend: native_sdk.platform.GpuSurfaceBackend) []const u8 {
+    return switch (backend) {
+        .metal, .d3d11 => "gpu",
+        .software => "software",
+        else => "-",
+    };
 }
 
 fn declaredGpuBackend(render_backend: []const u8, force_software: bool) native_sdk.app_manifest.GpuSurfaceBackend {
@@ -616,4 +640,10 @@ test {
         else => .none,
     };
     try std.testing.expectEqual(native_gpu_backend, declaredGpuBackend("gpu", false));
+}
+
+test "renderer backend status uses the portable public spelling" {
+    try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
+    try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
+    try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
 }

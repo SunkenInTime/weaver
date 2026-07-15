@@ -114,12 +114,17 @@ jobs:
         working-directory: runtime
         run: zig build test
 
-      - name: Portable supervisor core
+      - name: Build and test macOS host
         working-directory: host
-        run: zig build test-supervisor
+        run: |
+          zig build -Doptimize=ReleaseFast
+          zig build test -Doptimize=ReleaseFast
 
       - name: Cross-platform artifact lifecycle smoke
         run: node cli/test/install-smoke.mjs
+
+      - name: macOS daemon and dev lifecycle smoke
+        run: node cli/test/macos-host-smoke.mjs
 
       - name: Native SDK stock profile
         working-directory: runtime/native-sdk

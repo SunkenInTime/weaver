@@ -37,7 +37,7 @@ pub const Client = struct {
     count: usize = 0,
     available: bool = false,
 
-    pub fn init(self: *Client, pipe_name: ?[]const u8) !void {
+    pub fn init(self: *Client, _: std.Io, pipe_name: ?[]const u8) !void {
         const name = pipe_name orelse return;
         const name_w = try std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, name);
         defer std.heap.page_allocator.free(name_w);
