@@ -40,7 +40,8 @@ every install is a potential remix.
 The conjure and source-sharing loops work end to end: scaffold → agent edits
 the TSX → `weaver check` (agent-readable errors) → `weaver dev` → live widget,
 or `weaver pack` → portable source → `weaver install`. Windows only for now;
-macOS is next; see the honest milestone
+macOS follows the full [Lane D implementation plan](docs/macos-port-brief.md);
+see the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
 [`docs/m1-results.md`](docs/m1-results.md), plus the portable artifact evidence
 in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to

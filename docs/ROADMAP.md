@@ -25,8 +25,8 @@ the next trust-boundary work.
 5. **The manager + API breadth** — weaverd tray + widget-list/cost/permission
    surface (candidate: first Weaver app built with Weaver). Remote images,
    canvas gradients/paths, media control, network/battery providers.
-6. **macOS** — desktop-layer windowing semantics, MPNowPlaying/CoreAudio
-   provider shims, Mac CI. The platform seam pays rent.
+6. **[macOS](macos-port-brief.md)** — desktop-layer windowing semantics,
+   MPNowPlaying/CoreAudio provider shims, Mac CI. The platform seam pays rent.
 7. **Gallery** — hosted browse / one-click install / remix lineage /
    capability badges.
 8. **Packaging** — installer/winget bundle (weaverd, renderer, runtime, CLI,
