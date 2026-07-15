@@ -14,7 +14,8 @@ contract; it does not add a monitor selector or a macOS-only manifest field.
 
 This layer is published as stacked draft
 [Native SDK PR #3](https://github.com/SunkenInTime/native/pull/3) plus the
-matching Weaver PR. Physical placement on the attached Retina display passes.
+matching [Weaver PR #6](https://github.com/SunkenInTime/weaver/pull/6).
+Physical placement on the attached Retina display passes.
 The full multi-display and desktop-management gate remains **UNVERIFIED** where
 this machine lacks hardware, enabled modes, or capture permission.
 

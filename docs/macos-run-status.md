@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 04 Native SDK pushed; Weaver layer validated for publication`
+- State: `IN PROGRESS — PR 04 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T03:19:29-07:00
+- Last updated: 2026-07-15T03:22:07-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,7 +20,7 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/03-display-contract` | `f214d4d1` | [#3](https://github.com/SunkenInTime/native/pull/3) | [#2](https://github.com/SunkenInTime/native/pull/2) |
-| Weaver | `macos/04-display-anchoring` | pending | pending | [#5](https://github.com/SunkenInTime/weaver/pull/5) |
+| Weaver | `macos/04-display-anchoring` | `3715021` | [#6](https://github.com/SunkenInTime/weaver/pull/6) | [#5](https://github.com/SunkenInTime/weaver/pull/5) |
 
 ## Last reproducible capability
 
@@ -87,11 +87,10 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: PR 03's synthetic storage value, probe log, and oversized Clock backup removed after recording evidence
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: Native SDK clean at `f214d4d1`; Weaver PR 04 files are the current coherent publication set
-- Latest stack branches pushed: Weaver PRs 01-03 and Native SDK fork PRs 01-03 pushed
+- Working trees/submodule clean: clean after Weaver PR 04 implementation commit; Native SDK clean at `f214d4d1`
+- Latest stack branches pushed: Weaver PRs 01-04 and Native SDK fork PRs 01-03 pushed
 
 ## Next executable task
 
-1. Commit/push the Weaver PR 04 pointer, manifest mapping, results, and live handoff; open its draft PR on PR 03.
-2. Inspect PR 04 CI and correct actionable failures without weakening coverage.
-3. Start PR 05 deterministic macOS HTTPS transport behind the existing request/result contract.
+1. Inspect PR 04 CI and correct actionable failures without weakening coverage.
+2. Start PR 05 deterministic macOS HTTPS transport behind the existing request/result contract.
