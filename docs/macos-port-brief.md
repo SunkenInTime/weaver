@@ -20,15 +20,15 @@ platform strengths aggressively behind Weaver's internal seams when they make
 the product materially leaner. “It works on macOS” is not Lane D's success
 condition; it should feel like Weaver's architecture was meant for macOS.
 
-## Overnight autonomy contract
+## Unattended-run autonomy contract
 
-Lane D is designed to run unattended. During an overnight run there is no
+Lane D is designed to run unattended. During an unattended run there is no
 human operator, no clarification round trip, and no approval checkpoint. The
 agent must not ask a question or pause waiting for input. It makes the narrowest
 reasonable assumption consistent with this plan, records the assumption in the
 active result document, and continues.
 
-The overnight agent is authorized to:
+The unattended agent is authorized to:
 
 - create, commit, rebase/restack, and push the numbered macOS branches in both
   repositories;
@@ -64,17 +64,17 @@ Failure is a routing signal, not a reason to stop the run. The agent must:
    complete merely to keep the stack green.
 
 After every coherent PR layer, commit and push the branch so a crash does not
-lose the night's work. Maintain `docs/macos-overnight-status.md` as the live
+lose the run's work. Maintain `docs/macos-run-status.md` as the live
 handoff: current Weaver/fork commits, stack map, completed gates, active
 measurements, exact blockers, next executable task, and cleanup state. Before
 ending the run, restore reversible desktop settings where practical, terminate
 all test processes, remove ephemeral endpoints/registrations, push the latest
-branches, and make the top Weaver stack branch the reproducible morning entry
-point. Default branches need not be merged for the overnight run to succeed.
+branches, and make the top Weaver stack branch the reproducible handoff entry
+point. Default branches need not be merged for the unattended run to succeed.
 
 Do not stop merely because one PR is pushed, one gate is blocked, or the first
 visible fixture works. Continue while any safe executable task in this plan
-remains. The first minimum morning checkpoint is PR 03's directly launched,
+remains. The first minimum checkpoint is PR 03's directly launched,
 visibly verified software Clock; the useful product checkpoint is PR 10's full
 `weaver dev` loop. If an external blocker prevents either, spend the remaining
 run on independent stack layers, tests, performance harnesses, provider spikes,
@@ -116,7 +116,7 @@ unresolved. Never extend the frozen historical fork branches
 
 If a PR reveals that its parent abstraction is wrong, fix the lowest affected
 PR and restack the descendants. Do not conceal foundational corrections in a
-later PR. The overnight authority above explicitly permits the agent to push
+later PR. The unattended-run authority above explicitly permits the agent to push
 and maintain these draft PR stacks without human review.
 
 Every PR description in either stack must include:
@@ -163,7 +163,7 @@ after computer use has established the workload so automation overhead is not
 charged to Weaver.
 
 Computer use may approve and configure the ordinary reversible app permissions
-and macOS settings explicitly authorized by the overnight contract. It must not
+and macOS settings explicitly authorized by the unattended-run contract. It must not
 enter unknown credentials, sign in, install privileged system components, or
 weaken global security policy. If a required operation is unavailable, mark
 that gate `UNVERIFIED` with the exact blocker and continue the run; never infer
@@ -382,7 +382,7 @@ casual implementation detail and requires a loud product decision.
 ## The stacked implementation PRs
 
 The sequence below is mandatory unless a newly discovered dependency is
-documented in the live overnight status and requires the agent to restack the
+documented in the live run status and requires the agent to restack the
 order. A PR may be split into smaller stacked PRs; adjacent PRs must not be
 collapsed if that destroys an independently reviewable gate.
 
@@ -648,7 +648,7 @@ Implement the ADR-selected host-owned media adapter behind the existing provider
 shape. Preserve change-pushed metadata, the playing-position cadence, artwork
 bounds, command errors, and subscription-driven lifetime. Do not leak player
 bundle IDs or platform-only state into the SDK; cross-platform public contract
-changes are outside Lane D and must not be invented during the overnight run.
+changes are outside Lane D and must not be invented during the unattended run.
 
 **Gate:** Now Playing widget across the supported first-party and third-party
 players; play/pause/seek if selected by the ADR; player handoff, no active player,
@@ -743,9 +743,9 @@ Lane D is complete only when:
    silently treated as shippable.
 7. The two draft PR stacks are pushed and reproducible from their top branches;
    the top Weaver branch pins the top Native SDK fork commit, every automated
-   gate available overnight is green, and the working trees/submodule are clean.
+   gate available during the run is green, and the working trees/submodule are clean.
 8. The renderer ADR proves the selected macOS architecture against software,
    in-process Metal, hybrid, and shared candidates; the implementation meets
    its whole-application cost ledger without changing Widget API behavior.
-9. `docs/macos-overnight-status.md` gives a complete morning handoff with no
+9. `docs/macos-run-status.md` gives a complete handoff with no
    unanswered question required to resume, test, or inspect the result.

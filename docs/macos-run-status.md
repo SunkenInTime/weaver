@@ -1,9 +1,9 @@
-# macOS overnight status
+# macOS unattended run status
 
-Live handoff for the unattended Lane D implementation. The overnight agent
-updates this document after every coherent stacked-PR layer and before ending
-the run. Do not leave a question for a human; record the chosen assumption or
-exact blocker and the next executable command.
+Live handoff for an unattended Lane D implementation run. The agent updates
+this document after every coherent stacked-PR layer and before ending the run.
+Do not leave a question for a human; record the chosen assumption or exact
+blocker and the next executable command.
 
 ## Run identity
 
