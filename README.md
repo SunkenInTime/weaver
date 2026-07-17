@@ -37,13 +37,14 @@ every install is a potential remix.
 
 ## Status: v0 (pre-alpha), Windows + macOS port in progress
 
-The conjure and source-sharing loops work end to end on Windows: scaffold →
-agent edits the TSX → `weaver check` (agent-readable errors) → `weaver dev` →
-live widget. The portable `init` / `check` / `bundle` / `pack` / `inspect` /
-`install` / `uninstall` / `logs` lifecycle works on Windows and macOS with the
-same `.weave` bytes and install-owned source boundary. The macOS supervisor and
-`weaver dev` remain deliberately unavailable until their native host lands in
-PR 10 of the [Lane D implementation plan](docs/macos-port-brief.md). See the honest milestone
+The conjure and source-sharing loops work end to end on Windows and macOS:
+scaffold → agent edits the TSX → `weaver check` (agent-readable errors) →
+`weaver dev` → live widget. The portable `init` / `check` / `bundle` / `pack` /
+`inspect` / `install` / `uninstall` / `logs` lifecycle uses the same `.weave`
+bytes and install-owned source boundary on both platforms. macOS now has its
+native supervisor, acknowledged lifecycle, crash/backoff recovery, process
+cost status, and state-preserving dev hot swap from PR 10 of the
+[Lane D implementation plan](docs/macos-port-brief.md). See the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
 [`docs/m1-results.md`](docs/m1-results.md), plus the portable artifact evidence
 in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
@@ -68,8 +69,9 @@ node cli\bin\weaver.js install myclock.weave
 ```
 
 On macOS, build the runtime with `cd runtime && zig build
--Doptimize=ReleaseFast`, use `node cli/bin/weaver.js`, and use the artifact
-commands above. `up`, `down`, `status`, and `dev` become available with PR 10.
+-Doptimize=ReleaseFast`, build the host with `cd host && zig build
+-Doptimize=ReleaseFast`, and use `node cli/bin/weaver.js`. `up`, `down`,
+`status`, `dev`, and all artifact commands above are available.
 
 Or do it the intended way: point your coding agent at
 [`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it

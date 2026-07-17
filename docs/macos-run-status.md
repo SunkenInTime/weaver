@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 09 pushed; CI pending`
+- State: `IN PROGRESS — PR 10 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T05:39:26-07:00
+- Last updated: 2026-07-15T06:18:30-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/09-portable-supervisor` | `d1f4a47` | [#11](https://github.com/SunkenInTime/weaver/pull/11) | [#10](https://github.com/SunkenInTime/weaver/pull/10) |
+| Weaver | `macos/10-macos-daemon` | `aa9ce6c` | [#12](https://github.com/SunkenInTime/weaver/pull/12) | [#11](https://github.com/SunkenInTime/weaver/pull/11) |
 
 ## Last reproducible capability
 
-- Capability: platform-neutral supervisor state machine with all Win32 control, process, pipe, termination, and counter mechanics isolated in one Windows adapter
-- Checkout/pointer: `macos/09-portable-supervisor`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `cd host && zig build test-supervisor` and `zig build test`
-- Visible result: registry reconciliation, source/replacement decisions, desired state, subscriptions, renderer demand, crash/backoff, and status serialization run without importing any Windows type; Windows behavior remains behind `windows_host.zig`
-- Machine-readable evidence: six portable host tests pass on the physical arm64 Mac, including fake-adapter reconciliation, state/backoff/renderer policy, and exact public status spelling; three-architecture CI is running
+- Capability: native macOS daemon and complete acknowledged CLI/dev lifecycle on the portable supervisor
+- Checkout/pointer: `macos/10-macos-daemon` at `aa9ce6c`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `cd host && zig build test && zig build -Doptimize=ReleaseFast`; `cd runtime && zig build test && zig build -Doptimize=ReleaseFast`; `node cli/test/install-smoke.mjs`; `node cli/test/macos-host-smoke.mjs`
+- Visible result: `weaver dev` kept PID 20747 through a preserved-state bundle hot swap, restarted it as PID 28062 only after the size/window contract changed, then removed the registration and stopped without remnants
+- Machine-readable evidence: actual Metal status and process CPU/footprint/thread metrics; acknowledged concurrent install/uninstall; bounded UDS provider transport; host/Widget SIGKILL recovery with observable backoff; all local gates pass and three-architecture CI is running
 
 ## Gates
 
@@ -42,7 +42,7 @@ blocker and the next executable command.
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
 | CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
-| macOS daemon / `weaver dev` | pending | — |
+| macOS daemon / `weaver dev` | PASS | Weaver #12; `macos-host-smoke.mjs` proves init/dev/edit preserved-state hot swap/config restart/stop, concurrent mutations, provider UDS, host + Widget adverse kills, backoff/recovery/status, and zero process/socket/lock remnants |
 | CPU/memory providers | pending | — |
 | Audio decision/implementation | pending | — |
 | Media decision/implementation | pending | — |
@@ -85,10 +85,11 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - The first-pixel readback and deterministic Metal fault injector are compiled only into automation builds. Backdrop blur's reused target readback is the sole intentional production GPU readback.
 - macOS install/uninstall mutate the same atomic registry and immutable owned-source tree without starting a nonexistent host. Windows keeps its acknowledged host start/reload/rollback behavior; PR 10 connects the macOS host to that already-portable mutation boundary.
 - PR 09 keeps platform process state as an opaque generic field owned by the adapter-facing slot type. The supervisor can decide what must happen but cannot create, signal, sample, or terminate a process or IPC endpoint.
+- PR 10 uses one acknowledged control UDS and one cryptographically unguessable UDS per provider-subscribed Widget under a mode-0700 per-user root. Long default `TMPDIR` paths fall back to `/tmp` before they can exceed `sun_path`.
+- Because macOS has no public kill-on-close Job equivalent, a replacement host kills an orphan only when both its private marker and live `proc_pidpath` match the exact runtime executable. ADR 0013 records the rejected polling/unvalidated-kill alternatives.
 
 ## Exact blockers
 
-- `weaverd` remains a Windows-only build graph until PRs 09-10. ADR 0012 rejects a macOS shared renderer service, so the daemon port no longer waits on a renderer-architecture decision. The macOS CLI reports `up`, `down`, `status`, and `dev` as explicitly unavailable until PR 10.
 - Computer-use recording is unavailable: Chronicle is not running and ScreenCaptureKit returned TCC error `-3801`. Independent layers continue; a permissioned rerun must attach PR 02's recording.
 - PR 04 physical topology coverage is hardware-limited to the integrated display. Scaled modes, secondaries on every side, and disconnect/reconnect require external display hardware; Stage Manager, Show Desktop, Space switching, and sleep/wake require a permissioned supervised run that may safely alter desktop state.
 - The optional Native SDK Chromium host cannot be linked locally because the CEF SDK layout is absent (`missing CEF dependency for -Dweb-engine=chromium`; install hint: `native cef install --dir ../../third_party/cef/macos`). The system-engine host and its ABI link pass.
@@ -97,15 +98,15 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, StorageProbe, NetworkProbe, and loopback HTTPS server terminated; no Accessibility warning helper remains
-- Ephemeral sockets/endpoints: none created
-- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, isolated CLI home/data/log trees, registry locks, install stages, and owned Clock versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
+- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, System Monitor, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, and loopback HTTPS server terminated; no Accessibility warning helper remains
+- Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
+- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, isolated CLI home/data/log trees, registry locks, install stages, and owned versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after Weaver PR 09 implementation commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-09 and Native SDK fork PRs 01-05 pushed
+- Working trees/submodule clean: clean after Weaver PR 10 implementation commit; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-10 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 08-09 CI and correct actionable failures without weakening coverage.
-2. Create Weaver `macos/10-macos-daemon` from `macos/09-portable-supervisor`.
-3. Implement the macOS singleton/control channel, acknowledged reload, Unix provider endpoints, spawn/environment, graceful/forced stop, crash observation, stale cleanup, process metrics, and the complete CLI `up`/`down`/`status`/`dev` lifecycle on the extracted core.
+1. Inspect Weaver PR 10 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/11-cpu-memory-providers` from `macos/10-macos-daemon`.
+3. Implement subscription-driven host-owned CPU/memory collection and existing provider JSON shapes, then prove System parity, fan-out, zero unsubscribed collection, rapid subscription changes, and measured host idle cost.

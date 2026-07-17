@@ -751,7 +751,7 @@ function assertHostBuilt(): void {
 }
 
 function hostLifecycleAvailable(): boolean {
-  return process.platform === "win32";
+  return process.platform === "win32" || process.platform === "darwin";
 }
 
 function assertHostLifecycleAvailable(command: string): void {
