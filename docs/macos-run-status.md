@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 06 pushed; CI pending`
+- State: `IN PROGRESS — PR 07 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T04:19:28-07:00
+- Last updated: 2026-07-15T05:19:48-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -19,16 +19,16 @@ blocker and the next executable command.
 
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
-| Native SDK fork | `macos/04-renderer-bakeoff` | `18e9498c` | [#4](https://github.com/SunkenInTime/native/pull/4) | [#3](https://github.com/SunkenInTime/native/pull/3) |
-| Weaver | `macos/06-renderer-bakeoff` | `8b220fc` | [#8](https://github.com/SunkenInTime/weaver/pull/8) | [#7](https://github.com/SunkenInTime/weaver/pull/7) |
+| Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
+| Weaver | `macos/07-production-renderer` | `2d871d5` | [#9](https://github.com/SunkenInTime/weaver/pull/9) | [#8](https://github.com/SunkenInTime/weaver/pull/8) |
 
 ## Last reproducible capability
 
-- Capability: measured whole-process macOS renderer decision with production packet/frame attribution and pixel/API/input parity
-- Checkout/pointer: `macos/06-renderer-bakeoff`; Native SDK `18e9498c` (`macos/04-renderer-bakeoff`)
-- Commands: see `docs/macos-m5-results.md` and `scripts/macos-renderer-bakeoff.py`
-- Visible result: real Clock, Pomodoro/parity, and 60 Hz synthetic Widgets ran through software, retained Metal-hybrid, and retained Metal-composite candidates and terminated cleanly
-- Machine-readable evidence: 1/3/10 whole-process CPU, footprint, VM-region, wakeup/energy, thread/descriptor, frame-stage, precompiled-metallib, resource-lifetime, pixel-delta, API/input, and teardown results in `docs/macos-m5-data.json`
+- Capability: production in-process retained Metal renderer with embedded shaders, bounded reusable resources, same-frame software fallback, and bounded automatic recovery
+- Checkout/pointer: `macos/07-production-renderer`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: see `docs/macos-m6-results.md` and `scripts/macos-renderer-bakeoff.py`
+- Visible result: Clock, retained-parity, and 60 Hz synthetic Widgets use retained Metal composite by default; static clean surfaces park, covered surfaces stop acquiring drawables, and injected Metal failures recover without restart
+- Machine-readable evidence: production 1/3/10 cost, 10-minute active/static stability, startup stages, backend transitions, parity, lifecycle, descriptors, and teardown results in `docs/macos-m6-data.json`
 
 ## Gates
 
@@ -40,7 +40,7 @@ blocker and the next executable command.
 | Display/Spaces behavior | UNVERIFIED | All four anchors physically pass at Retina 2x and Mission Control/focus policy pass; only one display is attached, Stage Manager is disabled, Show Desktop automation is permission-blocked, sleep cannot be safely completed unattended, and OS capture fails with `could not create image from display` |
 | Network parity | PASS | Ephemeral NSURLSession transport plus 12/12 runtime suite; deterministic loopback TLS covers success, timeout, caps, redirect denial, malformed URL, certificate failure, and active-request cancellation; production probe returned 200 |
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
-| Production renderer | pending | — |
+| Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
 | CLI/artifact lifecycle | pending | — |
 | macOS daemon / `weaver dev` | pending | — |
 | CPU/memory providers | pending | — |
@@ -64,6 +64,8 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 | 10 Clocks, steady-state 1 Hz | software / Metal hybrid / Metal composite; ten isolated processes | 6.71% / 2.74% / 2.73% | 930.866 / 944.154 / 989.505 MB physical | 577.14 / 573.56 / 567.73 interrupt wakeups/s; 71.554 / 23.221 / 29.109 process mJ/s on independent runs | 1 Hz updates; no static-zero-update claim | `docs/macos-m5-results.md`, `docs/macos-m5-data.json` |
 | Synthetic, sustained 60 Hz | software / Metal hybrid / Metal composite; one process | 98.99% / 34.74% / 23.91% | 108.086 / 120.489 / 123.045 MB physical | 124.78 / 110.58 / 83.28 wakeups/s; 4965.233 / 184.508 / 144.453 process mJ/s | composite frame interval p50 16.660 ms, p90 17.667 ms | `docs/macos-m5-results.md`, `docs/macos-m5-data.json` |
 | Synthetic, sustained 60 Hz | software / Metal hybrid / Metal composite; three processes | 302.85% / 73.98% / 61.11% | 324.373 / 361.139 / 378.899 MB physical | 331.47 / 325.95 / 334.08 wakeups/s; 15051.751 / 712.669 / 506.738 process mJ/s | same production workload in every candidate | `docs/macos-m5-results.md`, `docs/macos-m5-data.json` |
+| Synthetic, sustained 60 Hz | production Metal composite; one process, 10 minutes | 23.61% mean | 123.782 MB final; 127.567 MB peak; 6–8 threads; 34 FDs | 87.22 wakeups/s; 158.794 process mJ/s | p50/p90/p99 16.666/16.704/18.270 ms; 4 of 36,410 intervals over 25 ms; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
+| Retained parity, zero updates | production Metal composite; one process, 10 minutes | 0.006% mean | 110.265 MB final; 118.211 MB peak; 5–7 threads; 34 FDs | 1.11 wakeups/s; 0.019 process mJ/s | three startup/reveal frames, then fully parked; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
 
 ## Assumptions made autonomously
 
@@ -78,8 +80,9 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Weaver's macOS Widget path uses the AppKit system engine. The optional Chromium host rejects primary-display anchors explicitly until it implements the same contract; the missing local CEF SDK is recorded rather than bypassed.
 - macOS HTTPS uses ephemeral NSURLSession and default system trust. It returns all redirects as their original 3xx (matching WinHTTP's stricter policy), caps total request and response bytes at 5 MiB each, and compiles its generated-certificate trust hook only into tests.
 - “Metal composite” means binary retained packets, Core Graphics rasterization for commands that are not native quads, and Metal quad composition/presentation; it is not mislabeled as a fully Metal-native vector renderer.
-- Every healthy macOS Widget will use the in-process Metal-composite architecture selected by ADR 0012. Software remains the bounded pixel reference and live fallback, backend choice is not workload-adaptive, and no renderer/window service is added. PR 07 owns the production switch and recovery policy.
+- Every healthy macOS Widget now uses the in-process Metal-composite architecture selected by ADR 0012. Software remains the bounded pixel reference and live fallback, backend choice is not workload-adaptive, and no renderer/window service is added. Production probes recovery after 1, 5, then 30 seconds.
 - PR 06's real-Widget mixed workload uses Clock, idle Pomodoro, and the retained/canvas parity Widget. System and Visualizer are not replaced with synthetic provider data before their honest endpoints arrive in PRs 10-13.
+- The first-pixel readback and deterministic Metal fault injector are compiled only into automation builds. Backdrop blur's reused target readback is the sole intentional production GPU readback.
 
 ## Exact blockers
 
@@ -87,19 +90,20 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Computer-use recording is unavailable: Chronicle is not running and ScreenCaptureKit returned TCC error `-3801`. Independent layers continue; a permissioned rerun must attach PR 02's recording.
 - PR 04 physical topology coverage is hardware-limited to the integrated display. Scaled modes, secondaries on every side, and disconnect/reconnect require external display hardware; Stage Manager, Show Desktop, Space switching, and sleep/wake require a permissioned supervised run that may safely alter desktop state.
 - The optional Native SDK Chromium host cannot be linked locally because the CEF SDK layout is absent (`missing CEF dependency for -Dweb-engine=chromium`; install hint: `native cef install --dir ../../third_party/cef/macos`). The system-engine host and its ABI link pass.
-- Whole-SoC process/GPU power attribution is unavailable unattended: `powermetrics --show-process-energy` exits `powermetrics must be invoked as the superuser`. PR 06 records the narrower public `proc_pid_rusage(RUSAGE_INFO_V6)` process counters; PR 07 still requires permissioned Instruments Energy and Metal System Trace captures.
+- Whole-SoC process/GPU power attribution is unavailable unattended: `powermetrics --show-process-energy` exits `powermetrics must be invoked as the superuser`. The run records the narrower public `proc_pid_rusage(RUSAGE_INFO_V6)` process counters.
+- Instruments Energy and Metal System Trace are blocked before launch: AMFI kills `xcrun xctrace` with exit 137 and records `dynamic: com.apple.dt.InstrumentsCLI disallowed with com.apple.private.tcc.allow entitlement` followed by `load code signature error 4 for file "xctrace"`. Xcode 16.0's on-disk signature verifies; the exact host failure is retained in `docs/macos-m6-results.md`.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff Widgets, Clock, StorageProbe, NetworkProbe, and loopback HTTPS server terminated; no Accessibility warning helper remains
+- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, StorageProbe, NetworkProbe, and loopback HTTPS server terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, and temporary NetworkProbe bundle removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after Weaver PR 06 implementation commit; Native SDK clean at `18e9498c`
-- Latest stack branches pushed: Weaver PRs 01-06 and Native SDK fork PRs 01-04 pushed
+- Working trees/submodule clean: clean after Weaver PR 07 implementation commit; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-07 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 06 and Native SDK PR 04 CI and correct actionable failures without weakening coverage.
-2. Create Native `macos/05-production-renderer` from `macos/04-renderer-bakeoff` and Weaver `macos/07-production-renderer` from `macos/06-renderer-bakeoff`.
-3. Implement ADR 0012 completely: precompiled metallib, process-lifetime immutable cache, bounded upload/scratch reuse, static/occlusion parking, software demotion/recovery, and status/cost attribution; then execute PR 07's long-duration and physical gates.
+1. Inspect Weaver PR 07 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/08-cli-artifacts` from `macos/07-production-renderer`.
+3. Make executable discovery, macOS data/log paths, `.weave` inspection, pack/install/uninstall, locking/replacement/rollback, and install smoke platform-aware while keeping host-dependent commands explicitly unavailable until PR 10.

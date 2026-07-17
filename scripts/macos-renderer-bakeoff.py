@@ -75,6 +75,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frame-trace", action="store_true")
     parser.add_argument("--stage-trace", action="store_true")
+    parser.add_argument("--automation-metal-failures", type=int, default=0)
     return parser.parse_args()
 
 
@@ -211,6 +212,10 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     candidate = CANDIDATES[args.candidate]
+    if args.automation_metal_failures < 0:
+        raise RuntimeError("--automation-metal-failures must be non-negative")
+    if args.automation_metal_failures and args.candidate != "metal-composite":
+        raise RuntimeError("automation Metal failures require the metal-composite candidate")
     processes: list[subprocess.Popen[bytes]] = []
     streams: list[Any] = []
     manifests = []
@@ -226,10 +231,14 @@ def main() -> int:
             streams.append(stream)
             env = os.environ.copy()
             env["HOME"] = str(home)
+            if args.candidate == "software":
+                env["WEAVER_FORCE_SOFTWARE"] = "1"
+            else:
+                env.pop("WEAVER_FORCE_SOFTWARE", None)
             if candidate["composite"]:
                 env["NATIVE_SDK_GPU_COMPOSITE"] = "1"
             else:
-                env.pop("NATIVE_SDK_GPU_COMPOSITE", None)
+                env["NATIVE_SDK_GPU_COMPOSITE"] = "0"
             if args.frame_trace:
                 env["NATIVE_SDK_GPU_FRAME_TRACE"] = "1"
             else:
@@ -238,6 +247,10 @@ def main() -> int:
                 env["NATIVE_SDK_RENDERER_BAKEOFF_TRACE"] = "1"
             else:
                 env.pop("NATIVE_SDK_RENDERER_BAKEOFF_TRACE", None)
+            if args.automation_metal_failures:
+                env["NATIVE_SDK_AUTOMATION_METAL_FAILURES"] = str(args.automation_metal_failures)
+            else:
+                env.pop("NATIVE_SDK_AUTOMATION_METAL_FAILURES", None)
             processes.append(subprocess.Popen([str(runtime), str(instance)],
                                               cwd=run_root, env=env,
                                               stdout=stream, stderr=subprocess.STDOUT))
@@ -282,6 +295,18 @@ def main() -> int:
                 exit_codes.append(process.wait())
         teardown_ns = time.monotonic_ns() - stop_begin
 
+        backend_transitions = []
+        for index in range(args.count):
+            process_log = run_root / f"process-{index + 1:02d}.log"
+            for line in process_log.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "native-sdk: renderer backend=" in line:
+                    backend_transitions.append({"process": index + 1, "line": line})
+        if args.automation_metal_failures:
+            transition_text = "\n".join(item["line"] for item in backend_transitions)
+            for expected in ("backend=software", "reason=recovery-probe", "reason=packet-success"):
+                if expected not in transition_text:
+                    raise RuntimeError(f"renderer recovery did not report {expected}: {transition_text}")
+
         result = {
             "schema": 1,
             "candidate": args.candidate,
@@ -306,6 +331,7 @@ def main() -> int:
                                             for report in process_reports),
             "teardown_ns": teardown_ns,
             "exit_codes": exit_codes,
+            "backend_transitions": backend_transitions,
             "raw_report_directory": str(run_root),
         }
         output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

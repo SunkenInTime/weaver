@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "recorded": "2026-07-15",
+  "hardware": "MacBook Air, Apple M2, 8 cores, 8 GB",
+  "os": "macOS 26.5.1 (25F80), arm64",
+  "zig": "0.16.0",
+  "runtime_optimization": "ReleaseFast",
+  "architecture": {
+    "default": "in-process retained Metal composite",
+    "fallback": "damage-aware software",
+    "adaptive": false,
+    "shared_service": false,
+    "production_runtime_shader_compilation": false,
+    "process_immutable_resources": [
+      "MTLDevice",
+      "MTLCommandQueue",
+      "MTLLibrary",
+      "presenter pipeline",
+      "composite blend pipeline",
+      "composite copy pipeline",
+      "sampler",
+      "flat texture"
+    ],
+    "scratch_texture_limit_bytes": 33554432,
+    "scratch_texture_limit_count": 16
+  },
+  "short_runs": [
+    { "workload": "clock-1hz", "backend": "metal-composite", "count": 1, "cpu_percent_one_core": 0.18, "phys_footprint_bytes": 100156328, "threads": 6.8, "file_descriptors": 34, "teardown_ns": 11172375 },
+    { "workload": "clock-1hz", "backend": "metal-composite", "count": 3, "cpu_percent_one_core": 0.96, "phys_footprint_bytes": 302222120, "threads": 23.2, "file_descriptors": 102, "teardown_ns": 21492750 },
+    { "workload": "clock-1hz", "backend": "metal-composite", "count": 10, "cpu_percent_one_core": 3.24, "phys_footprint_bytes": 990537064, "threads": 90.2, "file_descriptors": 340, "teardown_ns": 70785958 },
+    { "workload": "clock-1hz", "backend": "software", "count": 1, "cpu_percent_one_core": 0.52, "phys_footprint_bytes": 94765992, "threads": 6.6, "file_descriptors": 34, "teardown_ns": 10533458 },
+    { "workload": "clock-1hz", "backend": "software", "count": 3, "cpu_percent_one_core": 1.18, "phys_footprint_bytes": 284691192, "threads": 21.2, "file_descriptors": 102, "teardown_ns": 37298417 },
+    { "workload": "clock-1hz", "backend": "software", "count": 10, "cpu_percent_one_core": 3.44, "phys_footprint_bytes": 934077680, "threads": 90.2, "file_descriptors": 340, "teardown_ns": 62285792 },
+    { "workload": "mixed-clock-pomodoro-parity", "backend": "metal-composite", "count": 3, "cpu_percent_one_core": 1.0, "phys_footprint_bytes": 315919144, "threads": 21.2, "file_descriptors": 102, "teardown_ns": 33309166 },
+    { "workload": "mixed-clock-pomodoro-parity", "backend": "software", "count": 3, "cpu_percent_one_core": 1.12, "phys_footprint_bytes": 292653888, "threads": 20.8, "file_descriptors": 102, "teardown_ns": 32502625 },
+    { "workload": "synthetic-60hz", "backend": "metal-composite", "count": 1, "cpu_percent_one_core": 21.3, "phys_footprint_bytes": 123913176, "threads": 8.6, "file_descriptors": 34, "teardown_ns": 10621083 },
+    { "workload": "synthetic-60hz", "backend": "metal-composite", "count": 3, "cpu_percent_one_core": 66.84, "phys_footprint_bytes": 376163184, "threads": 23.0, "file_descriptors": 102, "teardown_ns": 34477125 },
+    { "workload": "synthetic-60hz", "backend": "software", "count": 1, "cpu_percent_one_core": 99.76, "phys_footprint_bytes": 107905936, "threads": 8.0, "file_descriptors": 34, "teardown_ns": 22700709 },
+    { "workload": "synthetic-60hz", "backend": "software", "count": 3, "cpu_percent_one_core": 303.18, "phys_footprint_bytes": 323898104, "threads": 23.0, "file_descriptors": 102, "teardown_ns": 41773542 }
+  ],
+  "startup": {
+    "runner_to_first_present_ns": [69031000, 80226000],
+    "resource_init_us": [596, 686],
+    "embedded_metallib_and_three_pipelines_us": [860, 786],
+    "first_binary_decode_us": [29, 29],
+    "first_retained_plan_us": [13, 12],
+    "first_composite_encode_us": [420, 387],
+    "first_drawable_wait_us": [818, 766],
+    "first_presenter_encode_us": [141, 36],
+    "first_gpu_completion_us": [651, 219]
+  },
+  "recovery": {
+    "automation_refused_composite_attempts": 2,
+    "transitions": [
+      "software reason=packet-fallback retry_ms=1000 failures=1",
+      "metal-composite reason=recovery-probe failures=1",
+      "metal-composite reason=packet-success recoveries=1"
+    ],
+    "exit_code": 0,
+    "phys_footprint_bytes": 121357272,
+    "file_descriptors": 34,
+    "teardown_ns": 10638625
+  },
+  "covered_reveal": {
+    "workload": "synthetic-60hz",
+    "cover": "opaque normal-level AppKit window",
+    "occluded_logical_frame_count": 13,
+    "occluded_cadence": "approximately 1 Hz",
+    "drawable_acquisition_while_occluded": false,
+    "reveal_result": "immediate Metal present and display cadence",
+    "backend_transition_count": 0,
+    "exit_code": 0
+  },
+  "repeated_launch_close": {
+    "runs": 20,
+    "exit_codes": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "phys_footprint_bytes": { "min": 95962024, "mean": 96540376.8, "max": 100762560 },
+    "file_descriptors": [34],
+    "teardown_ns": { "min": 8847541, "mean": 10556162.45, "max": 12126875 },
+    "backend_transition_count": 0,
+    "remaining_process_count": 0
+  },
+  "long_runs": {
+    "active_60hz": {
+      "sample_count": 600,
+      "sample_window_ns": 603377177083,
+      "cpu_percent_one_core": { "mean": 23.608833333333333, "min": 13.7, "max": 28.5 },
+      "rss_bytes": {
+        "min": 84983808,
+        "max": 174407680,
+        "first_60_mean": 172686814,
+        "last_60_mean": 86342042
+      },
+      "phys_footprint_bytes": 123782080,
+      "phys_footprint_peak_bytes": 127566784,
+      "file_descriptors": 34,
+      "thread_count": { "mean": 7.16, "min": 6, "max": 8 },
+      "interrupt_wakeups_per_second": 87.22073356241759,
+      "process_energy_mj_per_second": 158.793588660746,
+      "frame_events": 36410,
+      "frame_event_span_ns": 607767119872,
+      "frame_interval_ms": { "p50": 16.666112, "p90": 16.704, "p99": 18.270208, "max": 851.415808 },
+      "frame_intervals_over_25ms": 4,
+      "backend_transitions": [],
+      "exit_code": 0,
+      "teardown_ns": 22711166
+    },
+    "static_idle": {
+      "workload": "retained-parity-zero-update",
+      "sample_count": 600,
+      "sample_window_ns": 604319098083,
+      "cpu_percent_one_core": { "mean": 0.006, "min": 0.0, "max": 0.5 },
+      "rss_bytes": {
+        "min": 68042752,
+        "max": 168968192,
+        "first_60_mean": 161844975,
+        "last_60_mean": 68042752
+      },
+      "phys_footprint_bytes": 110265280,
+      "phys_footprint_peak_bytes": 118211496,
+      "file_descriptors": 34,
+      "thread_count": { "mean": 5.013333333333334, "min": 5, "max": 7 },
+      "interrupt_wakeups_per_second": 1.113650060265954,
+      "process_energy_mj_per_second": 0.01886180833297853,
+      "frame_events": 3,
+      "backend_transitions": [],
+      "exit_code": 0,
+      "teardown_ns": 20867292
+    }
+  },
+  "instruments": {
+    "available": false,
+    "command_exit_code": 137,
+    "xcode": "16.0 (16A242d)",
+    "blocker": "AMFI: com.apple.dt.InstrumentsCLI disallowed with com.apple.private.tcc.allow entitlement"
+  }
+}
