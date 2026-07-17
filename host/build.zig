@@ -3,6 +3,20 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const supervisor_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/supervisor.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const supervisor_test_step = b.step("test-supervisor", "Run platform-neutral supervisor tests");
+    supervisor_test_step.dependOn(&b.addRunArtifact(supervisor_tests).step);
+    if (target.result.os.tag != .windows) {
+        const test_step = b.step("test", "Run platform-neutral weaverd tests on non-Windows hosts");
+        test_step.dependOn(&b.addRunArtifact(supervisor_tests).step);
+        return;
+    }
     const windows_sdk = std.zig.WindowsSdk.find(b.allocator, b.graph.io, target.result.cpu.arch, &b.graph.environ_map) catch @panic("Windows 10 SDK is required to build weaverd providers");
     defer windows_sdk.free(b.allocator);
     const windows_10 = windows_sdk.windows10sdk orelse @panic("Windows 10 SDK is required to build weaverd providers");

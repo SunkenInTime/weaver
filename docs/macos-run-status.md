@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 08 pushed; CI pending`
+- State: `IN PROGRESS — PR 09 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T05:30:01-07:00
+- Last updated: 2026-07-15T05:39:26-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/08-cli-artifacts` | `e83c474` | [#10](https://github.com/SunkenInTime/weaver/pull/10) | [#9](https://github.com/SunkenInTime/weaver/pull/9) |
+| Weaver | `macos/09-portable-supervisor` | `d1f4a47` | [#11](https://github.com/SunkenInTime/weaver/pull/11) | [#10](https://github.com/SunkenInTime/weaver/pull/10) |
 
 ## Last reproducible capability
 
-- Capability: cross-platform CLI artifact lifecycle with one deterministic `.weave` format and an install-owned immutable source boundary
-- Checkout/pointer: `macos/08-cli-artifacts`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `npm test` and `node cli/test/install-smoke.mjs`
-- Visible result: macOS init/check/bundle/pack/inspect/install/replace/uninstall/logs all pass against isolated platform-native paths; host-dependent commands name the PR 10 boundary instead of searching for Windows binaries
-- Machine-readable evidence: fixed archive SHA-256 `d4a517dac1e6355bdf6d75e5e828470ec657a82dbfdfcec8efd2903eb88d4bf4`; 22/22 root tests plus the complete Darwin lifecycle smoke pass locally
+- Capability: platform-neutral supervisor state machine with all Win32 control, process, pipe, termination, and counter mechanics isolated in one Windows adapter
+- Checkout/pointer: `macos/09-portable-supervisor`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `cd host && zig build test-supervisor` and `zig build test`
+- Visible result: registry reconciliation, source/replacement decisions, desired state, subscriptions, renderer demand, crash/backoff, and status serialization run without importing any Windows type; Windows behavior remains behind `windows_host.zig`
+- Machine-readable evidence: six portable host tests pass on the physical arm64 Mac, including fake-adapter reconciliation, state/backoff/renderer policy, and exact public status spelling; three-architecture CI is running
 
 ## Gates
 
@@ -41,7 +41,7 @@ blocker and the next executable command.
 | Network parity | PASS | Ephemeral NSURLSession transport plus 12/12 runtime suite; deterministic loopback TLS covers success, timeout, caps, redirect denial, malformed URL, certificate failure, and active-request cancellation; production probe returned 200 |
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
-| CLI/artifact lifecycle | pending | Weaver #10 local macOS gate passes deterministic pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs; Windows/Apple-silicon/Intel CI proof is running |
+| CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
 | macOS daemon / `weaver dev` | pending | — |
 | CPU/memory providers | pending | — |
 | Audio decision/implementation | pending | — |
@@ -84,6 +84,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - PR 06's real-Widget mixed workload uses Clock, idle Pomodoro, and the retained/canvas parity Widget. System and Visualizer are not replaced with synthetic provider data before their honest endpoints arrive in PRs 10-13.
 - The first-pixel readback and deterministic Metal fault injector are compiled only into automation builds. Backdrop blur's reused target readback is the sole intentional production GPU readback.
 - macOS install/uninstall mutate the same atomic registry and immutable owned-source tree without starting a nonexistent host. Windows keeps its acknowledged host start/reload/rollback behavior; PR 10 connects the macOS host to that already-portable mutation boundary.
+- PR 09 keeps platform process state as an opaque generic field owned by the adapter-facing slot type. The supervisor can decide what must happen but cannot create, signal, sample, or terminate a process or IPC endpoint.
 
 ## Exact blockers
 
@@ -100,11 +101,11 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Ephemeral sockets/endpoints: none created
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, isolated CLI home/data/log trees, registry locks, install stages, and owned Clock versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after Weaver PR 08 implementation commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-08 and Native SDK fork PRs 01-05 pushed
+- Working trees/submodule clean: clean after Weaver PR 09 implementation commit; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-09 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 07-08 CI and correct actionable failures without weakening coverage.
-2. Create Weaver `macos/09-portable-supervisor` from `macos/08-cli-artifacts`.
-3. Extract registry reconciliation, widget slots, backoff, desired state, status serialization, provider subscription bookkeeping, and renderer selection from Win32 process/event/pipe/counter mechanics while preserving Windows behavior exactly.
+1. Inspect Weaver PR 08-09 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/10-macos-daemon` from `macos/09-portable-supervisor`.
+3. Implement the macOS singleton/control channel, acknowledged reload, Unix provider endpoints, spawn/environment, graceful/forced stop, crash observation, stale cleanup, process metrics, and the complete CLI `up`/`down`/`status`/`dev` lifecycle on the extracted core.
