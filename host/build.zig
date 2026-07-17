@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = hostTarget(b);
     const optimize = b.standardOptimizeOption(.{});
+    const automation_seam = b.option(bool, "automation-seam", "Compile the deterministic audio test-injection seam (automation builds only)") orelse false;
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/supervisor.zig"),
@@ -21,7 +22,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        addMacosAudio(exe.root_module, b);
+        addMacosAudio(exe.root_module, b, automation_seam);
         exe.root_module.linkSystemLibrary("c", .{});
         b.installArtifact(exe);
         const bundle_executable = b.addInstallFile(exe.getEmittedBin(), "Weaverd.app/Contents/MacOS/weaverd");
@@ -41,7 +42,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        addMacosAudio(tests.root_module, b);
+        addMacosAudio(tests.root_module, b, automation_seam);
         tests.root_module.linkSystemLibrary("c", .{});
         const test_step = b.step("test", "Run macOS host and portable supervisor tests");
         test_step.dependOn(&b.addRunArtifact(tests).step);
@@ -136,11 +137,15 @@ fn macosSdkRoot(b: *std.Build) []const u8 {
     return std.mem.trim(u8, result.stdout, " \t\r\n");
 }
 
-fn addMacosAudio(module: *std.Build.Module, b: *std.Build) void {
+fn addMacosAudio(module: *std.Build.Module, b: *std.Build, automation_seam: bool) void {
     const sdk_include = b.fmt("-I{s}/usr/include", .{b.sysroot.?});
+    const audio_flags: []const []const u8 = if (automation_seam)
+        &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include, "-DWEAVER_AUTOMATION_SEAM=1" }
+    else
+        &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include };
     module.addCSourceFile(.{
         .file = b.path("src/macos_audio.m"),
-        .flags = &.{ "-fobjc-arc", "-fblocks", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include },
+        .flags = audio_flags,
     });
     module.addCSourceFile(.{
         .file = b.path("src/macos_system.c"),

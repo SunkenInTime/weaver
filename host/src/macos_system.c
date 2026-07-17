@@ -5,9 +5,12 @@
 #include <mach/mach_host.h>
 #include <mach/processor_info.h>
 #include <mach/vm_statistics.h>
+#include <signal.h>
+#include <string.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
 
 int weaver_system_sample(uint32_t *ticks, size_t core_capacity, size_t *core_count,
                          uint64_t *used_bytes, uint64_t *total_bytes) {
@@ -65,6 +68,35 @@ int weaver_process_path(int32_t pid, char *path, size_t capacity) {
     return proc_pidpath(pid, path, (uint32_t)capacity);
 }
 
-int weaver_chmod_private(const char *path) {
-    return path ? chmod(path, 0700) : -1;
+int weaver_secure_private_dir(const char *path) {
+    if (!path) return -1;
+    struct stat info;
+    if (lstat(path, &info) != 0) return -1;
+    if (!S_ISDIR(info.st_mode)) return -1;
+    if (info.st_uid != getuid()) return -1;
+    if (chmod(path, 0700) != 0) return -1;
+    if (lstat(path, &info) != 0) return -1;
+    if ((info.st_mode & 0777) != 0700) return -1;
+    return 0;
+}
+
+static volatile sig_atomic_t weaver_termination_flag = 0;
+
+static void weaver_handle_termination(int signal_number) {
+    (void)signal_number;
+    weaver_termination_flag = 1;
+}
+
+int weaver_install_termination_handler(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = weaver_handle_termination;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGTERM, &action, NULL) != 0) return -1;
+    if (sigaction(SIGINT, &action, NULL) != 0) return -1;
+    return 0;
+}
+
+int weaver_termination_requested(void) {
+    return weaver_termination_flag != 0;
 }

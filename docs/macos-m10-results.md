@@ -42,9 +42,11 @@ reauthorization. The final subscriber destroys capture and analyzer state.
 | Device loss / recovery | PASS | injected device loss reports `device-unavailable`, emits one final zero, retries one capture at a time, and returns to `live` after route recovery |
 | Teardown and crash regressions | PASS | concurrent uninstall returns provider to idle with zero subscribers and stable counters; the same smoke re-passes daemon/Widget adverse kills, hot swap, backoff, endpoints, and zero-remnant cleanup |
 
-The lifecycle driver is `node cli/test/macos-host-smoke.mjs`. Its injection is
-available only when both `WEAVER_AUTOMATION=1` and an explicit
-`WEAVER_AUDIO_TEST_CONTROL` file are present. It crosses the production C ring,
+The lifecycle driver is `node cli/test/macos-host-smoke.mjs`. Its injection
+exists only in hosts built with `zig build -Dautomation-seam=true` and
+activates only when both `WEAVER_AUTOMATION=1` and an explicit
+`WEAVER_AUDIO_TEST_CONTROL` file are present; production builds omit the seam
+entirely and CI proves its strings are absent from the shipped binary. It crosses the production C ring,
 Zig analyzer, UDS fan-out, runtime provider bridge, reconciler, canvas, renderer,
 and real AppKit Widget processes; it does not bypass the provider with JSON.
 

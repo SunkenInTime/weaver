@@ -18,7 +18,9 @@ int weaver_system_sample(uint32_t *ticks, size_t core_capacity, size_t *core_cou
 int weaver_process_sample(int32_t pid, uint64_t *physical_footprint,
                           uint64_t *cpu_time_ns, uint32_t *threads);
 int weaver_process_path(int32_t pid, char *path, size_t capacity);
-int weaver_chmod_private(const char *path);
+int weaver_secure_private_dir(const char *path);
+int weaver_install_termination_handler(void);
+int weaver_termination_requested(void);
 
 #ifdef __cplusplus
 }

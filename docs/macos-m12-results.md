@@ -3,7 +3,11 @@
 Recorded 2026-07-15 on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS
 26.5.1 (25F80), arm64, Zig 0.16.0, Node 23.11.0 locally, and Node 22 in CI.
 The implementation under test is Weaver commit `359be90` on
-`macos/16-ci-regression-closure`, pinned to Native SDK commit `9cb7cd98`.
+`macos/16-ci-regression-closure`, pinned to Native SDK commit `9cb7cd98` at
+capture time. The branch has since advanced the pin to Native `91949e15`
+(Dock-icon fix, texture-only raster cache, renderer CPU/memory reduction); the
+required CI matrix, including the clean-checkout session job, re-passed at that
+final head.
 Machine-readable gate state is in
 [`macos-m12-data.json`](macos-m12-data.json).
 
