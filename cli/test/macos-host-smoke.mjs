@@ -127,20 +127,36 @@ try {
   const uninstalls = await Promise.all([runAsync(["uninstall", "Alpha"]), runAsync(["uninstall", "Beta"])]);
   for (const result of uninstalls) assert.equal(result.code, 0, `concurrent uninstall failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   await waitFor("both concurrent uninstalls in status", () => status()?.widgets?.length === 0);
+  assert.equal(status().providers.systemSampleCount, 0, "host sampled system providers without a subscriber");
 
+  run(["init", "system-two"]);
+  const systemSource = readFileSync(join(repoRoot, "examples", "system", "widget.tsx"), "utf8");
+  writeFileSync(join(scratch, "system-two", "widget.tsx"), systemSource.replaceAll("System Monitor", "System Monitor 2"), "utf8");
   run(["install", join(repoRoot, "examples", "system")]);
-  await waitFor("provider-subscribed Widget", () => status()?.widgets?.[0]?.state === "running");
+  run(["install", "system-two"]);
+  await waitFor("system-provider fan-out", () => {
+    const providers = status()?.providers;
+    const logs = ["System Monitor.log", "System Monitor 2.log"]
+      .map((name) => join(environment.HOME, "Library", "Logs", "Weaver", name));
+    return providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 && providers.systemFrames >= 4 &&
+      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied count=2"));
+  });
   const activeRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))
     .map((name) => join(root, name)))
     .filter((path) => !runtimeEntriesBefore.has(path))
     .find((path) => existsSync(join(path, "control.sock")));
   assert.ok(activeRuntimeRoot, "macOS host did not create its short per-user runtime root");
-  const providerSocket = readdirSync(activeRuntimeRoot, { withFileTypes: true }).find((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
-  assert.ok(providerSocket, "provider-subscribed Widget did not connect through a Unix socket");
-  assert.ok(join(activeRuntimeRoot, providerSocket.name).length <= 104, "provider Unix socket exceeded macOS sun_path capacity");
-  run(["uninstall", "System Monitor"]);
-  assert.equal(existsSync(join(activeRuntimeRoot, providerSocket.name)), false, "uninstall left the per-Widget provider endpoint behind");
+  const providerSockets = readdirSync(activeRuntimeRoot, { withFileTypes: true }).filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
+  assert.equal(providerSockets.length, 2, "provider fan-out did not create one Unix socket per Widget");
+  assert.ok(providerSockets.every((entry) => join(activeRuntimeRoot, entry.name).length <= 104), "provider Unix socket exceeded macOS sun_path capacity");
+  const systemUninstalls = await Promise.all([runAsync(["uninstall", "System Monitor"]), runAsync(["uninstall", "System Monitor 2"])]);
+  for (const result of systemUninstalls) assert.equal(result.code, 0, `concurrent System uninstall failed\n${result.stderr}`);
+  await waitFor("system provider shutdown", () => status()?.providers?.systemSubscribers === 0 && status()?.widgets?.length === 0);
+  assert.ok(providerSockets.every((entry) => !existsSync(join(activeRuntimeRoot, entry.name))), "uninstall left a per-Widget provider endpoint behind");
+  const providerSamplesAfterStop = status().providers.systemSampleCount;
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 2200));
+  assert.equal(status().providers.systemSampleCount, providerSamplesAfterStop, "host continued sampling after the final system subscriber stopped");
 
   run(["install", "clock"]);
   await waitFor("installed Clock", () => status()?.widgets?.[0]?.state === "running" && status().widgets[0]);

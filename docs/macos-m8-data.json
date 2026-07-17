@@ -1,0 +1,426 @@
+{
+  "recorded_at": "2026-07-15T06:33:36-07:00",
+  "weaver_commit": "9c1dbc4",
+  "macos": [
+    "ProductName:\t\tmacOS",
+    "ProductVersion:\t\t26.5.1",
+    "BuildVersion:\t\t25F80"
+  ],
+  "hardware": "Apple M2",
+  "architecture": "arm64",
+  "zig": "0.16.0",
+  "node": "v23.11.0",
+  "sample_seconds": 5,
+  "memory_metric": "ps RSS bytes summed across weaverd and all participating Widget processes",
+  "cpu_metric": "ps percent of one core summed across weaverd and all participating Widget processes",
+  "workloads": [
+    {
+      "label": "host, zero subscribers",
+      "pids": [
+        78115
+      ],
+      "provider_start": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_end": {
+        "systemSubscribers": 0,
+        "systemSampleCount": 0,
+        "systemFrames": 0,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_sample_delta": 0,
+      "provider_frame_delta": 0,
+      "total_cpu_percent_one_core": {
+        "mean": 0.13999999999999999,
+        "min": 0.0,
+        "max": 0.3
+      },
+      "total_rss_bytes": {
+        "mean": 1510605,
+        "min": 1359872,
+        "max": 2113536
+      },
+      "total_threads": {
+        "mean": 2.0,
+        "min": 2,
+        "max": 2
+      },
+      "samples": [
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.3,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.0,
+            "rss_bytes": 1359872,
+            "threads": 2,
+            "state": "Ss"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.3,
+            "rss_bytes": 1359872,
+            "threads": 2,
+            "state": "Ss"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.0,
+            "rss_bytes": 1359872,
+            "threads": 2,
+            "state": "Ss"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 1359872,
+            "threads": 2,
+            "state": "Ss"
+          }
+        ]
+      ]
+    },
+    {
+      "label": "host + one System Widget",
+      "pids": [
+        78115,
+        78936
+      ],
+      "provider_start": {
+        "systemSubscribers": 1,
+        "systemSampleCount": 4,
+        "systemFrames": 6,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_end": {
+        "systemSubscribers": 1,
+        "systemSampleCount": 8,
+        "systemFrames": 14,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_sample_delta": 4,
+      "provider_frame_delta": 8,
+      "total_cpu_percent_one_core": {
+        "mean": 1.9600000000000002,
+        "min": 0.5,
+        "max": 3.0
+      },
+      "total_rss_bytes": {
+        "mean": 163640115,
+        "min": 163594240,
+        "max": 163725312
+      },
+      "total_threads": {
+        "mean": 9.4,
+        "min": 9,
+        "max": 10
+      },
+      "samples": [
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 2015232,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 161579008,
+            "threads": 8,
+            "state": "R"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 2015232,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 2.5,
+            "rss_bytes": 161611776,
+            "threads": 8,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.5,
+            "rss_bytes": 2015232,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 2.5,
+            "rss_bytes": 161595392,
+            "threads": 7,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.0,
+            "rss_bytes": 2015232,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 1.5,
+            "rss_bytes": 161628160,
+            "threads": 7,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 2015232,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 1.8,
+            "rss_bytes": 161710080,
+            "threads": 7,
+            "state": "S"
+          }
+        ]
+      ]
+    },
+    {
+      "label": "host + three System Widgets",
+      "pids": [
+        78115,
+        78936,
+        79619,
+        79667
+      ],
+      "provider_start": {
+        "systemSubscribers": 3,
+        "systemSampleCount": 14,
+        "systemFrames": 36,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_end": {
+        "systemSubscribers": 3,
+        "systemSampleCount": 18,
+        "systemFrames": 60,
+        "audioCaptureActive": false,
+        "audioSilent": true,
+        "audioPipeFrames": 0,
+        "mediaPipeFrames": 0
+      },
+      "provider_sample_delta": 4,
+      "provider_frame_delta": 24,
+      "total_cpu_percent_one_core": {
+        "mean": 3.96,
+        "min": 1.8,
+        "max": 6.2
+      },
+      "total_rss_bytes": {
+        "mean": 449645773,
+        "min": 449380352,
+        "max": 449806336
+      },
+      "total_threads": {
+        "mean": 24.8,
+        "min": 24,
+        "max": 25
+      },
+      "samples": [
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 0.9,
+            "rss_bytes": 126681088,
+            "threads": 7,
+            "state": "S"
+          },
+          {
+            "pid": 79619,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 160661504,
+            "threads": 8,
+            "state": "R"
+          },
+          {
+            "pid": 79667,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 159924224,
+            "threads": 8,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 1.1,
+            "rss_bytes": 126713856,
+            "threads": 7,
+            "state": "S"
+          },
+          {
+            "pid": 79619,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 160710656,
+            "threads": 8,
+            "state": "S"
+          },
+          {
+            "pid": 79667,
+            "cpu_percent_one_core": 0.3,
+            "rss_bytes": 159940608,
+            "threads": 8,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.1,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 0.7,
+            "rss_bytes": 126713856,
+            "threads": 7,
+            "state": "S"
+          },
+          {
+            "pid": 79619,
+            "cpu_percent_one_core": 0.9,
+            "rss_bytes": 160710656,
+            "threads": 8,
+            "state": "S"
+          },
+          {
+            "pid": 79667,
+            "cpu_percent_one_core": 2.8,
+            "rss_bytes": 160219136,
+            "threads": 8,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.2,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 0.7,
+            "rss_bytes": 126746624,
+            "threads": 7,
+            "state": "S"
+          },
+          {
+            "pid": 79619,
+            "cpu_percent_one_core": 2.5,
+            "rss_bytes": 160694272,
+            "threads": 8,
+            "state": "S"
+          },
+          {
+            "pid": 79667,
+            "cpu_percent_one_core": 2.8,
+            "rss_bytes": 160251904,
+            "threads": 8,
+            "state": "S"
+          }
+        ],
+        [
+          {
+            "pid": 78115,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 2113536,
+            "threads": 2,
+            "state": "Ss"
+          },
+          {
+            "pid": 78936,
+            "cpu_percent_one_core": 0.4,
+            "rss_bytes": 126746624,
+            "threads": 7,
+            "state": "S"
+          },
+          {
+            "pid": 79619,
+            "cpu_percent_one_core": 2.4,
+            "rss_bytes": 160694272,
+            "threads": 8,
+            "state": "S"
+          },
+          {
+            "pid": 79667,
+            "cpu_percent_one_core": 2.2,
+            "rss_bytes": 160251904,
+            "threads": 7,
+            "state": "S"
+          }
+        ]
+      ]
+    }
+  ]
+}

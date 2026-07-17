@@ -50,6 +50,10 @@ notes in [`docs/m0-results.md`](docs/m0-results.md) and
 in [`docs/weave-results.md`](docs/weave-results.md). Expect everything to
 change.
 
+Host-owned CPU and memory providers now run on both platforms and stay fully
+off with no subscriber. Audio and media are still explicit macOS port work,
+not stubbed capabilities.
+
 ## Quickstart
 
 Prerequisites: Windows 11 or macOS 13+, [Node 22+](https://nodejs.org), and

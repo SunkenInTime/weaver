@@ -148,14 +148,17 @@ pub const Engine = struct {
         return self.provider.available;
     }
 
-    pub fn drainProviders(self: *Engine) Error!void {
+    pub fn drainProviders(self: *Engine) Error!usize {
         self.beginTurn();
         defer self.endTurn();
         var line_buffer: [8192]u8 = undefined;
+        var count: usize = 0;
         while (self.provider.take(&line_buffer)) |line| {
             if (!bridge.dispatchProvider(self.context, &self.bridge_state, line)) return self.reportException();
+            count += 1;
         }
         try self.pumpJobs();
+        return count;
     }
 
     fn pumpJobs(self: *Engine) Error!void {
@@ -219,16 +222,16 @@ pub const Engine = struct {
 };
 
 fn logExceptionFrom(context: *c.JSContext) void {
-        const exception = c.JS_GetException(context);
-        defer c.JS_FreeValue(context, exception);
-        var len: usize = 0;
-        const raw = c.JS_ToCStringLen2(context, &len, exception, false);
-        if (raw) |text| {
-            defer c.JS_FreeCString(context, text);
-            std.log.err("widget JavaScript exception: {s}", .{text[0..len]});
-        } else {
-            std.log.err("widget JavaScript exception", .{});
-        }
+    const exception = c.JS_GetException(context);
+    defer c.JS_FreeValue(context, exception);
+    var len: usize = 0;
+    const raw = c.JS_ToCStringLen2(context, &len, exception, false);
+    if (raw) |text| {
+        defer c.JS_FreeCString(context, text);
+        std.log.err("widget JavaScript exception: {s}", .{text[0..len]});
+    } else {
+        std.log.err("widget JavaScript exception", .{});
+    }
 }
 
 fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
