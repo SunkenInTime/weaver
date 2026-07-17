@@ -1,0 +1,121 @@
+{
+  "schema": "weaver.macos-media-feasibility.v1",
+  "recorded_at": "2026-07-15T15:07:29Z",
+  "weaver_base_commit": "2001014d4118ff4ee985dd893647566d32dd6308",
+  "machine": {
+    "model": "MacBook Air",
+    "model_identifier": "Mac14,2",
+    "chip": "Apple M2",
+    "memory_bytes": 8589934592,
+    "architecture": "arm64",
+    "macos_version": "26.5.1",
+    "macos_build": "25F80",
+    "xcode": "16.0 (16A242d)",
+    "clang": "Apple clang 16.0.0 (clang-1600.0.26.3)",
+    "sdk": "macOS 15.0",
+    "deployment_target": "macOS 14.2"
+  },
+  "probe": {
+    "command": "spikes/macos-media-observation/build.sh",
+    "binary": {
+      "format": "Mach-O 64-bit executable arm64",
+      "minimum_macos": "14.2",
+      "sdk": "15.0"
+    },
+    "publisher": {
+      "album": "macOS M11",
+      "artist": "Weaver",
+      "hasNowPlayingInfo": true,
+      "mode": "publish",
+      "pid": 83598,
+      "playbackState": 1,
+      "title": "Weaver Public API Probe"
+    },
+    "concurrent_observer": {
+      "album": null,
+      "artist": null,
+      "hasNowPlayingInfo": false,
+      "mode": "observe",
+      "pid": 83600,
+      "playbackState": 0,
+      "title": null
+    },
+    "music_player_controller_compile": {
+      "succeeded": false,
+      "expected": "unavailable on macOS",
+      "diagnostic": "music_player_unavailable.m:4:5: error: 'MPMusicPlayerController' is unavailable: not available on macOS",
+      "sdk_declaration": "MPMusicPlayerController.h: API_UNAVAILABLE(watchos, macos)"
+    }
+  },
+  "installed_sdk_scan": {
+    "mp_now_playing_info_center": {
+      "public": true,
+      "available_since": "macOS 10.12.2",
+      "header_boundary": "default center holds now playing info about the current application",
+      "direction": "publish current application's metadata and playback state"
+    },
+    "mp_music_player_controller": {
+      "public_header_present": true,
+      "macos_availability": "unavailable"
+    },
+    "now_playing_framework": {
+      "public_sdk_framework_present": false,
+      "documentation_state": "beta",
+      "direction": "publish application's local or remote playback session"
+    },
+    "media_remote": {
+      "system_private_framework_present": true,
+      "sdk_private_framework_present": true,
+      "public_framework_present": false,
+      "selected": false
+    }
+  },
+  "player_adapter_scan": [
+    {
+      "application": "Music",
+      "version": "1.6.5",
+      "scripting_dictionary": true,
+      "fields": ["current track", "player position", "player state"],
+      "actions": ["playpause"]
+    },
+    {
+      "application": "Spotify",
+      "version": "1.2.89.539",
+      "scripting_dictionary": true,
+      "fields": ["current track", "player position", "player state", "artwork url"],
+      "actions": ["playpause"]
+    },
+    {
+      "application": "QuickTime Player",
+      "version": "10.5",
+      "scripting_dictionary": true,
+      "fields": ["document current time", "document duration", "document rate"],
+      "actions": []
+    },
+    {
+      "application": "Podcasts",
+      "version": "1.1.0",
+      "scripting_dictionary": false,
+      "error": "sdef error -192"
+    },
+    {
+      "application": "Safari",
+      "version": "26.5",
+      "scripting_dictionary": true,
+      "fields": [],
+      "actions": []
+    }
+  ],
+  "shipping_decision": {
+    "macos_media_availability": "unavailable",
+    "supported_fields": [],
+    "supported_actions": [],
+    "poll_cadence_hz": 0,
+    "emits_fabricated_frame": false,
+    "private_api_dependency": false,
+    "apple_events_dependency": false,
+    "public_sdk_changed": false,
+    "production_pr_15": "omitted",
+    "next_pr": "PR 16 macOS CI, regression matrix, and release closure"
+  }
+}

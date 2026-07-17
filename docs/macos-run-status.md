@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 13 pushed; CI pending`
+- State: `IN PROGRESS — PR 14 pushed; PR 15 omitted by ADR; PR 16 next`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T07:46:00-07:00
+- Last updated: 2026-07-15T08:07:00-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/13-production-audio` | `8b7f211` | [#15](https://github.com/SunkenInTime/weaver/pull/15) | [#14](https://github.com/SunkenInTime/weaver/pull/14) |
+| Weaver | `macos/14-media-decision` | `68d7b99` | [#16](https://github.com/SunkenInTime/weaver/pull/16) | [#15](https://github.com/SunkenInTime/weaver/pull/15) |
 
 ## Last reproducible capability
 
-- Capability: one signed host-owned macOS audio capture feeds the unchanged shared FFT/AGC/final-zero pipeline and two real Visualizer processes; authorization, revocation, device loss, recovery, fan-out, parking, and teardown are explicit and deterministic
-- Checkout/pointer: `macos/13-production-audio` result head `4ed9195`, implementation and measured workload `ba1336b`; Native SDK remains `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `cd host && zig build test && zig build`; `npm run build`; `npm run typecheck`; `npm test`; `node cli/test/macos-host-smoke.mjs`; `python3 scripts/macos-audio-cost.py --sample-seconds 10 --output docs/macos-m10-data.json`; `codesign --verify --deep --strict host/zig-out/Weaverd.app`
-- Visible result: deterministic 440 Hz injection drives two real Metal Visualizer Widgets through the production C/Zig/UDS/runtime seam; silence parks both after one final zero, while fresh real System Audio Recording consent remains unapprovable because Chronicle and System Events control are unavailable
-- Machine-readable evidence: `docs/macos-m10-results.md`, `docs/macos-m10-data.json`, exact availability/capture/frame/error counters, both Widget logs, signed bundle verification, 22/22 root tests, host tests, full daemon smoke, and zero process/socket/registration remnants
+- Capability: the macOS v0 media boundary is explicit and reproducible: public Now Playing APIs publish only the current application's session, the Apple Music controller is compiler-unavailable, private MediaRemote and incomplete per-player automation are rejected, and PR 15 is omitted
+- Checkout/pointer: `macos/14-media-decision` decision/spike head `4fe97f8`, restacked ledger `68d7b99`; Native SDK remains `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `spikes/macos-media-observation/build.sh`; `npm run build`; `npm run typecheck`; `npm test`; `python3 -m json.tool docs/macos-m11-data.json`; `git diff --check`
+- Visible result: no visible player claim is made; the deterministic publisher reads back its own title/state while a concurrent process reports no Now Playing dictionary, and the negative Music-controller source fails with the SDK's exact macOS-unavailable diagnostic
+- Machine-readable evidence: `docs/macos-m11-results.md`, `docs/macos-m11-data.json`, ADR 0015, probe JSON/compiler log, 22/22 root tests, and no production media dependency
 
 ## Gates
 
@@ -45,7 +45,7 @@ blocker and the next executable command.
 | macOS daemon / `weaver dev` | PASS | Weaver #12; `macos-host-smoke.mjs` proves init/dev/edit preserved-state hot swap/config restart/stop, concurrent mutations, provider UDS, host + Widget adverse kills, backoff/recovery/status, and zero process/socket/lock remnants |
 | CPU/memory providers | UNVERIFIED | Weaver #13 functional/fan-out/cost/zero-collection gates pass; required sleep/wake remains unsafe on the only unattended machine and is not inferred |
 | Audio decision/implementation | UNVERIFIED | ADR 0014 decision PASS; PR 13 production code, deterministic end-to-end Visualizers, denial/allow/revoke/device-loss state machine, one-capture fan-out, final-zero parking, injected cost, and teardown PASS. Real TCC grant, callback/mix/cost, physical routes, Bluetooth, and AirPlay remain unverified |
-| Media decision/implementation | pending | — |
+| Media decision/implementation | PASS | Weaver #16; ADR 0015 and M11 cross-process/header/compiler evidence decide that no public distributable system-wide provider exists at 14.2, mark macOS media unavailable, reject private MediaRemote/per-player Automation, and explicitly omit PR 15 |
 | Full CI/regression closure | pending | — |
 
 Use `PASS`, `FAIL`, `BLOCKED`, `UNVERIFIED`, or `pending`. A blocked gate does
@@ -79,7 +79,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - `macos-15` (Apple silicon) and `macos-15-intel` are the initial CI runners; physical Intel behavior/performance remains unverified.
 - PR 01 carries no visible/runtime performance claim and therefore requires no computer-use capture.
 - PR 02 uses desktop-icon-minus-one as the provisional bottom level after measuring desktop/icon/normal/floating levels on the physical M2. PR 04 revalidates it under macOS desktop-management modes.
-- An unbundled widget process returns transient AppKit startup activation to the first visible regular application in the public front-to-back CG window list. Bundled packaging still needs the matching agent-app metadata in PR 14.
+- An unbundled Widget process returns transient AppKit startup activation to the first visible regular application in the public front-to-back CG window list. The signed host gained stable agent-app metadata in PR 13; Widget app bundling remains outside this developer-build port rather than being misassigned to media PR 14.
 - PR 03 discovered that Weaver's software choice could not be reported honestly while the Native SDK hard-coded AppKit frames to Metal. Native SDK PR 02 is an explicit extra stacked dependency; it carries the requested backend/alpha contract and forces CPU pixel presentation for software surfaces.
 - Clock's once-per-second update makes its recorded CPU a 1 Hz steady-state baseline, not a static-idle claim. The 86 MB footprint misses the aspirational 15 MiB investigation target and remains an explicit PR 06–07 optimization input.
 - The existing manifest's `monitor: primary` remains the complete public selection surface. Native SDK exposes a generic primary-visible-frame corner anchor and enumerates secondary displays only to react to topology changes; no per-monitor selector is added.
@@ -96,6 +96,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - macOS `memory.usedMb` projects the platform-neutral SDK meaning as total physical memory minus free and inactive/reclaimable pages. CPU uses public per-logical-core Mach ticks with wrapping deltas; aggregate percent remains 0–100 rather than summing cores.
 - One host-owned private global mono Core Audio tap feeds one shared FFT/AGC/silence pipeline and software fan-out. The host ships as the `com.sunkenintime.weaver.host` signed agent; explicit authorization uses that same identity, while missing permission reports unavailable without fake live-silence frames.
 - Deterministic audio injection exists only under `WEAVER_AUTOMATION=1` with an explicit control file and crosses the production capture/analyzer/transport/runtime seam. It proves lifecycle and whole-application injected cost, not a real macOS consent grant or Core Audio callback cost.
+- macOS v0 media is unavailable because public APIs at the 14.2 floor publish the current application's session rather than observe the system player. Weaver omits PR 15, sends no fabricated frame, adds no artwork/control surface, and refuses private MediaRemote and incomplete per-player Automation adapters.
 
 ## Exact blockers
 
@@ -108,15 +109,15 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, both injected Visualizer fixtures, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, loopback HTTPS server, every audio spike, and blocked System Events helper terminated; no Accessibility warning helper remains
+- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, both injected Visualizer fixtures, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, loopback HTTPS server, every audio spike, both short-lived M11 media probe processes, and blocked System Events helper terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
 - Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, PR 13 Visualizers/control/authorization markers, isolated CLI home/data/log trees, registry locks, install stages, owned versions, scoped audio TCC decision, and temporary audio taps/aggregates removed after recording evidence; ignored spike builds and raw renderer run reports remain only as reproducible local build products
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after this PR 13 ledger commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-13 and Native SDK fork PRs 01-05 pushed; PR 12 is green and PR 13 CI is running
+- Working trees/submodule clean: decision commit clean before this PR 14 ledger update; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-14 and Native SDK fork PRs 01-05 pushed; PR 13 Apple-silicon CI passed while gate/Intel remain pending, and PR 14 CI is running
 
 ## Next executable task
 
-1. Inspect PR 13 CI and correct actionable failures without weakening coverage.
-2. Create `macos/14-media-decision` from PR 13 and complete the public media-provider feasibility/ADR gate.
-3. If public system-wide media observation is unavailable, record the honest unavailable decision and omit PR 15 rather than introducing private MediaRemote dependencies.
+1. Inspect PR 13 and PR 14 CI and correct actionable failures without weakening coverage.
+2. Omit PR 15 as required by ADR 0015; create `macos/16-ci-regression-closure` directly from PR 14.
+3. Add explicit unavailable media diagnostics, complete the required CI/regression/clean-clone matrix, audit the full stack, and leave the final reproducible cleanup handoff.
