@@ -103,6 +103,14 @@ jobs:
         working-directory: runtime
         run: zig build test-platform-services
 
+      - name: Build runtime (ReleaseFast)
+        working-directory: runtime
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Runtime tests including loopback HTTPS
+        working-directory: runtime
+        run: zig build test
+
       - name: Native SDK stock profile
         working-directory: runtime/native-sdk
         run: zig build test

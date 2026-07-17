@@ -38,6 +38,7 @@ pub const CanvasFrameSlot = struct {
 pub const FetchSlot = struct {
     active: bool = false,
     done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    cancelled: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     thread: ?std.Thread = null,
     resolve: c.JSValue = qjs.undefinedValue(),
     reject: c.JSValue = qjs.undefinedValue(),
@@ -98,6 +99,9 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
     }
     c.JS_FreeValue(ctx, bridge_state.event_callback);
     c.JS_FreeValue(ctx, bridge_state.provider_callback);
+    for (&bridge_state.fetches) |*slot| {
+        if (slot.thread != null) slot.cancelled.store(1, .release);
+    }
     for (&bridge_state.fetches) |*slot| {
         if (slot.thread) |thread| thread.join();
         c.JS_FreeValue(ctx, slot.resolve);
@@ -446,11 +450,11 @@ pub fn dispatchCanvasFrames(ctx: *c.JSContext, bridge_state: *State, timestamp_n
     return true;
 }
 
-/// `wfetch` uses WinHTTP because it is the fork's already-proven Windows TLS
-/// path. The bridge copies a bounded request into one of four slots and runs
-/// the blocking exchange on a worker; only `drainFetches` touches QuickJS,
-/// from the Native main loop. Redirects are disabled at WinHTTP so no request
-/// can escape the exact manifest host after this check.
+/// `wfetch` uses WinHTTP on Windows and ephemeral NSURLSession on macOS. The
+/// bridge copies one bounded request into one of four slots and runs the
+/// blocking exchange on a worker; only `drainFetches` touches QuickJS from the
+/// Native main loop. Both transports return the original 3xx instead of
+/// following it, so no request can escape the exact manifest host checked here.
 fn fetch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 4) return fail(js, "fetch expects url, method, headers JSON, and body");
@@ -480,6 +484,12 @@ fn fetch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValue
         c.JS_FreeValue(js, resolving[1]);
         return promise;
     }
+    if (!network.requestWithinCap(url.bytes.len, headers_json.bytes.len, body.bytes.len)) {
+        rejectPromise(js, resolving[1], "RequestTooLarge: wfetch request exceeds 5 MB");
+        c.JS_FreeValue(js, resolving[0]);
+        c.JS_FreeValue(js, resolving[1]);
+        return promise;
+    }
     const bridge_state = state(js);
     const slot = for (&bridge_state.fetches) |*candidate| {
         if (!candidate.active) break candidate;
@@ -490,6 +500,7 @@ fn fetch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValue
         return promise;
     };
     slot.* = .{ .active = true, .resolve = resolving[0], .reject = resolving[1] };
+    slot.request.cancelled = &slot.cancelled;
     slot.request.method = if (std.ascii.eqlIgnoreCase(method.bytes, "GET")) .get else if (std.ascii.eqlIgnoreCase(method.bytes, "POST")) .post else {
         rejectAndResetFetch(js, slot, "wfetch method must be GET or POST");
         return promise;
@@ -579,7 +590,9 @@ pub fn drainFetches(ctx: *c.JSContext, bridge_state: *State) void {
             rejectPromise(ctx, slot.reject, switch (slot.result.failure) {
                 .invalid_url => "HttpsRequired: wfetch accepts only https:// URLs",
                 .timed_out => "FetchTimeout: request exceeded 15 seconds",
+                .request_too_large => "RequestTooLarge: wfetch request exceeds 5 MB",
                 .response_too_large => "ResponseTooLarge: wfetch response exceeds 5 MB",
+                .cancelled => "FetchCancelled: request was cancelled",
                 .request_failed => "FetchFailed: request failed",
                 .none => unreachable,
             });
