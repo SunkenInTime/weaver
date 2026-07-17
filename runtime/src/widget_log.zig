@@ -1,28 +1,22 @@
 const std = @import("std");
-
-const win = @cImport({
-    @cDefine("WIN32_LEAN_AND_MEAN", "1");
-    @cInclude("windows.h");
-});
+const platform = @import("platform/root.zig");
 
 const rotate_bytes: u64 = 1024 * 1024;
-var path_buffer: [32768]u16 = undefined;
+var io: ?std.Io = null;
+var path_buffer: [32768]u8 = undefined;
 var path_len: usize = 0;
-var old_path_buffer: [32768]u16 = undefined;
+var old_path_buffer: [32768]u8 = undefined;
 var old_path_len: usize = 0;
 var mutex: std.atomic.Mutex = .unlocked;
 
-pub fn init(path: []const u8) !void {
-    const wide = try std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, path);
-    defer std.heap.page_allocator.free(wide);
-    if (wide.len + 5 >= path_buffer.len) return error.LogPathTooLong;
-    @memcpy(path_buffer[0..wide.len], wide);
-    path_buffer[wide.len] = 0;
-    path_len = wide.len;
-    @memcpy(old_path_buffer[0..wide.len], wide);
-    @memcpy(old_path_buffer[wide.len .. wide.len + 4], std.unicode.utf8ToUtf16LeStringLiteral(".old"));
-    old_path_len = wide.len + 4;
-    old_path_buffer[old_path_len] = 0;
+pub fn init(runtime_io: std.Io, path: []const u8) !void {
+    if (path.len + ".old".len > path_buffer.len) return error.LogPathTooLong;
+    @memcpy(path_buffer[0..path.len], path);
+    path_len = path.len;
+    @memcpy(old_path_buffer[0..path.len], path);
+    @memcpy(old_path_buffer[path.len .. path.len + ".old".len], ".old");
+    old_path_len = path.len + ".old".len;
+    io = runtime_io;
 }
 
 pub fn logFn(
@@ -33,11 +27,8 @@ pub fn logFn(
 ) void {
     var buffer: [8192]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
-    var local: win.SYSTEMTIME = undefined;
-    win.GetLocalTime(&local);
-    writer.print("[{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}] {s}", .{
-        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond, local.wMilliseconds, level.asText(),
-    }) catch return;
+    writeTimestamp(&writer) catch return;
+    writer.print(" {s}", .{level.asText()}) catch return;
     if (scope != .default) writer.print("({t})", .{scope}) catch return;
     writer.writeAll(": ") catch return;
     writer.print(format, args) catch return;
@@ -45,25 +36,53 @@ pub fn logFn(
     writeLine(writer.buffered());
 }
 
+fn writeTimestamp(writer: *std.Io.Writer) !void {
+    const milliseconds: u64 = @intCast(@max(0, platform.wallClockMilliseconds()));
+    const epoch_seconds: std.time.epoch.EpochSeconds = .{ .secs = milliseconds / std.time.ms_per_s };
+    const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch_seconds.getDaySeconds();
+    try writer.print("[{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z]", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+        day_seconds.getSecondsIntoMinute(),
+        milliseconds % std.time.ms_per_s,
+    });
+}
+
 fn writeLine(line: []const u8) void {
+    const runtime_io = io orelse return;
     if (path_len == 0) return;
     while (!mutex.tryLock()) std.atomic.spinLoopHint();
     defer mutex.unlock();
 
-    var data: win.WIN32_FILE_ATTRIBUTE_DATA = undefined;
-    const exists = win.GetFileAttributesExW(@ptrCast(&path_buffer), win.GetFileExInfoStandard, &data) != 0;
-    const size = if (exists) (@as(u64, data.nFileSizeHigh) << 32) | data.nFileSizeLow else 0;
-    if (size > 0 and size + line.len > rotate_bytes) {
-        _ = win.DeleteFileW(@ptrCast(&old_path_buffer));
-        _ = win.MoveFileExW(@ptrCast(&path_buffer), @ptrCast(&old_path_buffer), win.MOVEFILE_REPLACE_EXISTING | win.MOVEFILE_WRITE_THROUGH);
+    var cwd = std.Io.Dir.cwd();
+    const path = path_buffer[0..path_len];
+    const old_path = old_path_buffer[0..old_path_len];
+    const size = if (cwd.statFile(runtime_io, path, .{})) |stat| stat.size else |_| 0;
+    if (shouldRotate(size, line.len)) {
+        cwd.deleteFile(runtime_io, old_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return,
+        };
+        cwd.rename(path, cwd, old_path, runtime_io) catch return;
     }
-    const file = win.CreateFileW(@ptrCast(&path_buffer), win.FILE_APPEND_DATA, win.FILE_SHARE_READ | win.FILE_SHARE_WRITE | win.FILE_SHARE_DELETE, null, win.OPEN_ALWAYS, win.FILE_ATTRIBUTE_NORMAL, null);
-    if (file == win.INVALID_HANDLE_VALUE) return;
-    defer _ = win.CloseHandle(file);
-    var written: win.DWORD = 0;
-    _ = win.WriteFile(file, line.ptr, @intCast(line.len), &written, null);
+    var file = cwd.createFile(runtime_io, path, .{ .read = true, .truncate = false }) catch return;
+    defer file.close(runtime_io);
+    const stat = file.stat(runtime_io) catch return;
+    file.writePositionalAll(runtime_io, line, stat.size) catch return;
 }
 
-test "rotation threshold is one MiB" {
+fn shouldRotate(size: u64, incoming: usize) bool {
+    return size > 0 and size + incoming > rotate_bytes;
+}
+
+test "rotation threshold is one MiB and never rotates an empty file" {
     try std.testing.expectEqual(@as(u64, 1_048_576), rotate_bytes);
+    try std.testing.expect(!shouldRotate(0, rotate_bytes + 1));
+    try std.testing.expect(!shouldRotate(rotate_bytes - 1, 1));
+    try std.testing.expect(shouldRotate(rotate_bytes, 1));
 }

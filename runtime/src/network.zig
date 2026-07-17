@@ -1,9 +1,10 @@
 const std = @import("std");
-const win = @cImport({
+const builtin = @import("builtin");
+const win = if (builtin.os.tag == .windows) @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
     @cInclude("windows.h");
     @cInclude("winhttp.h");
-});
+}) else struct {};
 
 pub const timeout_ms: c_int = 15_000;
 pub const response_cap_bytes: usize = 5 * 1024 * 1024;
@@ -83,6 +84,12 @@ pub fn originDeclared(origins: []const []const u8, host: []const u8) bool {
 /// only on bridge workers; automatic redirects are disabled so a response can
 /// never cross the manifest's host boundary behind the policy check.
 pub fn perform(request: *const Request, allocator: std.mem.Allocator) Result {
+    if (builtin.os.tag != .windows) {
+        // URL parsing and exact-origin policy remain portable in PR 03. The
+        // macOS HTTPS transport arrives in PR 05; until then a requested
+        // fetch fails explicitly through the existing bridge result shape.
+        return .{ .failure = .request_failed };
+    }
     return performFallible(request, allocator) catch |err| .{ .failure = switch (err) {
         error.HttpsRequired, error.InvalidUrl => .invalid_url,
         error.ResponseTooLarge => .response_too_large,
