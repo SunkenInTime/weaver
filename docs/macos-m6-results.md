@@ -155,6 +155,104 @@ held 34 descriptors; physical footprint ranged from 95.962 to 100.763 MB and
 teardown from 8.85 to 12.13 ms (10.56 ms mean). No renderer transition or
 leftover Widget process remained.
 
+## Post-closure memory correction and follow-up
+
+The published 95–124 MB process totals above included an accidental AppKit
+application icon cost, not a necessary price of one-process isolation or the
+retained renderer. A `no_activate` Widget runs with accessory activation
+policy and has no Dock or Command-Tab presence, but the host still decoded the
+default app icon and asked AppKit to adopt it. Allocation stacks attributed a
+33.571 MB Dock icon snapshot plus a 16 MiB purgeable-large allocation to that
+call. Native `73b6e20e` now plans no Dock icon for accessory processes and the
+host also refuses to publish one under accessory policy.
+
+The same production Clock measurement now ends at 29.590 MB physical
+(30.016 MB peak, 34 descriptors); forced software ends at 25.658 MB. Relative
+to the published 100.156 MB Metal Clock, this removes 70.566 MB / 70.46%, and
+the honest retained-Metal premium is 3.932 MB. The corrected `vmmap` contains
+neither the prior CG-image region nor `MALLOC_LARGE`. This does not merge
+Widgets or weaken the crash-isolation contract: every Widget remains one
+process.
+
+The next live target was the production raster cache. The composite path
+uploaded every command raster to a Metal texture but also retained the CPU
+`CGImage` used by the hybrid/reference renderer. The cache now skips that
+second representation in production, while `NATIVE_SDK_GPU_COMPARE=1` and the
+CPU path explicitly retain it. An interleaved 60 Hz synthetic A/B measured:
+
+| Production binary | Runs | Physical mean | Physical median | CPU mean | CG raster region |
+|---|---:|---:|---:|---:|---:|
+| Before | 3 | 53.156 MB | 52.774 MB | 20.87% | 5.872–5.904 MiB virtual |
+| GPU texture only | 4 | 51.451 MB | 51.594 MB | 16.83% | absent |
+
+The physical saving is 1.705 MB by mean / 1.180 MB by median. Short CPU
+samples are load-sensitive, so the lower candidate CPU is only a
+non-regression signal, not a performance claim. Metal graphics and IOSurface
+regions were unchanged, every run retained 34 descriptors, and the explicit
+GPU-vs-CPU comparator produced 199 consecutive frames with zero differing
+pixels.
+
+The remaining active memory is mostly honest surface storage: the three
+CAMetalLayer drawables, the retained canvas target, and cached command
+textures. Forcing two drawables saved about 3.54 MB in the short run, but made
+`nextDrawable` wait 3.734/5.080/5.862 ms at p50/p90/p99 and moved frame p90
+from the published 16.704 ms to 17.961 ms. That trade was rejected rather than
+buy memory with input/frame latency. The machine-readable follow-up is
+[`macos-m6-memory-data.json`](macos-m6-memory-data.json).
+
+## Active renderer CPU and retained-target follow-up
+
+Sampling the corrected production binary under the 60 Hz synthetic fixture
+showed that its largest remaining CPU cost was not JavaScript or packet decode.
+Twenty-eight changing solid rounded bars were rebuilt through CoreGraphics,
+allocated as transient command rasters, and uploaded as Metal textures every
+frame. A five-second stack sample attributed most active main-thread work to
+`rasterCacheBuildEntryForCommand` and CoreGraphics path antialiasing.
+
+Native `91949e15` makes an untransformed, solid rounded rectangle one analytic
+Metal quad. The fragment shader uses per-corner signed-distance coverage and
+premultiplied source-over color; transformed, gradient, or fractionally clipped
+commands still use the reference raster path. The same change keeps the normal
+retained canvas in private GPU storage. Backdrop blur, incremental verification,
+GPU comparison, screenshot capture, and pixel fallback explicitly allocate a
+CPU-readable shared target instead. A patch that introduces blur over a private
+baseline refuses before mutation and takes the engine's normal full-resync path.
+
+An interleaved A/B used the exact pre-change production executable recovered
+from Zig's content-addressed cache, then alternated baseline/candidate twice.
+Every run used the same 480x320-point Retina-2x fixture, three-second warmup,
+eight-second sample, 34 descriptors, and a clean exit:
+
+| Production renderer | CPU mean | Physical mean | Frame mean | Frame p50 |
+|---|---:|---:|---:|---:|
+| CPU-raster rounded bars | 17.29% | 51.856 MB | 16.656 ms | 16.666 ms |
+| Analytic Metal + private target | 8.61% | 41.493 MB | 16.646 ms | 16.664 ms |
+
+That is 8.68 percentage points / 50.22% less CPU and 10.363 MB / 19.98%
+less physical memory under the active workload. The native composite phase's
+draw-time mean fell from 1.253 ms to 0.143 ms; traces changed from 28 fresh
+raster fills per frame to zero fills and 29 direct primitives. The two
+candidate frame-p90 values (16.725 and 18.142 ms) were no worse than their
+interleaved baselines (17.344 and 18.263 ms), so the saving did not buy a
+headline by stretching cadence.
+
+The private-target change was also isolated from the rounded-rectangle change.
+On this unified-memory M2 its physical saving is deliberately reported as
+small: 0.238 MB / 0.57% in the active fixture and 0.197 MB / 0.69% across two
+interleaved quiet Clock pairs. The final quiet Clock mean was 0.32% of one core
+and 28.452 MB physical. The mapping change remains useful architecture and may
+matter more on discrete-memory Intel, but it is not counted as the main win.
+
+The analytic silhouette was inspected from the actual GPU target at 960x640,
+and the full AppKit GPU-dashboard smoke passed pointer input, resize, byte-exact
+incremental verification, accessibility, teardown, and zero new WebKit helper
+processes. The analytic edge intentionally does not byte-match AppKit's cubic
+CoreGraphics antialiasing: the diagnostic CPU comparator reports differences
+only for that changed rounded-edge raster contract (12,398-14,532 pixels of
+614,400 in the sampled synthetic frames, maximum channel delta 35). This is not
+reported as zero; the unchanged raster fallback remains the parity reference
+for commands outside the direct primitive.
+
 ## Instruments and physical-environment boundary
 
 The required before/after Instruments capture cannot launch on this machine.

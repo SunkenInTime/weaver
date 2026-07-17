@@ -22,7 +22,9 @@ const environment = {
   WEAVER_AUDIO_TEST_CONTROL: audioControl,
 };
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
+const registryFile = join(dataRoot, "registry.json");
 const statusFile = join(dataRoot, "status.json");
+const hostExecutable = join(repoRoot, "host", "zig-out", "Weaverd.app", "Contents", "MacOS", "weaverd");
 const clockSource = join(scratch, "clock", "widget.tsx");
 const runtimeRootPrefix = `weaver-${process.getuid()}-`;
 const runtimeSearchRoots = [...new Set([tempRoot, realpathSync("/tmp")])];
@@ -123,6 +125,44 @@ try {
   assert.equal(devExit.code, 0, `weaver dev did not exit cleanly: ${JSON.stringify(devExit)}\n${devStderr}`);
   devProcess = undefined;
   await waitFor("dev registration removal acknowledgement", () => status()?.widgets?.length === 0);
+
+  run(["install", join(repoRoot, "examples", "now-playing")]);
+  const unavailableMedia = await waitFor("explicit unavailable macOS media status", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    const providers = document?.providers;
+    return widget?.name === "Now Playing" && widget.state === "running" &&
+      providers?.mediaAvailability === "unavailable" && providers.mediaSubscribers === 1 &&
+      providers.mediaPipeFrames === 0 && { document, widget, providers };
+  });
+  trackedPids.add(unavailableMedia.widget.pid);
+  const mediaRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
+    .filter((name) => name.startsWith(runtimeRootPrefix))
+    .map((name) => join(root, name)))
+    .filter((path) => !runtimeEntriesBefore.has(path))
+    .find((path) => existsSync(join(path, "control.sock")));
+  assert.ok(mediaRuntimeRoot, "macOS media test could not find the host runtime root");
+  const mediaProviderSockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
+  assert.equal(mediaProviderSockets.length, 0, "unavailable media allocated a provider socket or reader thread");
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
+  assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
+  run(["uninstall", "Now Playing"]);
+  await waitFor("unavailable media teardown", () => {
+    const document = status();
+    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 && document;
+  });
+
+  const validEmptyRegistry = readFileSync(registryFile, "utf8");
+  writeFileSync(registryFile, "{ malformed\n", "utf8");
+  const rejectedReload = spawnSync(hostExecutable, ["--signal-reload"], { cwd: repoRoot, env: environment, encoding: "utf8" });
+  assert.equal(rejectedReload.status, 1, `malformed registry reload unexpectedly passed\n${rejectedReload.stderr}`);
+  assert.match(rejectedReload.stderr, /RegistryReloadFailed/);
+  assert.equal(alive(status().hostPid), true, "malformed registry killed the host");
+  assert.deepEqual(status().widgets, [], "malformed registry changed the live supervisor slots");
+  writeFileSync(registryFile, validEmptyRegistry, "utf8");
+  const recoveredReload = spawnSync(hostExecutable, ["--signal-reload"], { cwd: repoRoot, env: environment, encoding: "utf8" });
+  assert.equal(recoveredReload.status, 0, `valid registry did not recover acknowledged reload\n${recoveredReload.stderr}`);
 
   run(["init", "alpha"]);
   run(["init", "beta"]);

@@ -73,6 +73,9 @@ try {
   trackedPids.add(first.hostPid);
   assert.deepEqual(first.widgets, []);
   assert.equal(first.providers.audioCaptureActive, false);
+  assert.equal(first.providers.mediaAvailability, "unavailable");
+  assert.equal(first.providers.mediaSubscribers, 0);
+  assert.equal(first.providers.mediaPipeFrames, 0);
   assert.match(run(["up"]).stdout, /already running/);
   const reported = JSON.parse(run(["status", "--json"]).stdout);
   assert.equal(reported.hostPid, first.hostPid);

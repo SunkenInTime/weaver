@@ -6,8 +6,10 @@ shared as source, remixed by anyone's agent.
 Weaver is a cross-platform desktop widget platform (think Rainmeter, rebuilt
 for 2026): widgets are single TypeScript components rendered by a native
 runtime — no browser, no webview. Each widget is its own crash-isolated
-process at **~13 MB of private memory and 0% idle CPU**, drawn with per-pixel
-transparency on the desktop layer.
+process, drawn with per-pixel transparency on the desktop layer. Current
+platform-specific cost measurements are published with the milestone results;
+the corrected macOS retained renderer is roughly 28.5 MB for the measured quiet
+Clock Widget and is not represented by the older Windows memory number.
 
 ```tsx
 import { useProvider, widget } from "@weaver/sdk";
@@ -35,7 +37,7 @@ That file is a complete widget. It is also the *distribution format*: a
 shared Weaver widget is always its source — what you read is what runs, and
 every install is a potential remix.
 
-## Status: v0 (pre-alpha), Windows + macOS port in progress
+## Status: v0 (pre-alpha), Windows + macOS developer builds
 
 The conjure and source-sharing loops work end to end on Windows and macOS:
 scaffold → agent edits the TSX → `weaver check` (agent-readable errors) →
@@ -43,7 +45,8 @@ scaffold → agent edits the TSX → `weaver check` (agent-readable errors) →
 `inspect` / `install` / `uninstall` / `logs` lifecycle uses the same `.weave`
 bytes and install-owned source boundary on both platforms. macOS now has its
 native supervisor, acknowledged lifecycle, crash/backoff recovery, process
-cost status, and state-preserving dev hot swap from PR 10 of the
+cost status, state-preserving dev hot swap, retained Metal renderer, and
+host-owned providers from the stacked
 [Lane D implementation plan](docs/macos-port-brief.md). See the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
 [`docs/m1-results.md`](docs/m1-results.md), plus the portable artifact evidence
@@ -62,30 +65,101 @@ and does not depend on private MediaRemote APIs. See
 ## Quickstart
 
 Prerequisites: Windows 11 or macOS 14.2+, [Node 22+](https://nodejs.org), and
-[Zig 0.16.0](https://ziglang.org/download/) on PATH.
+[Zig 0.16.0](https://ziglang.org/download/) on PATH. Clone the reviewed Native
+SDK fork commit with the repository:
 
-```powershell
+```sh
 git clone --recurse-submodules https://github.com/SunkenInTime/weaver
 cd weaver
-npm install
-cd runtime; zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off; cd ..
-
-node cli\bin\weaver.js init myclock
-node cli\bin\weaver.js dev myclock
-
-node cli\bin\weaver.js pack myclock
-node cli\bin\weaver.js install myclock.weave
+npm ci
 ```
 
-On macOS, build the runtime with `cd runtime && zig build
--Doptimize=ReleaseFast`, build the host with `cd host && zig build
--Doptimize=ReleaseFast`, and use `node cli/bin/weaver.js`. `up`, `down`,
-`status`, `dev`, and all artifact commands above are available. Before running
-an audio-reactive Widget, authorize the signed host identity in the foreground:
+On macOS:
+
+```sh
+(cd runtime && zig build -Doptimize=ReleaseFast)
+(cd host && zig build -Doptimize=ReleaseFast)
+
+node cli/bin/weaver.js init myclock
+node cli/bin/weaver.js check myclock
+node cli/bin/weaver.js dev myclock
+```
+
+On Windows PowerShell:
+
+```powershell
+Push-Location runtime
+zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+Pop-Location
+Push-Location host
+zig build -Doptimize=ReleaseFast
+Pop-Location
+
+node cli\bin\weaver.js init myclock
+node cli\bin\weaver.js check myclock
+node cli\bin\weaver.js dev myclock
+```
+
+Stop `dev` with Ctrl-C. The portable artifact loop is the same on both systems:
+
+```sh
+node cli/bin/weaver.js pack myclock
+node cli/bin/weaver.js inspect myclock.weave
+node cli/bin/weaver.js install myclock.weave
+node cli/bin/weaver.js uninstall Myclock
+```
+
+On Windows, use backslashes in the CLI path. Before running an audio-reactive
+Widget on macOS, authorize the signed host identity in the foreground:
 
 ```sh
 node cli/bin/weaver.js audio authorize
 ```
+
+### macOS diagnostics and permission reset
+
+```sh
+node cli/bin/weaver.js status --json
+node cli/bin/weaver.js logs "Clock"
+node cli/bin/weaver.js logs "Clock" --follow
+codesign --verify --deep --strict host/zig-out/Weaverd.app
+plutil -p host/zig-out/Weaverd.app/Contents/Info.plist
+```
+
+To discard every privacy decision associated with the development host bundle,
+stop it, reset that one bundle identity, rebuild, and authorize again:
+
+```sh
+node cli/bin/weaver.js down
+tccutil reset All com.sunkenintime.weaver.host
+(cd host && zig build -Doptimize=ReleaseFast)
+node cli/bin/weaver.js audio authorize
+```
+
+`tccutil reset All` is intentionally bundle-scoped but broader than audio: it
+removes every saved privacy choice for that host ID. Diagnostics never require
+disabling SIP, Gatekeeper, the firewall, or any global security control.
+
+### Development support matrix
+
+| Target | Automated gate | Physical status |
+|---|---|---|
+| Windows 11 x64 | Build, runtime/host/unit, portable artifact and example surfaces | Existing production/reference platform |
+| macOS 14.2+ Apple silicon | Clean build, headless suites, real AppKit Widget/session/provider/crash/teardown gate | M2 MacBook Air measured and visually exercised |
+| macOS 14.2+ Intel | Build, runtime/host/unit, portable artifact and nonvisual daemon lifecycle | Physical Intel hardware unverified |
+| Linux | None | Unsupported |
+
+The initial distribution is a source checkout and ad-hoc-signed developer host,
+not a notarized installer, login item, App Store product, or universal package.
+The remaining physical limits are explicit: external-display arrangements,
+Stage Manager/Space/fullscreen/lock and sleep/wake coverage, post-grant System
+Audio revocation and physical route recovery, Bluetooth/AirPlay, and Developer
+ID notarization are not inferred from automation. OS screen capture, Show
+Desktop, and integrated-output System Audio capture now have physical evidence.
+macOS media is unavailable by ADR 0015.
+See [`macos-m12-results.md`](docs/macos-m12-results.md) and the live
+[`macos-run-status.md`](docs/macos-run-status.md) for the exact gates and
+blockers.
 
 Or do it the intended way: point your coding agent at
 [`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it

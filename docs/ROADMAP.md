@@ -1,9 +1,11 @@
 # Roadmap
 
 Ordering set by Dara, 2026-07-15. Current state: M0–M4b, fork consolidation,
-dev hot-swap/logs, and the Windows per-monitor DPI contract are complete. The
-portable `.weave` pack/install boundary is implemented; capability grants are
-the next trust-boundary work.
+dev hot-swap/logs, the Windows per-monitor DPI contract, and the macOS
+developer-build implementation stack are complete. The portable `.weave`
+pack/install boundary is implemented; capability grants are the next
+trust-boundary work. macOS physical-session blockers remain explicit rather
+than being relabeled as implementation work.
 
 1. **Fork consolidation — complete** — consolidate the stacked fork branches into one
    clean `weaver-main` lineage; make the widget capacity profile a build option
@@ -25,9 +27,12 @@ the next trust-boundary work.
 5. **The manager + API breadth** — weaverd tray + widget-list/cost/permission
    surface (candidate: first Weaver app built with Weaver). Remote images,
    canvas gradients/paths, media control, network/battery providers.
-6. **[macOS](macos-port-brief.md)** — performance-native AppKit windowing, a
-   measured software/Metal architecture, provider shims, and Mac CI. The
-   platform seam pays rent.
+6. **[macOS](macos-port-brief.md) — developer stack complete, physical gates open** —
+   performance-native AppKit windowing, measured retained Metal with software
+   fallback, host-owned providers, artifact/daemon parity, and Apple
+   silicon/Intel CI. External-display/desktop-management, real audio consent
+   and routes, sleep/wake, physical Intel, and notarized packaging remain named
+   verification/distribution work.
 7. **Gallery** — hosted browse / one-click install / remix lineage /
    capability badges.
 8. **Packaging** — installer/winget bundle (weaverd, renderer, runtime, CLI,

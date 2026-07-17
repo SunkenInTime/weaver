@@ -1,41 +1,55 @@
 # weaverd
 
-`weaverd.exe` is intentionally a standalone Zig Win32 process, not a Native
-SDK application. M2 has no host UI, so constructing the Native renderer and
+`weaverd` is intentionally a standalone native process, not a Native SDK
+application. It owns singleton acquisition, registration reconciliation,
+crash/backoff supervision, process cost sampling, provider lifetime/fan-out,
+and acknowledged reload/shutdown. Constructing the Widget renderer and
 QuickJS in the one always-running process would spend memory without buying a
-capability. A later settings window can be a separate Native client or justify
-changing that boundary explicitly.
+host capability.
 
-Build with the repository's pinned Zig toolchain and an installed Windows 10
-SDK. The build discovers the SDK through the same registry metadata as Zig and
-uses its C++/WinRT projection plus `windowsapp.lib`; no package-manager C++
-dependency is required.
+Build and test on macOS 14.2 or later:
+
+```sh
+zig build -Doptimize=ReleaseFast
+zig build test -Doptimize=ReleaseFast
+codesign --verify --deep --strict zig-out/Weaverd.app
+```
+
+The macOS build emits an ad-hoc-signed `Weaverd.app` agent with bundle ID
+`com.sunkenintime.weaver.host`, deployment floor 14.2, and the System Audio
+Recording usage description. The CLI launches only its nested executable so
+authorization, daemon work, and status share one stable identity. This is a
+developer build, not a Developer ID/notarized distribution claim.
+
+On Windows, build with the repository's Zig toolchain and an installed Windows
+10 SDK:
 
 ```powershell
-$env:PATH = 'E:\Projects\native-spike\zig\zig-x86_64-windows-0.16.0;' + $env:PATH
 zig build -Doptimize=ReleaseFast
 zig build test -Doptimize=ReleaseFast
 ```
 
-The TypeScript CLI remains the sole widget checker/bundler. The host invokes
-that CLI only when `widget.tsx` is newer than `dist/bundle.js` or the dist
-manifest is missing; it never grows a second TSX pipeline.
+The build discovers the SDK and uses its C++/WinRT projection plus
+`windowsapp.lib`; no package-manager C++ dependency is required. The
+TypeScript CLI remains the sole Widget checker/bundler on both platforms. The
+host invokes it only when `widget.tsx` is newer than `dist/bundle.js` or the
+dist manifest is missing.
 
-Operational state lives under `%LOCALAPPDATA%\weaver`: `registry.json` is the
-persistent registration index, `widgets/` contains validated install-owned
-source copies, and `status.json` is the atomically replaced two-second cost
-snapshot consumed by `weaver status`. The supervisor uses a
-named mutex for singleton ownership and named events for reload/shutdown.
-Provider data has a separate outbound named pipe per subscribed widget.
+Persistent state lives at `%LOCALAPPDATA%\weaver` on Windows and
+`~/Library/Application Support/Weaver` on macOS. macOS logs live at
+`~/Library/Logs/Weaver`. Windows uses named synchronization objects and one
+outbound provider pipe per subscribed Widget. macOS uses one acknowledged
+control Unix socket and one unguessable, user-only provider socket per Widget
+that subscribes to an available host provider; stale child ownership is
+validated against the exact runtime executable before recovery.
 
-M3 keeps the provider ownership obvious:
+Provider ownership stays obvious:
 
-- WASAPI loopback and SMTC ABI work live in one C++ file. The audio boundary
-  returns normalized mono samples; the 2048-point FFT, 32 logarithmic bands,
-  AGC, silence state, JSON formatting, and fan-out are Zig.
-- Audio capture exists only while at least one running widget subscribes. It
-  emits one JSON line at 30 Hz while audible, emits zeros during the two-second
-  decay hold, sends one final zero, then stops pipe traffic until sound resumes.
-- SMTC is polled once per second only while subscribed. Serialized equality
-  makes metadata change-pushed and naturally retains the required 1 Hz playing
-  position update.
+- CPU and memory are sampled once by the host only while subscribed, then
+  fanned out.
+- Audio uses one capture and the shared 2048-point FFT, 32-band AGC/silence
+  pipeline. macOS uses the public Core Audio process tap from 14.2 and explicit
+  authorization; Windows uses WASAPI loopback.
+- Windows media uses the public system media-session manager. macOS media is
+  explicitly unavailable, allocates no endpoint or polling timer, emits no
+  fabricated frame, and never loads private MediaRemote.

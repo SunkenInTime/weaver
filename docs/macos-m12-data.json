@@ -1,0 +1,150 @@
+{
+  "schema": "weaver.macos-release-closure.v1",
+  "recorded_at": "2026-07-15T16:45:00Z",
+  "weaver_implementation_commit": "359be90b8f53d4ed46e428ba023b7ac59d90e85a",
+  "native_sdk_commit": "9cb7cd98055e15d68f5f6f81a6debe23186cb6db",
+  "machine": {
+    "model": "MacBook Air",
+    "chip": "Apple M2",
+    "memory_gib": 8,
+    "architecture": "arm64",
+    "macos_version": "26.5.1",
+    "macos_build": "25F80",
+    "zig": "0.16.0",
+    "node_local": "23.11.0",
+    "node_ci": "22"
+  },
+  "local_gates": {
+    "npm_build": "pass",
+    "npm_typecheck": "pass",
+    "npm_test": { "status": "pass", "passed": 22, "failed": 0 },
+    "release_audit": "pass",
+    "portable_install_artifact_logs_follow": "pass",
+    "example_surfaces": { "status": "pass", "count": 8 },
+    "runtime_platform_services": "pass",
+    "runtime_tests": "pass",
+    "runtime_release_build": "pass",
+    "host_tests": "pass",
+    "host_release_build": "pass",
+    "host_codesign_strict": "pass",
+    "host_bundle_id": "com.sunkenintime.weaver.host",
+    "host_minimum_macos": "14.2",
+    "media_public_api_probe": "pass",
+    "native_sdk_stock_profile": "pass",
+    "native_sdk_widget_profile": "pass",
+    "macos_host_control_smoke": "pass",
+    "macos_host_real_widget_smoke": "pass",
+    "native_gpu_dashboard_drawable_sample": "pass:0xff171717",
+    "native_webview_system_link": "pass",
+    "screen_capture_3420x2224": "pass",
+    "show_desktop_recording": "pass"
+  },
+  "ci_jobs": {
+    "windows_gate": "pass",
+    "macos_headless_apple_silicon": "pass",
+    "macos_headless_intel": "pass",
+    "macos_session_apple_silicon": "pass"
+  },
+  "clean_clone": {
+    "status": "pass",
+    "branch": "macos/16-ci-regression-closure",
+    "commit": "359be90b8f53d4ed46e428ba023b7ac59d90e85a",
+    "native_sdk_commit": "9cb7cd98055e15d68f5f6f81a6debe23186cb6db",
+    "quickstart_dev_backend": "metal-composite",
+    "artifact_name": "Myclock",
+    "teardown_processes": 0
+  },
+  "media_unavailable": {
+    "status_value": "unavailable",
+    "subscriber_count_exposed": true,
+    "pipe_frames": 0,
+    "provider_socket_created": false,
+    "fabricated_frame": false,
+    "private_api_dependency": false
+  },
+  "permissioned_physical": {
+    "screen_recording": {
+      "status": "pass",
+      "chronicle_fresh_frame": true,
+      "direct_capture_pixels": [3420, 2224],
+      "clock_window_pixels": [480, 220],
+      "clock_corner_rgba": [0, 0, 0, 0],
+      "show_desktop": "pass",
+      "recording": "macos-m12-show-desktop.mov"
+    },
+    "system_audio": {
+      "status": "pass-integrated-output",
+      "authorization_cli_exit": 0,
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "duration_seconds": 5,
+      "callbacks": 470,
+      "captured_frames": 240640,
+      "fanout_samples": 721920,
+      "mean_rms": 0.0037366,
+      "peak": 0.09918,
+      "first_callback_ms": 2459.87,
+      "signal_after_playback_ms": 390.68,
+      "production_capture_starts": 1,
+      "production_availability": "live",
+      "visualizer_backend": "gpu",
+      "active_frames": 60,
+      "parked_frames": 94,
+      "parked_counter_stable_seconds": 2.5,
+      "resumed_frames": 120
+    }
+  },
+  "failure_routing": [
+    {
+      "failure": "revocation smoke could race with live frames captured before the control transition",
+      "fixed_in": "2001014d4118ff4ee985dd893647566d32dd6308",
+      "resolution": "wait for revoked state then assert the frame counter remains stable across a later status interval; exact final-zero count remains unit-tested"
+    },
+    {
+      "failure": "first PR16 local session attempt used an older PR13 host binary and status lacked mediaAvailability",
+      "resolution": "rebuilt the host from the current checkout; full smoke passed; clean CI builds before running the session gate"
+    },
+    {
+      "failure": "Windows SIGINT teardown and portable logs-follow exposed platform-specific process and log lifecycle gaps",
+      "fixed_in": "8d44b331ba6c80444ce68942861cde059ff44c76",
+      "resolution": "closed the portable logs and Quickstart teardown paths without weakening the matrix"
+    },
+    {
+      "failure": "npm install normalized cli/bin/weaver.js to a non-executable mode in a clean checkout",
+      "fixed_in": "8a473bf279aec884a13c41f1311dc88eda5b2957",
+      "resolution": "committed the launcher as mode 100755"
+    },
+    {
+      "failure": "the retained Metal texture was correct but the real CAMetalDrawable was only cleared because the presenter pipeline and sampler were not initialized",
+      "fixed_in": "a74c0214219cadfebf2233a13edf214f89846d49",
+      "resolution": "initialize the presenter before the compositor and assert the exact drawable sample"
+    },
+    {
+      "failure": "desktop-icon-minus-one flattened a premultiplied transparent desktop window against white",
+      "fixed_in": "4b29f818ec2a80833d8c05d0cad85dd75111d91a",
+      "resolution": "use wallpaper-plus-one, keep the widget below Finder desktop items, and propagate premultiplied alpha to the CAMetalLayer"
+    },
+    {
+      "failure": "the standalone macOS WebView example omitted the embedded production metallib and failed to link",
+      "fixed_in": "9cb7cd98055e15d68f5f6f81a6debe23186cb6db",
+      "resolution": "link the same build-time metallib symbols as generated applications"
+    }
+  ],
+  "unverified_physical": [
+    "external displays on every side and reconnect",
+    "Stage Manager, Space switching, fullscreen, lock and unlock",
+    "sleep and wake",
+    "real System Audio Recording revocation, protected-stream policy, physical route loss and recovery, and sustained callback cost",
+    "Bluetooth and AirPlay",
+    "physical Intel runtime and performance",
+    "Instruments and privileged whole-SoC energy",
+    "Developer ID signing, notarization, App Sandbox, universal packaging, and login item"
+  ],
+  "cleanup": {
+    "weaver_processes": 0,
+    "new_runtime_roots": 0,
+    "test_registrations": 0,
+    "test_permission_helpers": 0,
+    "user_data_deleted": false
+  }
+}

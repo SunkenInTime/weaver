@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "recorded": "2026-07-15",
+  "hardware": {
+    "model": "MacBook Air",
+    "soc": "Apple M2",
+    "memory_bytes": 8589934592,
+    "macos": "26.5.1 (25F80)",
+    "architecture": "arm64"
+  },
+  "build": {
+    "weaver_branch": "macos/16-ci-regression-closure",
+    "native_branch": "macos/06-composite-presenter-closure",
+    "native_commit": "91949e15",
+    "optimize": "ReleaseFast",
+    "widget_profile": true,
+    "automation": false
+  },
+  "dock_icon_fix": {
+    "published_before": {
+      "clock_metal_physical_bytes": 100156000,
+      "clock_software_physical_bytes": 94766000,
+      "source": "docs/macos-m6-results.md"
+    },
+    "after": {
+      "clock_metal_physical_bytes": 29590416,
+      "clock_metal_peak_bytes": 30016400,
+      "clock_metal_cpu_percent_one_core_mean": 1.2,
+      "clock_metal_file_descriptors": 34,
+      "clock_software_physical_bytes": 25658184,
+      "metal_premium_bytes": 3932232,
+      "source": ".zig-cache/memory-iconfix-clock-metal-1.json",
+      "software_source": ".zig-cache/memory-iconfix-clock-software-1.json"
+    },
+    "saved_bytes": 70565584,
+    "saved_percent": 70.45567314988618,
+    "cause": "AppKit generated and retained a large Dock icon snapshot for a no-activate accessory process",
+    "allocation_evidence": {
+      "dock_icon_snapshot_bytes": 33570816,
+      "additional_purgeable_large_bytes": 16777216,
+      "after_cg_image_region_present": false,
+      "after_malloc_large_region_present": false
+    }
+  },
+  "gpu_raster_cache_fix": {
+    "workload": "examples/m4b-synthetic/dist, 480x320 points at Retina 2x, 60 Hz",
+    "method": "interleaved production binary A/B; 3 second warmup and 3 one-second samples per run",
+    "baseline_runs": [
+      {"physical_bytes": 54018936, "peak_bytes": 55772024, "cpu_percent_one_core_mean": 18.133333333333333, "threads_mean": 9.0, "file_descriptors": 34},
+      {"physical_bytes": 52773752, "peak_bytes": 54625144, "cpu_percent_one_core_mean": 21.400000000000002, "threads_mean": 8.0, "file_descriptors": 34},
+      {"physical_bytes": 52675472, "peak_bytes": 54543248, "cpu_percent_one_core_mean": 23.066666666666666, "threads_mean": 7.0, "file_descriptors": 34}
+    ],
+    "candidate_runs": [
+      {"physical_bytes": 50316200, "peak_bytes": 53412776, "cpu_percent_one_core_mean": 20.833333333333332, "threads_mean": 7.0, "file_descriptors": 34},
+      {"physical_bytes": 52298640, "peak_bytes": 54297488, "cpu_percent_one_core_mean": 15.700000000000001, "threads_mean": 8.0, "file_descriptors": 34},
+      {"physical_bytes": 50922384, "peak_bytes": 52904848, "cpu_percent_one_core_mean": 16.5, "threads_mean": 9.0, "file_descriptors": 34},
+      {"physical_bytes": 52265848, "peak_bytes": 54133648, "cpu_percent_one_core_mean": 14.299999999999999, "threads_mean": 8.0, "file_descriptors": 34}
+    ],
+    "baseline_physical_bytes_mean": 53156053.333333336,
+    "baseline_physical_bytes_median": 52773752,
+    "candidate_physical_bytes_mean": 51450768,
+    "candidate_physical_bytes_median": 51594116,
+    "mean_saved_bytes": 1705285.3333333358,
+    "median_saved_bytes": 1179636,
+    "baseline_cpu_percent_one_core_mean": 20.866666666666664,
+    "candidate_cpu_percent_one_core_mean": 16.833333333333332,
+    "baseline_cg_raster_virtual_kib_range": [5872, 5904],
+    "candidate_cg_raster_region_present": false,
+    "ioaccelerator_graphics_unchanged": true,
+    "iosurface_unchanged": true,
+    "comparison_frames": 199,
+    "comparison_differing_pixels": 0,
+    "sources": [
+      ".zig-cache/ab-baseline-2.json",
+      ".zig-cache/ab-baseline-3.json",
+      ".zig-cache/ab-baseline-4.json",
+      ".zig-cache/ab-candidate-1.json",
+      ".zig-cache/ab-candidate-2.json",
+      ".zig-cache/ab-candidate-3.json",
+      ".zig-cache/ab-candidate-4.json"
+    ]
+  },
+  "active_renderer_follow_up": {
+    "native_commit": "91949e15e3a17870de970242cfedfcfd0554504e",
+    "workload": "examples/m4b-synthetic/dist, 480x320 points at Retina 2x, 60 Hz",
+    "method": "interleaved exact production-binary A/B; baseline, candidate, baseline, candidate; 3 second warmup and 8 second sample",
+    "baseline_runs": [
+      {"physical_bytes": 52495272, "cpu_percent_one_core_mean": 17.2625, "frame_interval_ms": {"mean": 16.650, "p50": 16.667, "p90": 17.344, "p99": 18.493}, "file_descriptors": 34},
+      {"physical_bytes": 51217248, "cpu_percent_one_core_mean": 17.3125, "frame_interval_ms": {"mean": 16.661, "p50": 16.665, "p90": 18.263, "p99": 18.604}, "file_descriptors": 34}
+    ],
+    "candidate_runs": [
+      {"physical_bytes": 41550688, "cpu_percent_one_core_mean": 9.475, "frame_interval_ms": {"mean": 16.655, "p50": 16.664, "p90": 16.725, "p99": 17.129}, "file_descriptors": 34},
+      {"physical_bytes": 41436000, "cpu_percent_one_core_mean": 7.7375, "frame_interval_ms": {"mean": 16.636, "p50": 16.664, "p90": 18.142, "p99": 18.517}, "file_descriptors": 34}
+    ],
+    "baseline_cpu_percent_one_core_mean": 17.2875,
+    "candidate_cpu_percent_one_core_mean": 8.60625,
+    "cpu_saved_percentage_points": 8.68125,
+    "cpu_saved_percent": 50.216919739696315,
+    "baseline_physical_bytes_mean": 51856260,
+    "candidate_physical_bytes_mean": 41493344,
+    "physical_saved_bytes_mean": 10362916,
+    "physical_saved_percent": 19.9839363794458,
+    "native_draw_time_us": {
+      "baseline_mean": 1253.0,
+      "candidate_mean": 143.2,
+      "baseline_fresh_raster_fills_per_frame": 28,
+      "candidate_fresh_raster_fills_per_frame": 0,
+      "candidate_direct_primitives_per_frame": 29
+    },
+    "private_target_isolation": {
+      "active_shared_physical_bytes_mean": 41616236,
+      "active_private_physical_bytes_mean": 41378644,
+      "active_saved_bytes_mean": 237592,
+      "active_saved_percent": 0.5709114454793036,
+      "quiet_clock_shared_physical_bytes_mean": 28648300,
+      "quiet_clock_private_physical_bytes_mean": 28451656,
+      "quiet_clock_saved_bytes_mean": 196644,
+      "quiet_clock_saved_percent": 0.686404109842118
+    },
+    "quiet_clock": {
+      "cpu_percent_one_core_mean": 0.32,
+      "physical_bytes_mean": 28451656,
+      "file_descriptors": 34
+    },
+    "validation": {
+      "native_test": "pass",
+      "gpu_dashboard_smoke": "pass",
+      "new_webkit_helper_processes": 0,
+      "incremental_mismatches": 0,
+      "gpu_screenshot_dimensions": [960, 640],
+      "appkit_reference_comparator_frames": 67,
+      "appkit_reference_differing_pixels_range": [12398, 14532],
+      "appkit_reference_max_channel_delta": 35,
+      "comparator_note": "analytic signed-distance rounded edges intentionally differ from AppKit cubic CoreGraphics antialiasing"
+    },
+    "sources": [
+      ".zig-cache/cpu-final-ab-baseline-1.json",
+      ".zig-cache/cpu-final-ab-candidate-1.json",
+      ".zig-cache/cpu-final-ab-baseline-2.json",
+      ".zig-cache/cpu-final-ab-candidate-2.json",
+      ".zig-cache/cpu-storage-ab-shared-1.json",
+      ".zig-cache/cpu-storage-ab-private-1.json",
+      ".zig-cache/cpu-storage-ab-shared-2.json",
+      ".zig-cache/cpu-storage-ab-private-2.json",
+      ".zig-cache/clock-storage-ab-shared-1.json",
+      ".zig-cache/clock-storage-ab-private-1.json",
+      ".zig-cache/clock-storage-ab-shared-2.json",
+      ".zig-cache/clock-storage-ab-private-2.json"
+    ]
+  },
+  "rejected_drawable_pool_reduction": {
+    "maximum_drawable_count": 2,
+    "short_run_physical_bytes": 49693608,
+    "short_run_saved_bytes": 3538920,
+    "frame_interval_ms": {"p50": 16.666, "p90": 17.961, "p99": 18.534},
+    "next_drawable_wait_us": {"p50": 3734, "p90": 5080, "p99": 5862},
+    "decision": "rejected because the memory saving added milliseconds of drawable wait and regressed frame cadence",
+    "source": ".zig-cache/memory-drawable2-soak-60s.json"
+  }
+}

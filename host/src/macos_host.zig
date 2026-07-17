@@ -330,7 +330,10 @@ const Host = struct {
         defer manifest.deinit();
         supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.renderBackend, false);
 
-        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media;
+        // ADR 0015 makes media explicitly unavailable on macOS. A media-only
+        // Widget keeps its no-data state without a socket, reader thread, or
+        // provider timer; supported providers still share one endpoint.
+        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio;
         var endpoint_path: ?[]u8 = null;
         defer if (endpoint_path) |path| self.allocator.free(path);
         if (needs_endpoint) {
@@ -558,6 +561,8 @@ const Host = struct {
             .audio_silent = self.audio_provider.silent,
             .audio_pipe_frames = self.audio_pipe_frames,
             .media_pipe_frames = 0,
+            .media_availability = "unavailable",
+            .media_subscribers = supervisor.subscriptionCount(&self.slots, .media, self),
             .audio_availability = self.audio_provider.availability.label(),
             .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
             .audio_capture_starts = self.audio_provider.capture_starts,
@@ -628,7 +633,10 @@ fn run(init: std.process.Init) !void {
     try std.Io.Dir.cwd().createDirPath(init.io, runtime_root);
     const runtime_root_z = try allocator.dupeZ(u8, runtime_root);
     defer allocator.free(runtime_root_z);
-    _ = c.weaver_chmod_private(runtime_root_z.ptr);
+    // The root name is predictable and may fall back to sticky /tmp, so a
+    // pre-created entry could be attacker-owned; endpoints only live in a
+    // directory proven to be ours, a real directory, and mode 0700.
+    if (c.weaver_secure_private_dir(runtime_root_z.ptr) != 0) return error.InsecureRuntimeRoot;
     defer std.Io.Dir.cwd().deleteTree(init.io, runtime_root) catch {};
 
     const registry_path = try std.fs.path.join(allocator, &.{ data_root, "registry.json" });
@@ -654,11 +662,15 @@ fn run(init: std.process.Init) !void {
     };
     defer host.audio_provider.deinit();
     try host.loadRegistry();
+    // launchd and logout deliver SIGTERM; without a handler the host would die
+    // uncleanly, orphaning widgets and the runtime root until the next start.
+    if (c.weaver_install_termination_handler() != 0) return error.SignalHandlerFailed;
     var stopping = false;
     var next_cost_ms: u64 = 0;
     var next_provider_ms: u64 = 0;
     var audio_availability = host.audio_provider.availability;
     while (!stopping) {
+        if (c.weaver_termination_requested() != 0) break;
         var acknowledge_reload = false;
         if (control.take()) |command| switch (command) {
             .reload => {
@@ -688,7 +700,7 @@ fn run(init: std.process.Init) !void {
             next_cost_ms = now + 2000;
         }
         if (acknowledge_reload) control.complete(.ok);
-        if (!stopping) try std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 30 else 50), .awake);
+        if (!stopping) std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 30 else 50), .awake) catch {};
     }
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
     host.audio_provider.setActive(false, monotonicMilliseconds());

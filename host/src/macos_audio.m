@@ -24,9 +24,11 @@ struct WeaverAudioCapture {
     _Atomic uint64_t write_index;
     _Atomic uint32_t references;
     bool listener_added;
+#if defined(WEAVER_AUTOMATION_SEAM)
     bool automation;
     double automation_phase;
     char automation_control[1024];
+#endif
     AudioObjectID tap;
     AudioObjectID aggregate;
     AudioDeviceIOProcID io_proc;
@@ -89,18 +91,22 @@ static void WeaverPushSamples(WeaverAudioCapture *state, const AudioBufferList *
 }
 
 static void WeaverAudioCleanup(WeaverAudioCapture *state) {
-    if (!state->automation) {
-        if (state->listener_added) {
-            AudioObjectPropertyAddress output = WeaverDefaultOutputAddress();
-            AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &output, WeaverDefaultOutputChanged, state);
-        }
-        if (state->io_proc && state->aggregate != kAudioObjectUnknown) {
-            AudioDeviceStop(state->aggregate, state->io_proc);
-            AudioDeviceDestroyIOProcID(state->aggregate, state->io_proc);
-        }
-        if (state->aggregate != kAudioObjectUnknown) AudioHardwareDestroyAggregateDevice(state->aggregate);
-        if (state->tap != kAudioObjectUnknown) AudioHardwareDestroyProcessTap(state->tap);
+#if defined(WEAVER_AUTOMATION_SEAM)
+    if (state->automation) {
+        free(state);
+        return;
     }
+#endif
+    if (state->listener_added) {
+        AudioObjectPropertyAddress output = WeaverDefaultOutputAddress();
+        AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &output, WeaverDefaultOutputChanged, state);
+    }
+    if (state->io_proc && state->aggregate != kAudioObjectUnknown) {
+        AudioDeviceStop(state->aggregate, state->io_proc);
+        AudioDeviceDestroyIOProcID(state->aggregate, state->io_proc);
+    }
+    if (state->aggregate != kAudioObjectUnknown) AudioHardwareDestroyAggregateDevice(state->aggregate);
+    if (state->tap != kAudioObjectUnknown) AudioHardwareDestroyProcessTap(state->tap);
     free(state);
 }
 
@@ -190,7 +196,9 @@ static void *WeaverAudioWorker(void *context) {
     return NULL;
 }
 
+#if defined(WEAVER_AUTOMATION_SEAM)
 static char WeaverAutomationMode(const WeaverAudioCapture *state);
+#endif
 
 WeaverAudioCapture *weaver_audio_create(void) {
     WeaverAudioCapture *state = calloc(1, sizeof(*state));
@@ -200,6 +208,7 @@ WeaverAudioCapture *weaver_audio_create(void) {
     state->aggregate = kAudioObjectUnknown;
     atomic_store_explicit(&state->status, WEAVER_AUDIO_STARTING, memory_order_relaxed);
 
+#if defined(WEAVER_AUTOMATION_SEAM)
     const char *automation = getenv("WEAVER_AUTOMATION");
     const char *control = getenv("WEAVER_AUDIO_TEST_CONTROL");
     if (automation && strcmp(automation, "1") == 0 && control && control[0] != '\0') {
@@ -220,6 +229,7 @@ WeaverAudioCapture *weaver_audio_create(void) {
         }
         return state;
     }
+#endif
 
     pthread_t thread;
     atomic_fetch_add_explicit(&state->references, 1, memory_order_relaxed);
@@ -254,6 +264,7 @@ int weaver_audio_default_device_is_current(const WeaverAudioCapture *state) {
     return state && !atomic_load_explicit(&state->device_changed, memory_order_acquire);
 }
 
+#if defined(WEAVER_AUTOMATION_SEAM)
 static char WeaverAutomationMode(const WeaverAudioCapture *state) {
     FILE *file = fopen(state->automation_control, "r");
     if (!file) return 's';
@@ -261,6 +272,7 @@ static char WeaverAutomationMode(const WeaverAudioCapture *state) {
     fclose(file);
     return mode == EOF ? 's' : (char)mode;
 }
+#endif
 
 int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t capacity, size_t *sample_count) {
     if (!state || !mono || !sample_count) return -1;
@@ -268,6 +280,7 @@ int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t capacity, s
     const int status = weaver_audio_status(state);
     if (status == WEAVER_AUDIO_STARTING) return 0;
     if (status != WEAVER_AUDIO_RUNNING) return -2;
+#if defined(WEAVER_AUTOMATION_SEAM)
     if (state->automation) {
         const char mode = WeaverAutomationMode(state);
         if (mode == 'p' || mode == 'r') {
@@ -288,6 +301,7 @@ int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t capacity, s
         *sample_count = count;
         return 0;
     }
+#endif
     uint64_t read = atomic_load_explicit(&state->read_index, memory_order_relaxed);
     const uint64_t write = atomic_load_explicit(&state->write_index, memory_order_acquire);
     const size_t available = (size_t)(write - read);

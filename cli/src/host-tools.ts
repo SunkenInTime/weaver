@@ -28,6 +28,8 @@ export interface ProviderStatus {
   audioProviderFrames: number;
   audioLastError: number;
   mediaPipeFrames: number;
+  mediaAvailability: "available" | "unavailable";
+  mediaSubscribers: number;
 }
 export interface StatusDocument { hostPid: number; providers: ProviderStatus; widgets: WidgetStatus[] }
 export interface RegistryLockOptions { timeoutMs?: number; retryMs?: number; staleMs?: number }
