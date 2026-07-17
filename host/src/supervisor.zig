@@ -223,6 +223,11 @@ pub const ProviderStatus = struct {
     audio_silent: bool,
     audio_pipe_frames: u64,
     media_pipe_frames: u64,
+    audio_availability: []const u8 = "idle",
+    audio_subscribers: u32 = 0,
+    audio_capture_starts: u64 = 0,
+    audio_provider_frames: u64 = 0,
+    audio_last_error: i32 = 0,
 };
 
 pub const StatusEntry = struct {
@@ -256,6 +261,16 @@ pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: Provi
     try json.write(provider_status.audio_silent);
     try json.objectField("audioPipeFrames");
     try json.write(provider_status.audio_pipe_frames);
+    try json.objectField("audioAvailability");
+    try json.write(provider_status.audio_availability);
+    try json.objectField("audioSubscribers");
+    try json.write(provider_status.audio_subscribers);
+    try json.objectField("audioCaptureStarts");
+    try json.write(provider_status.audio_capture_starts);
+    try json.objectField("audioProviderFrames");
+    try json.write(provider_status.audio_provider_frames);
+    try json.objectField("audioLastError");
+    try json.write(provider_status.audio_last_error);
     try json.objectField("mediaPipeFrames");
     try json.write(provider_status.media_pipe_frames);
     try json.endObject();

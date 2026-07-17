@@ -15,7 +15,9 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", `weaver-widget${executableSuffix}`);
-const hostExecutable = join(repoRoot, "host", "zig-out", "bin", `weaverd${executableSuffix}`);
+const hostExecutable = process.platform === "darwin"
+  ? join(repoRoot, "host", "zig-out", "Weaverd.app", "Contents", "MacOS", "weaverd")
+  : join(repoRoot, "host", "zig-out", "bin", `weaverd${executableSuffix}`);
 
 class WeaverFailure extends Error {
   constructor(readonly details: string[]) {
@@ -73,8 +75,12 @@ async function main(argv: string[]): Promise<void> {
     if (!argument || rest.length > 0) throw new WeaverFailure(["Usage: weaver inspect <file.weave>"]);
     return inspectWidget(resolve(argument));
   }
+  if (command === "audio") {
+    if (argument !== "authorize" || rest.length > 0) throw new WeaverFailure(["Usage: weaver audio authorize"]);
+    return authorizeAudio();
+  }
   if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "install" && !argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "install", "uninstall", "status"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | inspect <file.weave> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow]"]);
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | inspect <file.weave> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow] | audio authorize"]);
   }
   if (command === "up") return upHost(true);
   if (command === "down") return downHost();
@@ -690,7 +696,7 @@ async function upHost(announce: boolean): Promise<void> {
     if (announce) process.stdout.write("weaverd is already running\n");
     return;
   }
-  const child = spawn(hostExecutable, [], { cwd: repoRoot, detached: true, stdio: "ignore", windowsHide: true });
+  const child = spawn(hostExecutable, [], { cwd: repoRoot, detached: true, stdio: "ignore", windowsHide: true, env: hostEnvironment() });
   child.unref();
   const deadline = Date.now() + 5000;
   while ((!hostRunning() || !hostReloadReady()) && Date.now() < deadline) await delay(50);
@@ -726,13 +732,13 @@ function showStatus(json: boolean): void {
 function hostRunning(): boolean {
   if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
-  return spawnSync(hostExecutable, ["--probe"], { stdio: "ignore", windowsHide: true }).status === 0;
+  return spawnSync(hostExecutable, ["--probe"], { stdio: "ignore", windowsHide: true, env: hostEnvironment() }).status === 0;
 }
 
 function hostReloadReady(): boolean {
   if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
-  return spawnSync(hostExecutable, ["--probe-reload-ready"], { stdio: "ignore", windowsHide: true }).status === 0;
+  return spawnSync(hostExecutable, ["--probe-reload-ready"], { stdio: "ignore", windowsHide: true, env: hostEnvironment() }).status === 0;
 }
 
 function assertHostReloadReady(): void {
@@ -742,8 +748,24 @@ function assertHostReloadReady(): void {
 }
 
 function signalHost(signal: "--signal-down" | "--signal-reload"): void {
-  const result = spawnSync(hostExecutable, [signal], { stdio: "ignore", windowsHide: true });
+  const result = spawnSync(hostExecutable, [signal], { stdio: "ignore", windowsHide: true, env: hostEnvironment() });
   if (result.status !== 0) throw new WeaverFailure([`weaverd rejected ${signal}`]);
+}
+
+function authorizeAudio(): void {
+  if (process.platform !== "darwin") throw new WeaverFailure(["weaver audio authorize is available only on macOS."]);
+  assertHostBuilt();
+  const result = spawnSync(hostExecutable, ["--authorize-audio"], {
+    cwd: repoRoot,
+    env: hostEnvironment(),
+    stdio: "inherit",
+  });
+  if (result.status !== 0) throw new WeaverFailure(["Weaver could not authorize macOS system audio.", "Check System Settings > Privacy & Security > Screen & System Audio Recording, then retry."]);
+  if (hostRunning()) signalHost("--signal-reload");
+}
+
+function hostEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, WEAVER_REPO_ROOT: repoRoot };
 }
 
 function assertHostBuilt(): void {

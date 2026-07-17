@@ -503,6 +503,11 @@ const Host = struct {
             .audio_silent = self.audio_provider.silent,
             .audio_pipe_frames = self.audio_pipe_frames,
             .media_pipe_frames = self.media_pipe_frames,
+            .audio_availability = self.audio_provider.availability.label(),
+            .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
+            .audio_capture_starts = self.audio_provider.capture_starts,
+            .audio_provider_frames = self.audio_provider.frame_count,
+            .audio_last_error = self.audio_provider.last_error,
         }, entries[0..entry_count]) catch return;
         var cwd = std.Io.Dir.cwd();
         cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch return;
