@@ -60,3 +60,53 @@ jobs:
           node ..\cli\bin\weaver.js bundle ciclock
           if (-not (Test-Path ciclock\dist\bundle.js)) { throw "bundle missing" }
           if (-not (Test-Path ciclock\dist\widget.json)) { throw "manifest missing" }
+
+  macos-baseline:
+    name: macOS baseline (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: apple-silicon
+            runner: macos-15
+            zig_arch: aarch64
+          - arch: intel
+            runner: macos-15-intel
+            zig_arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install workspaces
+        run: npm ci
+
+      - name: Typecheck + unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Install Zig 0.16.0
+        run: |
+          curl --fail --location --retry 3 \
+            "https://ziglang.org/download/0.16.0/zig-${{ matrix.zig_arch }}-macos-0.16.0.tar.xz" \
+            --output "$RUNNER_TEMP/zig.tar.xz"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-${{ matrix.zig_arch }}-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Runtime platform-service seam
+        working-directory: runtime
+        run: zig build test-platform-services
+
+      - name: Native SDK stock profile
+        working-directory: runtime/native-sdk
+        run: zig build test
+
+      - name: Native SDK Weaver widget profile
+        working-directory: runtime/native-sdk
+        run: zig build test -Dwidget-profile=true
