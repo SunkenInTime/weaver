@@ -194,6 +194,10 @@ useProvider("media")  // { title: string, artist: string, album: string,
                       // change-pushed; 1 Hz position while playing
 ```
 
+If the host cannot access system loopback, `audio` emits no fabricated frames.
+Authorization and route availability remain host diagnostics; they do not add
+platform-specific values or branches to Widget source.
+
 Media *control* (play/seek) is deliberately not in M3.
 
 ---

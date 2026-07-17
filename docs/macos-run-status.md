@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 11 pushed; CI pending`
+- State: `IN PROGRESS — PR 12 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T06:38:10-07:00
+- Last updated: 2026-07-15T07:05:48-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/11-cpu-memory-providers` | `3f5881b` | [#13](https://github.com/SunkenInTime/weaver/pull/13) | [#12](https://github.com/SunkenInTime/weaver/pull/12) |
+| Weaver | `macos/12-audio-decision` | `56622be` | [#14](https://github.com/SunkenInTime/weaver/pull/14) | [#13](https://github.com/SunkenInTime/weaver/pull/13) |
 
 ## Last reproducible capability
 
-- Capability: host-owned macOS CPU/memory sampling and byte-identical 1 Hz fan-out to every subscribed Widget, with zero collection when unused
-- Checkout/pointer: `macos/11-cpu-memory-providers` at `3f5881b`; measured implementation `9c1dbc4`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
-- Commands: `cd host && zig build test && zig build -Doptimize=ReleaseFast`; `cd runtime && zig build test && zig build -Doptimize=ReleaseFast`; `npm run build && npm run typecheck && npm test`; `node cli/test/macos-host-smoke.mjs`; `python3 scripts/macos-provider-cost.py --sample-seconds 5 --output docs/macos-m8-data.json`
-- Visible result: System Monitor launched through the production host and applied its first CPU + memory frame pair; two distinct System Widgets then received the same sample over separate private sockets
-- Machine-readable evidence: exact public JSON serializer tests, bounded live Mach samples, `systemSubscribers/systemSampleCount/systemFrames`, runtime applied-frame logs, fan-out 1→3 without sampler growth, stable zero-subscriber count, and full raw cost data; three-architecture CI is running
+- Capability: the production macOS audio architecture, final OS floor, permission UX, signed identity, fan-out ownership, unavailable semantics, and shipping constraints are fixed before capture code lands
+- Checkout/pointer: `macos/12-audio-decision` at `56622be`; measured spike `a3c7988`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `spikes/macos-audio-tap/build.sh`; signed and linker-ad-hoc `--setup-only`; signature-removal negative test; scoped `tccutil reset All com.sunkenintime.weaver.audio-tap-spike`; bounded signed capture/process sample; `npm run typecheck`; `npm test`
+- Visible result: public tap/UID/48 kHz Float32 mono format/private aggregate setup passed, while the fresh System Audio Recording authorization call remained visibly unapprovable because Chronicle and System Events control were unavailable
+- Machine-readable evidence: `docs/macos-m9-data.json`, ADR 0014, `OSStatus 0` setup on both developer signing shapes, unsigned exit 137 before `main`, bounded permission stack sample, zero leftover tap/aggregate, and ten raw setup-cost runs; three-architecture CI is running
 
 ## Gates
 
@@ -44,7 +44,7 @@ blocker and the next executable command.
 | CLI/artifact lifecycle | PASS | Weaver #10 passes the same fixed-byte pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs driver on Windows, Apple silicon, and Intel; the original PowerShell Windows smoke also remains green |
 | macOS daemon / `weaver dev` | PASS | Weaver #12; `macos-host-smoke.mjs` proves init/dev/edit preserved-state hot swap/config restart/stop, concurrent mutations, provider UDS, host + Widget adverse kills, backoff/recovery/status, and zero process/socket/lock remnants |
 | CPU/memory providers | UNVERIFIED | Weaver #13 functional/fan-out/cost/zero-collection gates pass; required sleep/wake remains unsafe on the only unattended machine and is not inferred |
-| Audio decision/implementation | pending | — |
+| Audio decision/implementation | UNVERIFIED | Weaver #14 decision PASS: ADR 0014 selects one public Core Audio process tap, macOS 14.2, a signed agent/explicit authorization flow, and no fallback; production PR 13 and live permission/mix/route/cost gates remain pending |
 | Media decision/implementation | pending | — |
 | Full CI/regression closure | pending | — |
 
@@ -68,10 +68,11 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 | Retained parity, zero updates | production Metal composite; one process, 10 minutes | 0.006% mean | 110.265 MB final; 118.211 MB peak; 5–7 threads; 34 FDs | 1.11 wakeups/s; 0.019 process mJ/s | three startup/reveal frames, then fully parked; zero transitions | `docs/macos-m6-results.md`, `docs/macos-m6-data.json` |
 | Host, zero system subscribers | native macOS daemon only; five 1 s samples | 0.14% mean of one core | 1.441 MiB RSS | 2 threads; wakeups not captured | exactly 0 sampler calls / 0 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
 | Host + one / three System Widgets | one shared Mach sample, UDS fan-out; five 1 s samples | 1.96% / 3.96% whole workload | 156.059 / 428.816 MiB RSS | 9.4 / 24.8 threads; wakeups not captured | 4 sampler calls in both captured boundaries; 8 / 24 frames | `docs/macos-m8-results.md`, `docs/macos-m8-data.json` |
+| Core Audio setup-only process | one private global mono tap + aggregate; ten launches, each with intentional 0.5 s sleep | 0.014 s summed CPU / 0.610 s wall mean (2.295% over boundary) | 14,209,843 bytes mean maximum RSS | not captured | no IO proc/callback; no latency claim | `docs/macos-m9-results.md`, `docs/macos-m9-data.json` |
 
 ## Assumptions made autonomously
 
-- The provisional developer-build floor is macOS 13.0 from Zig 0.16.0's host support. PR 12 owns the final floor.
+- The final macOS floor is 14.2 because the selected public Core Audio process-tap function is available from 14.2. Weaver rejects ScreenCaptureKit and virtual-driver fallbacks rather than retain the provisional 13.0 floor.
 - `macos-15` (Apple silicon) and `macos-15-intel` are the initial CI runners; physical Intel behavior/performance remains unverified.
 - PR 01 carries no visible/runtime performance claim and therefore requires no computer-use capture.
 - PR 02 uses desktop-icon-minus-one as the provisional bottom level after measuring desktop/icon/normal/floating levels on the physical M2. PR 04 revalidates it under macOS desktop-management modes.
@@ -90,6 +91,7 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - PR 10 uses one acknowledged control UDS and one cryptographically unguessable UDS per provider-subscribed Widget under a mode-0700 per-user root. Long default `TMPDIR` paths fall back to `/tmp` before they can exceed `sun_path`.
 - Because macOS has no public kill-on-close Job equivalent, a replacement host kills an orphan only when both its private marker and live `proc_pidpath` match the exact runtime executable. ADR 0013 records the rejected polling/unvalidated-kill alternatives.
 - macOS `memory.usedMb` projects the platform-neutral SDK meaning as total physical memory minus free and inactive/reclaimable pages. CPU uses public per-logical-core Mach ticks with wrapping deltas; aggregate percent remains 0–100 rather than summing cores.
+- One host-owned private global mono Core Audio tap feeds one shared FFT/AGC/silence pipeline and software fan-out. The host ships as the `com.sunkenintime.weaver.host` signed agent; explicit authorization uses that same identity, while missing permission reports unavailable without fake live-silence frames.
 
 ## Exact blockers
 
@@ -98,18 +100,19 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - The optional Native SDK Chromium host cannot be linked locally because the CEF SDK layout is absent (`missing CEF dependency for -Dweb-engine=chromium`; install hint: `native cef install --dir ../../third_party/cef/macos`). The system-engine host and its ABI link pass.
 - Whole-SoC process/GPU power attribution is unavailable unattended: `powermetrics --show-process-energy` exits `powermetrics must be invoked as the superuser`. The run records the narrower public `proc_pid_rusage(RUSAGE_INFO_V6)` process counters.
 - Instruments Energy and Metal System Trace are blocked before launch: AMFI kills `xcrun xctrace` with exit 137 and records `dynamic: com.apple.dt.InstrumentsCLI disallowed with com.apple.private.tcc.allow entitlement` followed by `load code signature error 4 for file "xctrace"`. Xcode 16.0's on-disk signature verifies; the exact host failure is retained in `docs/macos-m6-results.md`.
+- Fresh System Audio Recording permission is unavailable unattended: the signed, usage-described spike remained blocked in `AudioDeviceCreateIOProcIDWithBlock` after six seconds, Chronicle was not running, and System Events automation also blocked. Denial, revocation, audible mix, callback latency, active cost, and route recovery remain `UNVERIFIED`; no Bluetooth or AirPlay route is attached, and no Developer ID identity is installed.
 
 ## Cleanup state
 
-- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, and loopback HTTPS server terminated; no Accessibility warning helper remains
+- Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, every single/two/three-Widget System provider fixture, StorageProbe, NetworkProbe, deliberately crashed/recovered daemon and Widgets, loopback HTTPS server, every audio spike, and blocked System Events helper terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: all PR 10 control/provider sockets, runtime roots, and singleton files removed
-- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, isolated CLI home/data/log trees, registry locks, install stages, and owned versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
+- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, PR 10 Clock/Alpha/Beta/System fixtures, isolated CLI home/data/log trees, registry locks, install stages, owned versions, scoped audio TCC decision, and temporary audio taps/aggregates removed after recording evidence; ignored spike builds and raw renderer run reports remain only as reproducible local build products
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after Weaver PR 10 implementation commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-11 and Native SDK fork PRs 01-05 pushed
+- Working trees/submodule clean: clean after Weaver PR 12 decision commit; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-12 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 10-11 CI and correct actionable failures without weakening coverage.
-2. Create Weaver `macos/12-audio-decision` from `macos/11-cpu-memory-providers`.
-3. Run the public macOS audio-capture feasibility spike, record permission/signing/device/latency/cost constraints, and publish the shipping/minimum-version decision as an ADR without landing production audio ahead of it.
+1. Inspect restacked Weaver PR 10-12 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/13-production-audio` from `macos/12-audio-decision`.
+3. Implement the signed host agent and explicit authorization flow, then the one-capture production Core Audio provider with deterministic injection and every live gate the available permission/hardware permits.

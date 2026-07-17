@@ -1,0 +1,154 @@
+{
+  "schema": "weaver.macos-audio-feasibility.v1",
+  "recorded_at": "2026-07-15T14:02:00Z",
+  "weaver_commit": "a3c79889e490dc6421a86401d0707b2a7f5db636",
+  "machine": {
+    "model": "MacBook Air",
+    "chip": "Apple M2",
+    "memory_gib": 8,
+    "architecture": "arm64",
+    "macos_version": "26.5.1",
+    "macos_build": "25F80",
+    "xcode": "16.0 (16A242d)",
+    "clang": "Apple clang 16.0.0 (clang-1600.0.26.3)",
+    "sdk": "macOS 15.0"
+  },
+  "public_api": {
+    "function": "AudioHardwareCreateProcessTap",
+    "installed_sdk_availability": "macOS 14.2",
+    "tap": "private unmuted mono global excluding Weaver",
+    "aggregate": "private, tap auto-start disabled",
+    "binary_minimum": "macOS 14.2"
+  },
+  "signing": {
+    "linker_adhoc": {
+      "identifier": "WeaverAudioTapSpike",
+      "signature": "adhoc",
+      "info_plist": "not bound",
+      "setup_exit": 0
+    },
+    "bundle_adhoc": {
+      "identifier": "com.sunkenintime.weaver.audio-tap-spike",
+      "signature": "adhoc",
+      "info_plist_entries": 10,
+      "team_identifier": null,
+      "setup_exit": 0
+    },
+    "unsigned": {
+      "codesign_verify_exit": 1,
+      "codesign_error": "code object is not signed at all",
+      "setup_exit": 137,
+      "reached_main": false
+    },
+    "available_identities": [
+      "gdb-cert"
+    ],
+    "developer_id_available": false
+  },
+  "setup_cases": [
+    {
+      "name": "unbundled linker-ad-hoc",
+      "bundle_id": null,
+      "fanout": 3,
+      "exit": 0,
+      "statuses": {
+        "create_tap": 0,
+        "read_tap_uid": 0,
+        "read_tap_format": 0,
+        "create_private_aggregate": 0,
+        "create_io_proc_attempted": false
+      },
+      "format": {
+        "sample_rate_hz": 48000,
+        "channels": 1,
+        "bits_per_channel": 32,
+        "bytes_per_frame": 4,
+        "flags": 9
+      }
+    },
+    {
+      "name": "explicitly ad-hoc-signed bundle",
+      "bundle_id": "com.sunkenintime.weaver.audio-tap-spike",
+      "fanout": 3,
+      "exit": 0,
+      "statuses": {
+        "create_tap": 0,
+        "read_tap_uid": 0,
+        "read_tap_format": 0,
+        "create_private_aggregate": 0,
+        "create_io_proc_attempted": false
+      },
+      "format": {
+        "sample_rate_hz": 48000,
+        "channels": 1,
+        "bits_per_channel": 32,
+        "bytes_per_frame": 4,
+        "flags": 9
+      }
+    }
+  ],
+  "permission_attempt": {
+    "bundle_id": "com.sunkenintime.weaver.audio-tap-spike",
+    "tcc_reset_command": "tccutil reset All com.sunkenintime.weaver.audio-tap-spike",
+    "tcc_reset_exit": 0,
+    "bounded_wait_seconds": 6,
+    "completed": false,
+    "result_file_written": false,
+    "termination_exit": 137,
+    "sampled_main_thread": "AudioDeviceCreateIOProcIDWithBlock -> HAL_HardwarePlugIn_DeviceCreateIOProcIDWithBlock -> mach_msg2_trap",
+    "chronicle_running": false,
+    "system_events_control": "blocked",
+    "cleanup_tcc_reset_exit": 0
+  },
+  "setup_cost_runs": {
+    "definition": "process launch plus public tap, format, and private aggregate creation/destruction; includes an intentional 0.5 second sleep; not capture steady state",
+    "fanout": 3,
+    "runs": [
+      { "real_s": 0.63, "user_s": 0.00, "sys_s": 0.00, "max_rss_bytes": 14172160 },
+      { "real_s": 0.61, "user_s": 0.00, "sys_s": 0.01, "max_rss_bytes": 14221312 },
+      { "real_s": 0.60, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14188544 },
+      { "real_s": 0.59, "user_s": 0.00, "sys_s": 0.00, "max_rss_bytes": 14221312 },
+      { "real_s": 0.60, "user_s": 0.00, "sys_s": 0.01, "max_rss_bytes": 14188544 },
+      { "real_s": 0.61, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14221312 },
+      { "real_s": 0.62, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14237696 },
+      { "real_s": 0.61, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14221312 },
+      { "real_s": 0.61, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14188544 },
+      { "real_s": 0.62, "user_s": 0.01, "sys_s": 0.01, "max_rss_bytes": 14237696 }
+    ],
+    "mean_real_s": 0.61,
+    "mean_user_s": 0.006,
+    "mean_sys_s": 0.008,
+    "mean_cpu_percent_over_wall_boundary": 2.295,
+    "mean_max_rss_bytes": 14209843
+  },
+  "audio_routes": {
+    "default_output": "MacBook Air Speakers",
+    "present": [
+      "MacBook Air Speakers",
+      "MacBook Air Microphone",
+      "BlackHole 2ch",
+      "Aggregate Device",
+      "Blackhole+built in"
+    ],
+    "bluetooth_present": false,
+    "airplay_present": false,
+    "live_route_change_verified": false,
+    "remaining_weaver_tap_or_aggregate": false
+  },
+  "comparison": {
+    "screen_capture_kit_existing_error": "SCStreamErrorDomain Code=-3801: The user declined TCCs for application, window, display capture",
+    "screen_capture_kit_permission": "Screen Recording",
+    "core_audio_permission": "System Audio Recording",
+    "selected": "Core Audio process tap"
+  },
+  "unverified": [
+    "permission allow, deny, and revoke outcomes",
+    "audible system mix and protected-stream behavior",
+    "first callback and audible-signal latency",
+    "silent and active steady-state CPU, footprint, wakeups, and energy",
+    "live default-device change",
+    "Bluetooth output",
+    "AirPlay output",
+    "Developer ID signing, notarization, and App Sandbox"
+  ]
+}
