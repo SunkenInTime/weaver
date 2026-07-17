@@ -17,22 +17,51 @@ export interface WidgetStatus {
 }
 export interface StatusDocument { hostPid: number; widgets: WidgetStatus[] }
 export interface RegistryLockOptions { timeoutMs?: number; retryMs?: number; staleMs?: number }
-
-export function weaverDataPath(localAppData = process.env.LOCALAPPDATA): string {
-  if (!localAppData) throw new Error("LOCALAPPDATA is not available");
-  return join(localAppData, "weaver");
+export interface WeaverPathEnvironment {
+  platform?: NodeJS.Platform;
+  localAppData?: string;
+  home?: string;
 }
 
-export function widgetsPath(localAppData = process.env.LOCALAPPDATA): string {
-  return join(weaverDataPath(localAppData), "widgets");
+export function weaverDataPath(environment: WeaverPathEnvironment = {}): string {
+  const platform = environment.platform ?? process.platform;
+  if (platform === "win32") {
+    const localAppData = environment.localAppData ?? process.env.LOCALAPPDATA;
+    if (!localAppData) throw new Error("LOCALAPPDATA is not available");
+    return win32.join(localAppData, "weaver");
+  }
+  if (platform === "darwin") {
+    const home = environment.home ?? process.env.HOME;
+    if (!home) throw new Error("HOME is not available");
+    return posix.join(home, "Library", "Application Support", "Weaver");
+  }
+  throw new Error(`Weaver data paths are not supported on ${platform}`);
 }
 
-export function registryPath(localAppData = process.env.LOCALAPPDATA): string {
-  return join(weaverDataPath(localAppData), "registry.json");
+export function weaverLogsPath(environment: WeaverPathEnvironment = {}): string {
+  const platform = environment.platform ?? process.platform;
+  if (platform === "win32") return win32.join(weaverDataPath(environment), "logs");
+  if (platform === "darwin") {
+    const home = environment.home ?? process.env.HOME;
+    if (!home) throw new Error("HOME is not available");
+    return posix.join(home, "Library", "Logs", "Weaver");
+  }
+  throw new Error(`Weaver log paths are not supported on ${platform}`);
 }
 
-export function statusPath(localAppData = process.env.LOCALAPPDATA): string {
-  return join(weaverDataPath(localAppData), "status.json");
+export function widgetsPath(environment: WeaverPathEnvironment = {}): string {
+  const implementation = (environment.platform ?? process.platform) === "win32" ? win32 : posix;
+  return implementation.join(weaverDataPath(environment), "widgets");
+}
+
+export function registryPath(environment: WeaverPathEnvironment = {}): string {
+  const implementation = (environment.platform ?? process.platform) === "win32" ? win32 : posix;
+  return implementation.join(weaverDataPath(environment), "registry.json");
+}
+
+export function statusPath(environment: WeaverPathEnvironment = {}): string {
+  const implementation = (environment.platform ?? process.platform) === "win32" ? win32 : posix;
+  return implementation.join(weaverDataPath(environment), "status.json");
 }
 
 export function readRegistry(path = registryPath()): RegistryDocument {

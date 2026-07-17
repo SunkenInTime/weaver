@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -56,6 +56,17 @@ test("path helpers follow Windows case rules without weakening POSIX containment
   assert.equal(hostTools.pathInside("/var/lib/weaver", "/var/lib/weaver/../outside", "linux"), false);
 });
 
+test("CLI paths match the runtime contract on Windows and macOS", () => {
+  const windows = { platform: "win32", localAppData: "C:\\Users\\Dara\\AppData\\Local" };
+  assert.equal(hostTools.weaverDataPath(windows), "C:\\Users\\Dara\\AppData\\Local\\weaver");
+  assert.equal(hostTools.weaverLogsPath(windows), "C:\\Users\\Dara\\AppData\\Local\\weaver\\logs");
+  assert.equal(hostTools.registryPath(windows), "C:\\Users\\Dara\\AppData\\Local\\weaver\\registry.json");
+  const macos = { platform: "darwin", home: "/Users/dara" };
+  assert.equal(hostTools.weaverDataPath(macos), "/Users/dara/Library/Application Support/Weaver");
+  assert.equal(hostTools.weaverLogsPath(macos), "/Users/dara/Library/Logs/Weaver");
+  assert.equal(hostTools.registryPath(macos), "/Users/dara/Library/Application Support/Weaver/registry.json");
+});
+
 test("registry mutations are serialized across processes and leave no shared temp file", async () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-registry-lock-"));
   const registry = join(root, "registry.json");
@@ -79,6 +90,24 @@ await withRegistryLock(async () => {
     assert.equal(secondResult.code, 0, secondResult.stderr);
     assert.deepEqual(hostTools.readRegistry(registry).widgets.map((widget) => widget.name), ["first", "second"]);
     assert.deepEqual(readdirSync(root).filter((name) => name.endsWith(".tmp") || name.endsWith(".lock")), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an abandoned registry lock is reclaimed and completely removed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-abandoned-lock-"));
+  const registry = join(root, "registry.json");
+  const lock = `${registry}.lock`;
+  try {
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, "owner.json"), '{"pid":0,"token":"abandoned"}\n', "utf8");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    let ran = false;
+    await hostTools.withRegistryLock(() => { ran = true; }, registry, { timeoutMs: 1000, retryMs: 5, staleMs: 10 });
+    assert.equal(ran, true);
+    assert.equal(existsSync(lock), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -132,4 +161,3 @@ function childResult(child) {
     child.once("exit", (code) => resolve({ code, stderr }));
   });
 }
-

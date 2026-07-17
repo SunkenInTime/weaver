@@ -7,9 +7,9 @@ blocker and the next executable command.
 
 ## Run identity
 
-- State: `IN PROGRESS — PR 07 pushed; CI pending`
+- State: `IN PROGRESS — PR 08 pushed; CI pending`
 - Started: 2026-07-15T01:20:00-07:00
-- Last updated: 2026-07-15T05:19:48-07:00
+- Last updated: 2026-07-15T05:30:01-07:00
 - Mac hardware: MacBook Air (Apple M2, 8 cores, 8 GB)
 - macOS build: 26.5.1 (25F80)
 - Architecture: arm64
@@ -20,15 +20,15 @@ blocker and the next executable command.
 | Stack | Top branch | Commit | Draft PR | Parent/base |
 |---|---|---|---|---|
 | Native SDK fork | `macos/05-production-renderer` | `359f5c9c` | [#5](https://github.com/SunkenInTime/native/pull/5) | [#4](https://github.com/SunkenInTime/native/pull/4) |
-| Weaver | `macos/07-production-renderer` | `2d871d5` | [#9](https://github.com/SunkenInTime/weaver/pull/9) | [#8](https://github.com/SunkenInTime/weaver/pull/8) |
+| Weaver | `macos/08-cli-artifacts` | `e83c474` | [#10](https://github.com/SunkenInTime/weaver/pull/10) | [#9](https://github.com/SunkenInTime/weaver/pull/9) |
 
 ## Last reproducible capability
 
-- Capability: production in-process retained Metal renderer with embedded shaders, bounded reusable resources, same-frame software fallback, and bounded automatic recovery
-- Checkout/pointer: `macos/07-production-renderer`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
-- Commands: see `docs/macos-m6-results.md` and `scripts/macos-renderer-bakeoff.py`
-- Visible result: Clock, retained-parity, and 60 Hz synthetic Widgets use retained Metal composite by default; static clean surfaces park, covered surfaces stop acquiring drawables, and injected Metal failures recover without restart
-- Machine-readable evidence: production 1/3/10 cost, 10-minute active/static stability, startup stages, backend transitions, parity, lifecycle, descriptors, and teardown results in `docs/macos-m6-data.json`
+- Capability: cross-platform CLI artifact lifecycle with one deterministic `.weave` format and an install-owned immutable source boundary
+- Checkout/pointer: `macos/08-cli-artifacts`; Native SDK `359f5c9c` (`macos/05-production-renderer`)
+- Commands: `npm test` and `node cli/test/install-smoke.mjs`
+- Visible result: macOS init/check/bundle/pack/inspect/install/replace/uninstall/logs all pass against isolated platform-native paths; host-dependent commands name the PR 10 boundary instead of searching for Windows binaries
+- Machine-readable evidence: fixed archive SHA-256 `d4a517dac1e6355bdf6d75e5e828470ec657a82dbfdfcec8efd2903eb88d4bf4`; 22/22 root tests plus the complete Darwin lifecycle smoke pass locally
 
 ## Gates
 
@@ -41,7 +41,7 @@ blocker and the next executable command.
 | Network parity | PASS | Ephemeral NSURLSession transport plus 12/12 runtime suite; deterministic loopback TLS covers success, timeout, caps, redirect denial, malformed URL, certificate failure, and active-request cancellation; production probe returned 200 |
 | Renderer bakeoff | PASS | Native #4 + Weaver #8; ADR 0012 selects in-process retained Metal composite, software reference/live fallback, non-adaptive policy, and no shared service from captured 1/3/10-Widget totals |
 | Production renderer | PASS | Native #5 + Weaver #9; embedded metallib, process-lifetime resources, bounded scratch reuse, static/occlusion parking, same-frame software demotion, automatic recovery, pixel parity, 10-minute active/static runs, cover/reveal, and 20-cycle lifecycle all pass; Instruments is AMFI-blocked and sleep/external-display remain explicitly UNVERIFIED |
-| CLI/artifact lifecycle | pending | — |
+| CLI/artifact lifecycle | pending | Weaver #10 local macOS gate passes deterministic pack/open/inspect/install, containment, rollback, replacement, abandoned lock/stage, cleanup, uninstall, directory ownership, and logs; Windows/Apple-silicon/Intel CI proof is running |
 | macOS daemon / `weaver dev` | pending | — |
 | CPU/memory providers | pending | — |
 | Audio decision/implementation | pending | — |
@@ -83,10 +83,11 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 - Every healthy macOS Widget now uses the in-process Metal-composite architecture selected by ADR 0012. Software remains the bounded pixel reference and live fallback, backend choice is not workload-adaptive, and no renderer/window service is added. Production probes recovery after 1, 5, then 30 seconds.
 - PR 06's real-Widget mixed workload uses Clock, idle Pomodoro, and the retained/canvas parity Widget. System and Visualizer are not replaced with synthetic provider data before their honest endpoints arrive in PRs 10-13.
 - The first-pixel readback and deterministic Metal fault injector are compiled only into automation builds. Backdrop blur's reused target readback is the sole intentional production GPU readback.
+- macOS install/uninstall mutate the same atomic registry and immutable owned-source tree without starting a nonexistent host. Windows keeps its acknowledged host start/reload/rollback behavior; PR 10 connects the macOS host to that already-portable mutation boundary.
 
 ## Exact blockers
 
-- `weaverd` and `weaver-renderer` remain Windows-only build graphs until PRs 09-10. ADR 0012 rejects a macOS shared renderer service, so the daemon port no longer waits on a renderer-architecture decision.
+- `weaverd` remains a Windows-only build graph until PRs 09-10. ADR 0012 rejects a macOS shared renderer service, so the daemon port no longer waits on a renderer-architecture decision. The macOS CLI reports `up`, `down`, `status`, and `dev` as explicitly unavailable until PR 10.
 - Computer-use recording is unavailable: Chronicle is not running and ScreenCaptureKit returned TCC error `-3801`. Independent layers continue; a permissioned rerun must attach PR 02's recording.
 - PR 04 physical topology coverage is hardware-limited to the integrated display. Scaled modes, secondaries on every side, and disconnect/reconnect require external display hardware; Stage Manager, Show Desktop, Space switching, and sleep/wake require a permissioned supervised run that may safely alter desktop state.
 - The optional Native SDK Chromium host cannot be linked locally because the CEF SDK layout is absent (`missing CEF dependency for -Dweb-engine=chromium`; install hint: `native cef install --dir ../../third_party/cef/macos`). The system-engine host and its ABI link pass.
@@ -97,13 +98,13 @@ host, Widgets, providers, and any renderer—not only the process that improved.
 
 - Test processes: macOS policy harness, stock GPU example, all renderer-bakeoff and production Widgets, opaque cover application, Clock, StorageProbe, NetworkProbe, and loopback HTTPS server terminated; no Accessibility warning helper remains
 - Ephemeral sockets/endpoints: none created
-- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, and temporary NetworkProbe bundle removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
+- Temporary registrations/data: PR 03's synthetic storage value, oversized Clock backup, generated TLS key/certificate, temporary NetworkProbe bundle, isolated CLI home/data/log trees, registry locks, install stages, and owned Clock versions removed after recording evidence; raw renderer run reports remain only under ignored root `.zig-cache`
 - Reversible System Settings restored: unchanged
-- Working trees/submodule clean: clean after Weaver PR 07 implementation commit; Native SDK clean at `359f5c9c`
-- Latest stack branches pushed: Weaver PRs 01-07 and Native SDK fork PRs 01-05 pushed
+- Working trees/submodule clean: clean after Weaver PR 08 implementation commit; Native SDK clean at `359f5c9c`
+- Latest stack branches pushed: Weaver PRs 01-08 and Native SDK fork PRs 01-05 pushed
 
 ## Next executable task
 
-1. Inspect Weaver PR 07 CI and correct actionable failures without weakening coverage.
-2. Create Weaver `macos/08-cli-artifacts` from `macos/07-production-renderer`.
-3. Make executable discovery, macOS data/log paths, `.weave` inspection, pack/install/uninstall, locking/replacement/rollback, and install smoke platform-aware while keeping host-dependent commands explicitly unavailable until PR 10.
+1. Inspect Weaver PR 07-08 CI and correct actionable failures without weakening coverage.
+2. Create Weaver `macos/09-portable-supervisor` from `macos/08-cli-artifacts`.
+3. Extract registry reconciliation, widget slots, backoff, desired state, status serialization, provider subscription bookkeeping, and renderer selection from Win32 process/event/pipe/counter mechanics while preserving Windows behavior exactly.
