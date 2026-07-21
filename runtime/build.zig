@@ -57,6 +57,12 @@ fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: s
         .windows => {
             addWindowsMonitor(b, compile);
             compile.root_module.linkSystemLibrary("winhttp", .{});
+            // windows_monitor.cpp: virtual-screen metrics (user32) and
+            // the DPI fallback (gdi32). The exe gets both transitively
+            // through the Native SDK host; the test binary links the
+            // monitor shim without the host.
+            compile.root_module.linkSystemLibrary("user32", .{});
+            compile.root_module.linkSystemLibrary("gdi32", .{});
         },
         .macos => {
             const sdk_include = if (b.sysroot) |sysroot| b.fmt("-I{s}/usr/include", .{sysroot}) else "";

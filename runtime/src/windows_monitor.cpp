@@ -52,3 +52,17 @@ int weaver_primary_monitor_geometry(WeaverPrimaryMonitorGeometry *geometry) {
     geometry->effective_dpi = effectiveMonitorDpi(monitor);
     return geometry->effective_dpi > 0 ? 1 : 0;
 }
+
+int weaver_virtual_screen_bounds(WeaverVirtualScreenBounds *bounds) {
+    if (!bounds) return 0;
+    const int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (width <= 0 || height <= 0) return 0;
+    bounds->left_px = left;
+    bounds->top_px = top;
+    bounds->right_px = left + width;
+    bounds->bottom_px = top + height;
+    return 1;
+}

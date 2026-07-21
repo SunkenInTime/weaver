@@ -1,11 +1,14 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
+const geometry_mod = @import("geometry.zig");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
 const provider_mod = @import("provider.zig");
 const platform = @import("platform/root.zig");
 const storage_mod = @import("storage.zig");
+const windows_monitor = if (builtin.os.tag == .windows) @import("platform/windows_monitor.zig") else struct {};
 const tree_mod = @import("tree.zig");
 const widget_log = @import("widget_log.zig");
 
@@ -43,6 +46,12 @@ pub const Model = struct {
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
+    geometry: ?*const geometry_mod.Store = null,
+    /// Last origin we consider settled (launch placement or the last
+    /// persisted drag), in the platform's logical window space. Null
+    /// until the first platform frame report names the launch position.
+    frame_origin: ?[2]f32 = null,
+    pending_frame: ?geometry_mod.Saved = null,
 };
 
 const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
@@ -53,6 +62,7 @@ const max_images: usize = 16;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
 const dev_reload_key: u64 = 0x7764_6576_726c;
+const geometry_save_key: u64 = 0x7767_656f_6d65;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
 pub const Msg = union(enum) {
@@ -60,6 +70,7 @@ pub const Msg = union(enum) {
     press: tree_mod.NodeId,
     slider: tree_mod.NodeId,
     canvas_frame: u64,
+    frame_moved: geometry_mod.Saved,
 };
 
 const WidgetApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = false });
@@ -97,6 +108,10 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         .timer => |timer| {
             if (timer.outcome != .fired) {
                 std.log.err("widget timer was rejected", .{});
+                return;
+            }
+            if (timer.key == geometry_save_key) {
+                persistGeometry(model);
                 return;
             }
             if (timer.key == dev_reload_key) {
@@ -148,6 +163,28 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             };
             syncTimers(model, effects);
         },
+        .frame_moved => |moved| {
+            const known = model.frame_origin orelse {
+                // The first platform report names the launch placement
+                // (creation/focus echo). The anchor — or the restored
+                // origin — stays authoritative until the user actually
+                // moves the window.
+                model.frame_origin = .{ moved.x, moved.y };
+                return;
+            };
+            if (@abs(known[0] - moved.x) < 0.5 and @abs(known[1] - moved.y) < 0.5) return;
+            model.frame_origin = .{ moved.x, moved.y };
+            model.pending_frame = moved;
+            // OS drags report continuously. Re-starting the same key
+            // REPLACES the pending one-shot, so the disk write lands
+            // once, after the gesture settles.
+            effects.startTimer(.{
+                .key = geometry_save_key,
+                .interval_ms = 400,
+                .mode = .one_shot,
+                .on_fire = Effects.timerMsg(.timer),
+            });
+        },
         .canvas_frame => |timestamp_ns| {
             if (model.provider_poll_interval_ms <= 33) {
                 drainProviderFrames(model) catch |err| {
@@ -160,6 +197,31 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             syncTimers(model, effects);
         },
     }
+}
+
+/// A dragged position is user state, not widget source (ADR 0004/0011):
+/// it lands in its own per-widget geometry record, never in the
+/// installed manifest and never in the widget's JS-visible storage doc.
+fn persistGeometry(model: *Model) void {
+    const pending = model.pending_frame orelse return;
+    model.pending_frame = null;
+    const store = model.geometry orelse return;
+    store.save(pending) catch |err| {
+        std.log.warn("widget could not persist dragged position: {s}", .{@errorName(err)});
+        return;
+    };
+    std.log.info("widget position persisted x={d} y={d}", .{ pending.x, pending.y });
+}
+
+/// Every frame report maps to a Msg; the model decides what is a real
+/// move. During the drag itself the OS owns the window — nothing here
+/// touches JS or invalidates the presented surface.
+fn onWindowFrame(event: native_sdk.runtime.WindowFrameEvent) ?Msg {
+    return Msg{ .frame_moved = .{
+        .x = event.frame.x,
+        .y = event.frame.y,
+        .scale = event.scale_factor,
+    } };
 }
 
 fn drainProviderFrames(model: *Model) !void {
@@ -346,14 +408,20 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
-    const root_id = model.tree.root orelse return ui.panel(.{}, .{});
-    return buildNode(ui, &model.tree, root_id);
+    const root_id = model.tree.root orelse return ui.panel(.{ .window_drag = true }, .{});
+    return buildNode(ui, &model.tree, root_id, true);
 }
 
-fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) WidgetUi.Node {
+fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
     const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
     var options: WidgetUi.ElementOptions = .{
         .global_key = .{ .int = id },
+        // Every widget drags by its whole surface: the root is one OS
+        // window-drag region, and press-claiming widgets inside it
+        // (buttons, sliders) become exclusion rects automatically, so
+        // their interactions win over the drag. The OS owns the pointer
+        // for the whole gesture — no JS round-trip, no re-render.
+        .window_drag = is_root,
         .padding = retained.padding,
         .gap = retained.gap,
         .opacity = retained.opacity,
@@ -396,7 +464,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId) Wid
     }
     const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch return ui.panel(.{}, .{});
     for (retained.children[0..retained.child_count], 0..) |child_id, index| {
-        children[index] = buildNode(ui, tree, child_id);
+        children[index] = buildNode(ui, tree, child_id, false);
     }
     return switch (retained.kind) {
         // SDK layout-only rows/columns do not paint their own style. A
@@ -493,7 +561,23 @@ pub fn main(init: std.process.Init) !void {
     var storage = try storage_mod.Store.init(init.io, allocator, data_root, loaded.manifest.name);
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
     const bundle_stat = try std.Io.Dir.cwd().statFile(init.io, bundle_path, .{});
-    const frame = manifest_mod.desktopFrame(loaded.manifest);
+    var geometry_store = try geometry_mod.Store.init(init.io, allocator, data_root, loaded.manifest.name);
+    // A dragged position outranks the manifest anchor, but only while it
+    // still lands on an attached display; a stale record (monitor
+    // unplugged) falls back to the anchor. macOS validates in AppKit at
+    // creation (constrainFrame), so only Windows pre-checks here.
+    const dragged: ?geometry_mod.Saved = if (geometry_store.load(allocator)) |saved|
+        (if (draggedOriginVisible(saved, loaded.manifest.size)) saved else null)
+    else
+        null;
+    var frame = manifest_mod.desktopFrame(loaded.manifest);
+    if (dragged) |saved| {
+        frame.x = saved.x;
+        frame.y = saved.y;
+        // The Windows host reads a (0,0) origin as "let the system
+        // place it"; nudge the exact corner case off the sentinel.
+        if (builtin.os.tag == .windows and frame.x == 0 and frame.y == 0) frame.x = 0.01;
+    }
     const shell_views = [_]native_sdk.ShellView{.{
         .label = "widget-canvas",
         .kind = .gpu_surface,
@@ -537,8 +621,11 @@ pub fn main(init: std.process.Init) !void {
         .view = view,
         .sync = syncNativeState,
         .on_frame = onFrame,
+        .on_window_frame = onWindowFrame,
     });
     defer app_state.destroy();
+    app_state.model.geometry = &geometry_store;
+    if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
     try app_state.model.provider.init(init.io, platform.providerEndpoint(
         init.environ_map.get("WEAVER_HOST_PIPE"),
         init.environ_map.get("WEAVER_HOST_ENDPOINT"),
@@ -567,10 +654,34 @@ pub fn main(init: std.process.Init) !void {
         .window_title = loaded.manifest.name,
         .bundle_id = "com.weaver.widget",
         .default_frame = frame,
-        .restore_state = false,
-        .primary_display_anchor = if (@import("builtin").os.tag == .macos) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
+        // A dragged origin places the window explicitly (macOS reads the
+        // frame only when restore is set, then clamps it in AppKit); the
+        // manifest anchor stays the placement until that first drag.
+        .restore_state = dragged != null,
+        // Weaver owns placement persistence (debounced, per-widget,
+        // atomic). The substrate's bundle-id-keyed store would make
+        // every widget process rewrite one shared windows.zon on each
+        // move tick.
+        .persist_window_state = false,
+        .primary_display_anchor = if (builtin.os.tag == .macos and dragged == null) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
         .js_window_api = false,
     }, init);
+}
+
+/// A persisted origin is only trusted while a grabbable corner of the
+/// widget (24 physical px each axis) still intersects the virtual
+/// desktop — monitors come and go between sessions. Non-Windows
+/// platforms answer true: macOS clamps in AppKit at creation.
+fn draggedOriginVisible(saved: geometry_mod.Saved, size: [2]f32) bool {
+    if (builtin.os.tag != .windows) return true;
+    const bounds = windows_monitor.virtualScreen() orelse return true;
+    const left = saved.x * saved.scale;
+    const top = saved.y * saved.scale;
+    const right = left + size[0] * saved.scale;
+    const bottom = top + size[1] * saved.scale;
+    const overlap_x = @min(right, @as(f32, @floatFromInt(bounds.right_px))) - @max(left, @as(f32, @floatFromInt(bounds.left_px)));
+    const overlap_y = @min(bottom, @as(f32, @floatFromInt(bounds.bottom_px))) - @max(top, @as(f32, @floatFromInt(bounds.top_px)));
+    return overlap_x >= 24 and overlap_y >= 24;
 }
 
 fn publishBackendStatus(backend: native_sdk.platform.GpuSurfaceBackend) void {
@@ -633,6 +744,7 @@ fn safeLogName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
 
 test {
     _ = @import("tree.zig");
+    _ = @import("geometry.zig");
     _ = @import("manifest.zig");
     _ = @import("network.zig");
     _ = @import("storage.zig");

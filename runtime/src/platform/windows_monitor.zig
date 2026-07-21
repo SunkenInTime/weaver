@@ -21,3 +21,24 @@ pub fn primary() ?Geometry {
         .effective_dpi = native.effective_dpi,
     };
 }
+
+pub const VirtualBounds = struct {
+    left_px: i32,
+    top_px: i32,
+    right_px: i32,
+    bottom_px: i32,
+};
+
+/// The bounding box of every attached display in physical virtual-desktop
+/// pixels — the space a persisted widget position must still intersect
+/// after monitors come and go.
+pub fn virtualScreen() ?VirtualBounds {
+    var native: win.WeaverVirtualScreenBounds = undefined;
+    if (win.weaver_virtual_screen_bounds(&native) == 0) return null;
+    return .{
+        .left_px = native.left_px,
+        .top_px = native.top_px,
+        .right_px = native.right_px,
+        .bottom_px = native.bottom_px,
+    };
+}

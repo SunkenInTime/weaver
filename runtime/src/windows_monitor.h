@@ -16,6 +16,15 @@ struct WeaverPrimaryMonitorGeometry {
 
 int weaver_primary_monitor_geometry(struct WeaverPrimaryMonitorGeometry *geometry);
 
+struct WeaverVirtualScreenBounds {
+    int32_t left_px;
+    int32_t top_px;
+    int32_t right_px;
+    int32_t bottom_px;
+};
+
+int weaver_virtual_screen_bounds(struct WeaverVirtualScreenBounds *bounds);
+
 #ifdef __cplusplus
 }
 #endif

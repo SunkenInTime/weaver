@@ -59,6 +59,13 @@ export interface WidgetConfig {
 `weaver check` validates config statically (it is extracted from the default
 export at bundle time; config must be a literal object — no computed values).
 
+`anchor` is the widget's placement until the user drags it. Every widget is
+draggable by its whole surface (buttons and sliders keep their interactions);
+the dragged position is user state stored outside the widget — it survives
+restarts and reinstalls, outranks `anchor`, and falls back to `anchor` when it
+goes stale (e.g. its monitor was unplugged). Widget code cannot read or write
+it (ADR 0016).
+
 ## Hooks
 
 ```ts
