@@ -44,7 +44,7 @@ presentation, isolated Weaver data roots, and one widget process at a time.
 Each row is ten host `status.json` snapshots two seconds apart after startup;
 CPU is Weaver host-reported process CPU percentage and memory is private MiB.
 The parent was detached `origin/master` `a6d48af` with Native pin `78137351`.
-The showcase was the final PR12 tree with Native pin `52c7627a`.
+The showcase was the final PR12 tree with Native pin `8aae6aa2`.
 
 | Widget | Sample uptime | CPU avg (min–max) | Private MiB avg (min–max) |
 |---|---:|---:|---:|
