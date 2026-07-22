@@ -18,8 +18,8 @@ export default widget({
       </panel>
     </row>
 
-    <stack class="w-full grow overflow-hidden rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg border-2 border-stone-500 shadow-lg">
-      <image src="./assets/night-bloom.jpg" fit="cover" class="size-full rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg" />
+    <stack class="w-full grow overflow-hidden rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg">
+      <image src="./assets/night-bloom.jpg" fit="cover" class="size-full rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg border-2 border-stone-500 shadow-lg" />
       <panel class="size-full bg-black/25" />
       <column class="size-full p-5 justify-between">
         <row class="justify-between items-start">
