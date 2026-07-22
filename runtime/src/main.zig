@@ -1142,6 +1142,37 @@ test "showcase headline keeps exact registered face through bold and text shadow
     }
 }
 
+test "attached shadows preserve hover and pressed metadata" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const panel = try retained_tree.createNode(.panel);
+    try retained_tree.setNumberProp(panel, "hoverOpacity", 0.8);
+    try retained_tree.setNumberProp(panel, "pressedOpacity", 0.6);
+    try retained_tree.setShadow(panel, .{
+        .offset = .{ .dx = 0, .dy = 2 },
+        .blur = 4,
+        .spread = 0,
+        .color = native_sdk.canvas.Color.rgb8(0, 0, 0),
+    });
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, panel, true));
+    try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .hover_style => |style| try std.testing.expectEqual(@as(?f32, 0.8), style.opacity),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .pressed_style => |style| try std.testing.expectEqual(@as(?f32, 0.6), style.opacity),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[2]) {
+        .box_shadow => |shadow| try std.testing.expectEqual(@as(f32, 4), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+}
+
 test "bundled font resolution honors exact stems families and nearest weights" {
     var tree: tree_mod.Tree = .{};
     const id = try tree.createNode(.text);
