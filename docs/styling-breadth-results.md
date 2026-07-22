@@ -46,9 +46,10 @@ CPU is Weaver host-reported process CPU percentage and memory is private MiB.
 The parent was detached `origin/master` `a6d48af` with Native pin `78137351`.
 The measured showcase was the accepted PR12 tree with Native pin `8aae6aa2`.
 After CI exposed common-shape arena regressions, the final review head was
-repinned to behavior-equivalent compact Native `709989d2`; the live acceptance
-smoke was rerun at that pin, while the original matched A/B samples below were
-not relabeled or recomputed.
+repinned first to compact Native `709989d2`, where the live acceptance smoke
+was rerun, and finally to `80e74357`, which only inherits N3's Markdown arena
+right-sizing. The original matched A/B samples below were not relabeled or
+recomputed; the final aggregate Native and Weaver suites pass at `80e74357`.
 
 | Widget | Sample uptime | CPU avg (min–max) | Private MiB avg (min–max) |
 |---|---:|---:|---:|
@@ -94,3 +95,8 @@ record in the existing bounded command slice. The common `Widget` is exactly
 font/shadow/hover/pressed metadata composes in the same slice. Final Native
 N4–N8 focused/stock/profile gates, every Weaver 05–12 npm/typecheck/runtime
 gate, and the all-12-head release-audit sweep pass locally.
+
+N3 retains four lossless f32 corner overrides and the unchanged hostile arena
+bound. Its final repair pre-sizes capped Markdown block/list/table node buffers
+from safe source-line upper bounds instead of eagerly reserving 64 full nodes
+for short inputs; maximum capacities and truncation semantics do not change.
