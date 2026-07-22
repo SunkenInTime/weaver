@@ -1,3 +1,5 @@
+import { tailwindColors } from "./tailwind-colors.js";
+
 export type CrossAlign = "start" | "center" | "end" | "baseline" | "stretch";
 export type MainAlign = "start" | "center" | "end" | "between" | "around" | "evenly";
 export type SelfAlign = "auto" | "start" | "center" | "end" | "stretch";
@@ -127,7 +129,6 @@ function applyUtility(output: ClassProps, utility: string): void {
   if ((match = /^p-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
     output.padding = utilityNumber(match[1], utility);
     clearPaddingSides(output);
-    return;
   }
   if ((match = /^(px|py|pt|pr|pb|pl)-(\d+(?:\.\d+)?)$/.exec(utility))) {
     applyPaddingSides(output, match[1], utilityNumber(match[2], utility, 4));
@@ -191,9 +192,19 @@ function applyUtility(output: ClassProps, utility: string): void {
     output.background = normalizeColor(match[1], match[2]);
     return;
   }
-  if ((match = /^text-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\]$/.exec(utility))) {
-    output.textColor = normalizeColor(match[1]);
+  if ((match = /^text-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
+    output.textColor = normalizeColor(match[1], match[2]);
     return;
+  }
+  if ((match = /^(bg|text|border)-([a-z]+(?:-\d+)?)(?:\/(\d{1,3}))?$/.exec(utility))) {
+    const color = tailwindColors[match[2]];
+    if (color !== undefined) {
+      const resolved = namedColorWithAlpha(color, match[3]);
+      if (match[1] === "bg") output.background = resolved;
+      else if (match[1] === "text") output.textColor = resolved;
+      else output.borderColor = resolved;
+      return;
+    }
   }
   if ((match = /^text-(xs|sm|base|lg|xl|2xl|3xl|4xl)$/.exec(utility))) {
     output.fontScale = fontScales[match[1]];
@@ -427,6 +438,15 @@ function normalizeColor(source: string, alphaPercent?: string): string {
     hex = hex.slice(0, 6) + Math.round(percent * 255 / 100).toString(16).padStart(2, "0");
   }
   return `#${hex.toUpperCase()}`;
+}
+
+function namedColorWithAlpha(color: string, alphaPercent?: string): string {
+  if (alphaPercent === undefined) return color;
+  const percent = Number(alphaPercent);
+  if (percent > 100) throw new UtilityError(color, `Color alpha must be between 0 and 100, received ${percent}`);
+  const baseAlpha = Number.parseInt(color.slice(7, 9), 16);
+  const alpha = Math.round(baseAlpha * percent / 100).toString(16).padStart(2, "0").toUpperCase();
+  return `${color.slice(0, 7)}${alpha}`;
 }
 
 function unknownUtility(utility: string): UtilityError {
