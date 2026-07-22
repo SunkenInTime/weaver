@@ -44,7 +44,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `16e49390` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `8669cfae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | complete, pushed, draft PRs open |
 | 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `25f6f63` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `52c7627a` | complete, pushed, draft PRs open |
-| 12 | `styling/12-showcase` | none | pending |
+| 12 | `styling/12-showcase` at `571a8b6` (draft creation pending final gates) | none | implementation complete and pushed; final verification in progress |
 
 ## Completed gates
 
@@ -112,6 +112,13 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 35. `pressed:` is the brief's explicit state-prefix spelling even though Tailwind CSS calls its nearest built-in pseudo-state `active:`. Only the brief's four channels are accepted, with the underlying color and opacity utility semantics kept exact; unsupported state channels remain loud check-time errors.
 36. Normalized press coordinates are clamped to 0–1, with zero-size axes yielding zero, so the API keeps the promised normalized range even for degenerate or edge hit geometry.
 
+37. PR12 uses fixed display strings and no provider, interval, animated canvas, fetch, or state loop. The clock and playback values are intentionally fake so the acceptance anchor preserves idle-zero.
+38. The cover art and Geist Pixel font are reused from the repository's Native deck/font assets. The grille is a built-in image-generator output; generator-only PNG metadata was stripped without changing pixels, and the generated canvas plus cover were normalized to 256×256 to satisfy the widget-profile 256 KiB decoded-image bound.
+39. `<stack>` is layout-only, so the showcase paints border/shadow on its first image child rather than the stack itself. The first physical capture exposed this contract mistake; moving paint to the child restored the cover and every later overlay.
+40. The required A/B compares different widgets exactly as the brief requests. Ten host `status.json` snapshots were taken two seconds apart on the same Windows machine, software/pixels path, release binaries, isolated data roots, and one widget at a time; the result is observational and not a causal per-layer performance claim.
+41. The computer-control plugin could not initialize because its native pipe was unavailable. Physical evidence therefore uses Win32 `PrintWindow` against each real Native widget window, followed by direct visual inspection of both PNGs.
+42. The generated texture's first two encoded forms exceeded the source-stream limit, and its fixed 1254×1254 canvas plus the 512×512 cover exceeded the widget-profile decoded-image limit. The narrowest resolution was local 256×256 normalization; final check/bundle/live registration is clean.
+
 ## UNVERIFIED / BLOCKED
 
 - `UNVERIFIED (needs Mac)`: N1 shared-layout behavior on the macOS reference and Metal presentation paths. Evidence available now: platform-neutral Native Zig suites pass on Windows; await PR CI for compile gates and Mac hardware for physical pixels.
@@ -137,6 +144,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `BLOCKED (unrelated Native fast gate)`: N8 fast gate against N7 passes zig-test (28s), validate (1s), frontend examples (8s), and mobile examples (53s), but `examples-native` fails after 155s in the same five unchanged exhaustive switches that omit pre-existing `Event.window_frame`; total gate time 245.1s. N8 changes neither those examples nor the runtime Event tag set.
 - `UNVERIFIED (needs Mac)`: Weaver 11 / Native N8 physical hover/pressed pixels and macOS right-click delivery. Evidence available now: exact Native state/event tests, stock/profile suites, exact Weaver wire/projection tests, and a stable Windows software live run; physical macOS behavior awaits hardware and headless CI is pending.
 - `RESOLVED during PR11`: the first live smoke used the prior runtime executable and produced three `unsupported property` crash-restarts. An explicit ReleaseFast runtime executable rebuild followed by a fresh isolated run reached 67s uptime with one startup and zero exception/crash/restart lines; the failed attempt was not accepted as evidence.
+- `RESOLVED during PR12`: the initial 2.4 MiB generated grille caused three `StreamTooLong` crash-restarts. A metadata-stripped image-generator revision fit the source stream but exposed `ImageTooLarge`; normalizing both local images to 256×256 meets the widget-profile decoded-image budget. The final fresh run has one startup, software/pixels presentation, 75s observed uptime, and zero error/restart lines.
+- `RESOLVED during PR12`: the first physical showcase frame omitted all stack children because border/shadow had been authored on the layout-only `<stack>`. The shipped example moves those channels to the first image child; the final capture visibly contains the cover, overlay labels, elapsed text, progress, grille, and controls.
+- `UNVERIFIED (needs Mac)`: PR12 physical CoreText font/icon pixels, AppKit image/clip/tile output, and native state visuals. Evidence available now: final Windows physical capture, exact contract/compiler ratchet, prior Native platform-neutral suites, and stable software live run; macOS hardware remains unavailable.
 
 ## Cleanup state
 
@@ -153,4 +163,4 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## Next executable task
 
-Create Weaver `styling/12-showcase` from PR11, implement `examples/retro-player-shell` with the full stacked surface, update the conjure skill and consolidated contract/results tables, capture Windows measurements/screenshots, run the complete final verification matrix, and open the final draft PR without changing either default branch.
+Run PR12's complete local verification matrix, commit/push the contract/results/status evidence, open the draft PR against `styling/11-interaction`, then audit every draft's CI and final branch/submodule topology without changing either default branch.
