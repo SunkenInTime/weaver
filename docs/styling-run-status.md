@@ -44,7 +44,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `16e49390` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `8669cfae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | complete, pushed, draft PRs open |
 | 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `25f6f63` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `52c7627a` | complete, pushed, draft PRs open |
-| 12 | `styling/12-showcase` at `571a8b6` (draft creation pending final gates) | none | implementation complete and pushed; final verification in progress |
+| 12 | `styling/12-showcase` at evidence commit `a5183c6` (draft creation next) | none | complete, pushed; all local gates green |
 
 ## Completed gates
 
@@ -72,6 +72,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Release-audit repair: PR01 through PR10 now each require their branch's exact Native gitlink. A branch-by-branch checkout, recursive submodule update, and `npm run audit:release` sweep passed all ten heads (`e7648949`, `457c2dd9`, `bb20a1f5`, `85cda5d7`, `0d36b403`, `b96b72f8`, `65aff3ea`, `e66ea8cd`, `16e49390`, `8669cfae`).
 - Native N8: focused profile canvas suite PASS in 70.2s after the target-id follow-up; `zig build validate` PASS in 38.4s; stock suite PASS in 46.0s; widget-profile suite PASS in 59.6s. Exact tests cover retained hover/pressed channel resolution, pressed precedence, target/local geometry, click count, double/right dispatch, invalidation, and hostile arena bounds. Draft PR: https://github.com/SunkenInTime/native/pull/14.
 - Weaver 11: `npm test` PASS 45/45 in 27.4s; `npm run typecheck` PASS in 2.8s; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 10.7s; ReleaseFast runtime test PASS in 60.6s; CLI build and example TypeScript/check/bundle PASS. Corrected isolated `weaver dev examples/styling-interaction` reached `running` at 67s uptime with one startup, software/pixels presentation, and zero exception/crash/restart lines; shutdown and broad process audit left no clone-owned process.
+- Weaver 12: `npm test` PASS 47/47 in 23.2s; `npm run typecheck` PASS in 2.2s; `npm run build` PASS in 0.5s; example TypeScript PASS in 2.7s, check PASS in 2.4s, bundle PASS in 2.3s; release audit PASS in 0.6s at Native `52c7627a`; runtime Debug `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 0.7s cached and ReleaseFast PASS in 1.0s cached; consolidated contract test PASS 2/2 and conjure skill validation PASS. A fresh isolated live run reached 75s uptime with one startup, software/pixels presentation, and zero error/restart lines. Physical capture was visually accepted, and the matched-window A/B is recorded in `docs/styling-breadth-results.md`.
 
 ## Assumptions
 
@@ -160,7 +161,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Before PR09 smoke, a fresh audit found two stale clone-owned Node/esbuild watcher pairs for the PR07 and PR08 examples despite the earlier narrower audits; PIDs 20764/9468 and 44400/1928 were terminated. PR09 isolated data and generated output were removed after shutdown, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
 - PR10 isolated data and generated output were removed after `weaver down`; the dev watcher and its esbuild helper were explicitly stopped, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
 - PR11 isolated data and generated output were removed after `weaver down`; the dev watcher and esbuild helper were explicitly stopped, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
+- PR12 baseline/showcase hosts, dev watchers, isolated data roots, diagnostic captures, logs, and the detached master worktree were removed after shutdown. A broad process audit found no clone-owned runtime, host, watcher, or esbuild process; only the running Codex task process matched the clone path in its command text.
 
 ## Next executable task
 
-Run PR12's complete local verification matrix, commit/push the contract/results/status evidence, open the draft PR against `styling/11-interaction`, then audit every draft's CI and final branch/submodule topology without changing either default branch.
+Commit and push this final PR12 gate ledger, open the draft PR against `styling/11-interaction`, then audit every draft's CI and final branch/submodule topology without changing either default branch.
