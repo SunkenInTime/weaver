@@ -11,7 +11,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
 | 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
-| 06 / N5 | `styling/06-shadows`, implementation `5fff1ee` plus final test follow-up | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `f84552629aa076b134e5a6c21465248be47daf15` | complete and pushed; Weaver draft PR pending creation |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `f84552629aa076b134e5a6c21465248be47daf15` | complete, pushed, draft PRs open |
 | 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
 | 08 | `styling/08-icons` | none expected | pending |
 | 09 / N6 | `styling/09-stack-overflow` | `styling/N6-stack-overflow` | pending |
@@ -81,4 +81,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Open the Weaver PR06 draft against `styling/05-text-pack`, link Native N5, then branch `styling/07-fonts` from PR06 and audit the existing bundle/font registry seams before implementation.
+Branch `styling/07-fonts` from PR06 and audit the existing bundle/font registry seams before implementing discovery, validation, pack transport, registration, family selection, and weight degradation.
