@@ -81,6 +81,10 @@ test("styling 01 utility families each have an accept case", () => {
   for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
 });
 
+test("cross-axis stretch is the explicit CSS-default utility", () => {
+  assert.deepEqual(compileClass("items-start items-stretch"), { crossAlign: "stretch" });
+});
+
 test("styling 01 rejects malformed new utilities with fix-its", () => {
   assert.throws(() => compileClass("w-3/0"), /Unknown class utility "w-3\/0"\. Did you mean/);
   assert.throws(() => compileClass("w-0/1"), /Unknown class utility "w-0\/1"\. Did you mean/);

@@ -580,6 +580,7 @@ test "tree owns a bounded hierarchy" {
 test "tree stores styling breadth layout wire properties" {
     var tree: Tree = .{};
     const id = try tree.createNode(.panel);
+    try std.testing.expectEqual(CrossAlign.stretch, (try tree.nodeConst(id)).cross_align);
     try tree.setNumberProp(id, "paddingTop", 0);
     try tree.setNumberProp(id, "paddingRight", 12);
     try tree.setNumberProp(id, "marginLeft", -8);
