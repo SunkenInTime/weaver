@@ -876,6 +876,108 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   return value as unknown as WidgetConfigData;
 }
 
+const nativeWidgetNodeLimit = 128;
+const nativeWidgetDepthLimit = 32;
+
+interface LoweredTreeMetrics { nodes: number; depth: number }
+
+function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
+  const components = new Map<string, ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment>();
+  const unwrapJsx = (expression: ts.Expression): ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current) ? current : null;
+  };
+  const returnedRoot = (body: ts.ConciseBody): ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null => {
+    if (!ts.isBlock(body)) return unwrapJsx(body);
+    let result: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null = null;
+    const findReturn = (node: ts.Node): void => {
+      if (result || (node !== body && ts.isFunctionLike(node))) return;
+      if (ts.isReturnStatement(node) && node.expression) result = unwrapJsx(node.expression);
+      else ts.forEachChild(node, findReturn);
+    };
+    findReturn(body);
+    return result;
+  };
+  const indexComponents = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      const root = returnedRoot(node.body);
+      if (root) components.set(node.name.text, root);
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
+      const root = returnedRoot(node.initializer.body);
+      if (root) components.set(node.name.text, root);
+    }
+    ts.forEachChild(node, indexComponents);
+  };
+  indexComponents(project.sourceFile);
+
+  const directRoots = (node: ts.Node): (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] => {
+    const roots: (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] = [];
+    const visit = (child: ts.Node): void => {
+      if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+        roots.push(child);
+        return;
+      }
+      ts.forEachChild(child, visit);
+    };
+    ts.forEachChild(node, visit);
+    return roots;
+  };
+  const tagAndAttributes = (node: ts.JsxElement | ts.JsxSelfClosingElement): { tag: string; attributes: ts.JsxAttributes } =>
+    ts.isJsxElement(node)
+      ? { tag: node.openingElement.tagName.getText(project.sourceFile), attributes: node.openingElement.attributes }
+      : { tag: node.tagName.getText(project.sourceFile), attributes: node.attributes };
+  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
+    if (tag !== "row" && tag !== "column") return false;
+    const { attributes } = tagAndAttributes(node);
+    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "class");
+    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
+    if (classText === null) return false;
+    try {
+      const compiled = compileClass(classText);
+      return Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"));
+    } catch {
+      return false; // The normal class validator reports the actionable error.
+    }
+  };
+  const metrics = (node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment, visiting: Set<string>): LoweredTreeMetrics => {
+    if (ts.isJsxFragment(node)) {
+      const children = directRoots(node).map((child) => metrics(child, visiting));
+      return { nodes: children.reduce((sum, child) => sum + child.nodes, 0), depth: Math.max(0, ...children.map((child) => child.depth)) };
+    }
+    const { tag } = tagAndAttributes(node);
+    if (/^[A-Z]/.test(tag) && components.has(tag) && !visiting.has(tag)) {
+      const next = new Set(visiting);
+      next.add(tag);
+      return metrics(components.get(tag)!, next);
+    }
+    const children = ts.isJsxElement(node) ? directRoots(node).map((child) => metrics(child, visiting)) : [];
+    const ownDepth = isPaintedLayout(node, tag) ? 2 : 1;
+    return {
+      nodes: ownDepth + children.reduce((sum, child) => sum + child.nodes, 0),
+      depth: ownDepth + Math.max(0, ...children.map((child) => child.depth)),
+    };
+  };
+  const roots: (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] = [];
+  const collectRoots = (node: ts.Node, insideJsx: boolean): void => {
+    const jsx = ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node);
+    if (jsx && !insideJsx) roots.push(node);
+    ts.forEachChild(node, (child) => collectRoots(child, insideJsx || jsx));
+  };
+  collectRoots(project.sourceFile, false);
+  for (const root of roots) {
+    const lowered = metrics(root, new Set());
+    if (lowered.nodes > nativeWidgetNodeLimit) {
+      errors.push(locationMessage(project.sourceFile, root, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); painted <row>/<column> elements add an inner layout node`));
+    }
+    if (lowered.depth > nativeWidgetDepthLimit) {
+      errors.push(locationMessage(project.sourceFile, root, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level`));
+    }
+  }
+}
+
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
   const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
@@ -917,6 +1019,7 @@ function validateSource(project: SourceProject): string[] {
   for (const provider of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) errors.push(`useProvider("${provider}") requires subscribe: ["${provider}"] in the widget config`);
   }
+  validateLoweredTreeBudgets(project, errors);
   return errors;
 }
 
