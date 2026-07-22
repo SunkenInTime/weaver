@@ -420,8 +420,8 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     padding: 0, paddingTop: -1, paddingRight: -1, paddingBottom: -1, paddingLeft: -1,
     marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
     gap: 0, radius: 0, background: "", textColor: "",
-    fontScale: 1, fontWeight: "normal", opacity: 1, crossAlign: "start",
-    mainAlign: "start", grow: 0, width: -1, height: -1,
+    fontScale: 1, fontWeight: "normal", opacity: 1, crossAlign: "stretch",
+    mainAlign: "start", grow: 0, shrink: 1, alignSelf: "auto", flexWrap: false, width: -1, height: -1,
     minWidth: 0, minHeight: 0, maxWidth: -1, maxHeight: -1,
     widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false,
   };

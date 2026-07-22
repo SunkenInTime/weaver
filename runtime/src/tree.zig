@@ -31,8 +31,9 @@ pub const Kind = enum {
 };
 
 pub const FontWeight = enum { light, regular, medium, semibold, bold };
-pub const CrossAlign = enum { start, center, end, baseline };
-pub const MainAlign = enum { start, center, end, between };
+pub const CrossAlign = enum { start, center, end, baseline, stretch };
+pub const MainAlign = enum { start, center, end, between, around, evenly };
+pub const SelfAlign = enum { auto, start, center, end, stretch };
 
 /// One bounded retained node. M0 deliberately keeps ownership simple: JS ids
 /// index this table, strings and child lists live inline, and a whole widget
@@ -61,9 +62,12 @@ pub const Node = struct {
     text_color: ?native_sdk.canvas.Color = null,
     font_scale: f32 = 1,
     font_weight: FontWeight = .regular,
-    cross_align: CrossAlign = .start,
+    cross_align: CrossAlign = .stretch,
     main_align: MainAlign = .start,
     grow: f32 = 0,
+    shrink: f32 = 1,
+    align_self: SelfAlign = .auto,
+    flex_wrap: bool = false,
     /// -1 is unset; zero is an authored preferred size.
     width: f32 = -1,
     height: f32 = -1,
@@ -217,6 +221,8 @@ pub const Tree = struct {
             &target.font_scale
         else if (std.mem.eql(u8, key, "grow"))
             &target.grow
+        else if (std.mem.eql(u8, key, "shrink"))
+            &target.shrink
         else if (std.mem.eql(u8, key, "width"))
             &target.width
         else if (std.mem.eql(u8, key, "height"))
@@ -276,7 +282,7 @@ pub const Tree = struct {
     }
 
     pub fn setCrossAlign(self: *Tree, id: NodeId, value: []const u8) Error!void {
-        const alignment: CrossAlign = if (std.mem.eql(u8, value, "start")) .start else if (std.mem.eql(u8, value, "center")) .center else if (std.mem.eql(u8, value, "end")) .end else if (std.mem.eql(u8, value, "baseline")) .baseline else return error.InvalidProperty;
+        const alignment: CrossAlign = if (std.mem.eql(u8, value, "start")) .start else if (std.mem.eql(u8, value, "center")) .center else if (std.mem.eql(u8, value, "end")) .end else if (std.mem.eql(u8, value, "baseline")) .baseline else if (std.mem.eql(u8, value, "stretch")) .stretch else return error.InvalidProperty;
         const target = try self.node(id);
         if (target.cross_align == alignment) return;
         target.cross_align = alignment;
@@ -284,10 +290,25 @@ pub const Tree = struct {
     }
 
     pub fn setMainAlign(self: *Tree, id: NodeId, value: []const u8) Error!void {
-        const alignment: MainAlign = if (std.mem.eql(u8, value, "start")) .start else if (std.mem.eql(u8, value, "center")) .center else if (std.mem.eql(u8, value, "end")) .end else if (std.mem.eql(u8, value, "between")) .between else return error.InvalidProperty;
+        const alignment: MainAlign = if (std.mem.eql(u8, value, "start")) .start else if (std.mem.eql(u8, value, "center")) .center else if (std.mem.eql(u8, value, "end")) .end else if (std.mem.eql(u8, value, "between")) .between else if (std.mem.eql(u8, value, "around")) .around else if (std.mem.eql(u8, value, "evenly")) .evenly else return error.InvalidProperty;
         const target = try self.node(id);
         if (target.main_align == alignment) return;
         target.main_align = alignment;
+        self.changed();
+    }
+
+    pub fn setAlignSelf(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        const alignment: SelfAlign = if (std.mem.eql(u8, value, "auto")) .auto else if (std.mem.eql(u8, value, "start")) .start else if (std.mem.eql(u8, value, "center")) .center else if (std.mem.eql(u8, value, "end")) .end else if (std.mem.eql(u8, value, "stretch")) .stretch else return error.InvalidProperty;
+        const target = try self.node(id);
+        if (target.align_self == alignment) return;
+        target.align_self = alignment;
+        self.changed();
+    }
+
+    pub fn setFlexWrap(self: *Tree, id: NodeId, value: bool) Error!void {
+        const target = try self.node(id);
+        if (target.flex_wrap == value) return;
+        target.flex_wrap = value;
         self.changed();
     }
 
@@ -568,6 +589,10 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setNumberProp(id, "aspectRatio", 4.0 / 3.0);
     try tree.setNumberProp(id, "width", 0);
     try tree.setNumberProp(id, "maxWidth", 0);
+    try tree.setNumberProp(id, "shrink", 0);
+    try tree.setMainAlign(id, "evenly");
+    try tree.setAlignSelf(id, "stretch");
+    try tree.setFlexWrap(id, true);
     const node = try tree.nodeConst(id);
     try std.testing.expectEqual(@as(f32, 0), node.padding_top);
     try std.testing.expectEqual(@as(f32, 12), node.padding_right);
@@ -578,6 +603,10 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectApproxEqAbs(@as(f32, 4.0 / 3.0), node.aspect_ratio, 0.0001);
     try std.testing.expectEqual(@as(f32, 0), node.width);
     try std.testing.expectEqual(@as(f32, 0), node.max_width);
+    try std.testing.expectEqual(@as(f32, 0), node.shrink);
+    try std.testing.expectEqual(MainAlign.evenly, node.main_align);
+    try std.testing.expectEqual(SelfAlign.stretch, node.align_self);
+    try std.testing.expect(node.flex_wrap);
     try tree.setNumberProp(id, "paddingTop", -1);
     try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
 }
