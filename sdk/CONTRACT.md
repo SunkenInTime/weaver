@@ -175,7 +175,8 @@ The exact stem always works (`GeistPixel-Square.ttf` becomes
 `-Semibold`, or `-Bold` (underscore also accepted) additionally groups
 faces into a family alias: `Display-Regular.ttf` plus `Display-Bold.ttf`
 can be selected with `font-[Display] font-bold`. The closest available
-registered weight is used. A single custom face therefore deliberately
+registered weight is used. An exact file-stem match wins over family/weight
+resolution. A single custom face therefore deliberately
 degrades every requested weight to that face rather than fabricating or
 silently switching families. Built-in sans maps five requested weights to
 the three bundled Native rungs (regular, medium, bold); built-in mono has
