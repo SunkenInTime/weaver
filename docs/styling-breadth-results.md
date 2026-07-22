@@ -100,3 +100,14 @@ N3 retains four lossless f32 corner overrides and the unchanged hostile arena
 bound. Its final repair pre-sizes capped Markdown block/list/table node buffers
 from safe source-line upper bounds instead of eagerly reserving 64 full nodes
 for short inputs; maximum capacities and truncation semantics do not change.
+
+## Final CI rollup
+
+The arena repair is confirmed by green Apple-silicon headless CI on every final
+Weaver head PR21-30. PR19-30 are fully green across the Windows gate, Intel
+headless, Apple-silicon headless, and Apple-silicon session jobs. PR21's Intel
+job required two reruns because the unchanged loopback HTTPS test twice parsed
+an empty temporary port file; the third attempt passed without a styling-code
+or test change. Native PR7-14 have no configured GitHub checks; all required
+Native suites pass locally at their exact pushed heads as recorded in the run
+status ledger.
