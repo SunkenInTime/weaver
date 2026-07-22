@@ -122,6 +122,9 @@ utility.
 | `p-N`, `p-[Npx]` | uniform padding |
 | `gap-N`, `gap-[Npx]` | flex gap |
 | `rounded`, `rounded-{md,lg,xl,2xl,3xl,full}`, `rounded-[Npx]` | corner radius |
+| `rounded-{t,r,b,l,tl,tr,br,bl}[-{md,lg,xl,2xl,3xl,full}]`, arbitrary `[Npx]` | selected corner radii; later classes win per corner |
+| `border`, `border-N`, `border-[Npx]` | border width in pixels; width-only utilities default to `#E5E7EBFF` (gray-200) |
+| `border-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | border color; color alone does not create width |
 | `bg-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | background color |
 | `text-[#…]` | text color |
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
