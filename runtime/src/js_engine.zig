@@ -115,7 +115,7 @@ pub const Engine = struct {
         try self.pumpJobs();
     }
 
-    pub fn fireEvent(self: *Engine, node_id: tree_mod.NodeId, kind: []const u8, payload: ?f64) Error!void {
+    pub fn fireEvent(self: *Engine, node_id: tree_mod.NodeId, kind: []const u8, payload: ?bridge.EventPayload) Error!void {
         self.beginTurn();
         defer self.endTurn();
         if (!bridge.dispatchEvent(self.context, &self.bridge_state, node_id, kind, payload)) return self.reportException();

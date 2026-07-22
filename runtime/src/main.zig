@@ -67,7 +67,9 @@ const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
 pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
-    press: tree_mod.NodeId,
+    press: native_sdk.canvas.WidgetPressEvent,
+    double_press: native_sdk.canvas.WidgetPressEvent,
+    right_press: native_sdk.canvas.WidgetPressEvent,
     slider: tree_mod.NodeId,
     canvas_frame: u64,
     dev_reload,
@@ -141,15 +143,12 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 std.log.info("widget timer: {d} callbacks, generation {d}, changed={}", .{ model.timer_fires, model.tree.generation, before != model.tree.generation });
             }
         },
-        .press => |id| {
-            (model.engine orelse return).fireEvent(id, "press", null) catch |err| {
-                std.log.err("widget press callback failed: {s}", .{@errorName(err)});
-            };
-            syncTimers(model, effects);
-        },
+        .press => |event| dispatchPressEvent(model, effects, "press", event),
+        .double_press => |event| dispatchPressEvent(model, effects, "doublepress", event),
+        .right_press => |event| dispatchPressEvent(model, effects, "rightpress", event),
         .slider => |id| {
             const value = model.slider_values[id - 1];
-            (model.engine orelse return).fireEvent(id, "change", value) catch |err| {
+            (model.engine orelse return).fireEvent(id, "change", .{ .number = value }) catch |err| {
                 std.log.err("widget slider callback failed: {s}", .{@errorName(err)});
             };
             syncTimers(model, effects);
@@ -193,6 +192,49 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             };
         },
     }
+}
+
+fn dispatchPressEvent(model: *Model, effects: *Effects, kind: []const u8, event: native_sdk.canvas.WidgetPressEvent) void {
+    const id = retainedPressNodeId(&model.tree, event.target_id) orelse {
+        std.log.warn("widget {s} target {d} has no retained node", .{ kind, event.target_id });
+        return;
+    };
+    (model.engine orelse return).fireEvent(id, kind, .{ .press = .{
+        .x = event.x,
+        .y = event.y,
+        .width = event.width,
+        .height = event.height,
+    } }) catch |err| {
+        std.log.err("widget {s} callback failed: {s}", .{ kind, @errorName(err) });
+    };
+    syncTimers(model, effects);
+}
+
+fn retainedPressNodeId(tree: *const tree_mod.Tree, target_id: native_sdk.canvas.ObjectId) ?tree_mod.NodeId {
+    var id: tree_mod.NodeId = 1;
+    while (id <= tree_mod.max_nodes) : (id += 1) {
+        const node = tree.nodeConst(id) catch continue;
+        const kind: native_sdk.canvas.WidgetKind = switch (node.kind) {
+            .button => .panel,
+            else => continue,
+        };
+        if (native_sdk.canvas.globalWidgetId(kind, native_sdk.canvas.uiKey(id)) == target_id) return id;
+    }
+    return null;
+}
+
+test "interaction projection retains exact channels and press identity" {
+    const background = native_sdk.canvas.Color.rgba8(10, 20, 30, 255);
+    const border = native_sdk.canvas.Color.rgba8(40, 50, 60, 255);
+    const projected = nativeInteractionStyle(.{ .background = background, .opacity = 0.65, .border_color = border }).?;
+    try std.testing.expectEqualDeep(background, projected.background.?);
+    try std.testing.expectEqual(@as(f32, 0.65), projected.opacity.?);
+    try std.testing.expectEqualDeep(border, projected.border.?);
+
+    var tree: tree_mod.Tree = .{};
+    const id = try tree.createNode(.button);
+    const target_id = native_sdk.canvas.globalWidgetId(.panel, native_sdk.canvas.uiKey(id));
+    try std.testing.expectEqual(id, retainedPressNodeId(&tree, target_id).?);
 }
 
 /// A dragged position is user state, not widget source (ADR 0004/0011):
@@ -416,7 +458,18 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
 
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
     return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
-        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null;
+        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null or
+        !node.hover_style.isEmpty() or !node.pressed_style.isEmpty();
+}
+
+fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.WidgetInteractionStyle {
+    if (style.isEmpty()) return null;
+    return .{
+        .background = style.background,
+        .foreground = style.text_color,
+        .opacity = if (style.opacity >= 0) style.opacity else null,
+        .border = style.border_color,
+    };
 }
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
@@ -545,7 +598,11 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             .stroke_width = retained.border_width,
             .quiet_hover = true,
         },
-        .on_press = if (retained.handles_press) Msg{ .press = id } else null,
+        .hover_style = nativeInteractionStyle(retained.hover_style),
+        .pressed_style = nativeInteractionStyle(retained.pressed_style),
+        .on_press_event = if (retained.handles_press) WidgetUi.pressMsg(.press) else null,
+        .on_double_press_event = if (retained.handles_double_press) WidgetUi.pressMsg(.double_press) else null,
+        .on_right_press_event = if (retained.handles_right_press) WidgetUi.pressMsg(.right_press) else null,
         .on_change = if (retained.handles_change) Msg{ .slider = id } else null,
     };
     if (retained.kind == .text) {

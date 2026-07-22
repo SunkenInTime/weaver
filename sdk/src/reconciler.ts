@@ -42,6 +42,7 @@ export interface MediaData { title: string; artist: string; album: string; playi
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
 export interface CanvasFrame { t: number; dt: number }
+export interface PressEvent { x: number; y: number; u: number; v: number }
 export interface CanvasCtx {
   readonly width: number;
   readonly height: number;
@@ -74,7 +75,9 @@ interface HostInstance {
 }
 
 interface HostElementProps {
-  onPress?: () => void;
+  onPress?: (event?: PressEvent) => void;
+  onDoublePress?: (event: PressEvent) => void;
+  onRightPress?: (event: PressEvent) => void;
   onChange?: (value: number) => void;
   value?: number;
   max?: number;
@@ -161,6 +164,11 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
       throw new Error('<image> fit must be "cover", "contain", or "stretch"');
     }
     if (source.tile !== undefined && typeof source.tile !== "boolean") throw new Error("<image> tile must be boolean");
+  }
+  if (type === "button") {
+    if (typeof source.onPress !== "function") throw new Error("<button> requires onPress={() => ...}");
+    if (source.onDoublePress !== undefined && typeof source.onDoublePress !== "function") throw new Error("<button> onDoublePress must be a function");
+    if (source.onRightPress !== undefined && typeof source.onRightPress !== "function") throw new Error("<button> onRightPress must be a function");
   }
   return {
     __weaverElement: true,
@@ -445,6 +453,8 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     borderWidth: 0, borderColor: "", shadow: "", shadowInset: false, textShadow: "", background: "", textColor: "",
     fontScale: 1, fontWeight: "normal", fontFamily: "sans", textAlign: "start", lineHeight: 0,
     letterSpacing: 0, lineClamp: 0, tabularNums: false, opacity: 1, crossAlign: "stretch",
+    hoverBackground: "", hoverTextColor: "", hoverOpacity: -1, hoverBorderColor: "",
+    pressedBackground: "", pressedTextColor: "", pressedOpacity: -1, pressedBorderColor: "",
     mainAlign: "start", grow: 0, shrink: 1, alignSelf: "auto", flexWrap: false, width: -1, height: -1,
     minWidth: 0, minHeight: 0, maxWidth: -1, maxHeight: -1,
     widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false, overflowHidden: false,
@@ -461,7 +471,9 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   const next: HostElementProps = {};
   if (instance.type === "button") {
     if (typeof props.onPress !== "function") throw new Error("<button> requires onPress={() => ...}");
-    next.onPress = props.onPress as () => void;
+    next.onPress = props.onPress as (event?: PressEvent) => void;
+    next.onDoublePress = props.onDoublePress as ((event: PressEvent) => void) | undefined;
+    next.onRightPress = props.onRightPress as ((event: PressEvent) => void) | undefined;
   } else if (instance.type === "slider") {
     if (typeof props.onChange !== "function") throw new Error("<slider> requires onChange={(value) => ...}");
     if (typeof props.value !== "number" || !Number.isFinite(props.value)) throw new Error("<slider> value must be a finite number");
@@ -497,6 +509,8 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
     next.fps = props.fps === undefined ? undefined : Math.min(60, props.fps as number);
   }
   if (Boolean(previous.onPress) !== Boolean(next.onPress)) native.setHandler(instance.id, "press", Boolean(next.onPress));
+  if (Boolean(previous.onDoublePress) !== Boolean(next.onDoublePress)) native.setHandler(instance.id, "doublepress", Boolean(next.onDoublePress));
+  if (Boolean(previous.onRightPress) !== Boolean(next.onRightPress)) native.setHandler(instance.id, "rightpress", Boolean(next.onRightPress));
   if (Boolean(previous.onChange) !== Boolean(next.onChange)) native.setHandler(instance.id, "change", Boolean(next.onChange));
   if (!Object.is(previous.value, next.value) && next.value !== undefined) native.setProp(instance.id, "value", next.value);
   if (!Object.is(previous.max, next.max) && next.max !== undefined) native.setProp(instance.id, "max", next.max);
@@ -510,7 +524,7 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (instance.type === "canvas" && next.onFrame) {
     updateCanvasBinding(instance.id, next.onFrame, next.fps, instance.props.width ?? 0, instance.props.height ?? 0);
   }
-  if (next.onPress || next.onChange) handlers.set(instance.id, next);
+  if (next.onPress || next.onDoublePress || next.onRightPress || next.onChange) handlers.set(instance.id, next);
   else handlers.delete(instance.id);
 }
 
@@ -872,9 +886,17 @@ function utf8ByteLength(value: string): number {
   return bytes;
 }
 
+function pressEvent(payload: NativePressPayload): PressEvent {
+  const u = payload.w > 0 ? Math.max(0, Math.min(1, payload.x / payload.w)) : 0;
+  const v = payload.h > 0 ? Math.max(0, Math.min(1, payload.y / payload.h)) : 0;
+  return { x: payload.x, y: payload.y, u, v };
+}
+
 native.onEvent((id, kind, payload) => {
   const handler = handlers.get(id);
-  if (kind === "press") handler?.onPress?.();
+  if (kind === "press") handler?.onPress?.(payload && typeof payload === "object" ? pressEvent(payload) : undefined);
+  else if (kind === "doublepress" && payload && typeof payload === "object") handler?.onDoublePress?.(pressEvent(payload));
+  else if (kind === "rightpress" && payload && typeof payload === "object") handler?.onRightPress?.(pressEvent(payload));
   else if (kind === "change" && typeof payload === "number") handler?.onChange?.(payload);
 });
 Object.defineProperty(globalThis, "wfetch", { value: wfetch, configurable: false, writable: false });

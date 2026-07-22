@@ -272,16 +272,18 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
     const key = stringArg(js, argv[1]) catch return fail(js, "property key must be a string");
     defer c.JS_FreeCString(js, key.raw);
-    if (std.mem.eql(u8, key.bytes, "background") or std.mem.eql(u8, key.bytes, "textColor") or std.mem.eql(u8, key.bytes, "borderColor")) {
-        const value = stringArg(js, argv[2]) catch return fail(js, "background must be #RRGGBBAA");
+    if (isColorProperty(key.bytes)) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "color property must be #RRGGBBAA");
         defer c.JS_FreeCString(js, value.raw);
         const color = if (value.bytes.len == 0) null else parseColor(value.bytes) orelse return fail(js, "color must be #RRGGBBAA");
         if (std.mem.eql(u8, key.bytes, "background")) {
             state(js).tree.setBackground(id, color) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "textColor")) {
             state(js).tree.setTextColor(id, color) catch return fail(js, "setProp failed");
-        } else {
+        } else if (std.mem.eql(u8, key.bytes, "borderColor")) {
             state(js).tree.setBorderColor(id, color) catch return fail(js, "setProp failed");
+        } else {
+            state(js).tree.setInteractionColor(id, key.bytes, color) catch return fail(js, "setProp failed");
         }
     } else if (std.mem.eql(u8, key.bytes, "shadow") or std.mem.eql(u8, key.bytes, "textShadow")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "shadow must be a packed string");
@@ -654,11 +656,25 @@ pub fn drainFetches(ctx: *c.JSContext, bridge_state: *State) void {
     }
 }
 
-pub fn dispatchEvent(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.NodeId, kind: []const u8, payload: ?f64) bool {
+pub const PressPayload = struct { x: f64, y: f64, width: f64, height: f64 };
+pub const EventPayload = union(enum) { number: f64, press: PressPayload };
+
+pub fn dispatchEvent(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.NodeId, kind: []const u8, payload: ?EventPayload) bool {
     if (!c.JS_IsFunction(ctx, bridge_state.event_callback)) return true;
     const kind_value = c.JS_NewStringLen(ctx, kind.ptr, kind.len);
     defer c.JS_FreeValue(ctx, kind_value);
-    const payload_value = if (payload) |value| c.JS_NewFloat64(ctx, value) else qjs.nullValue();
+    const payload_value = if (payload) |value| switch (value) {
+        .number => |number| c.JS_NewFloat64(ctx, number),
+        .press => |press| block: {
+            const object = c.JS_NewObject(ctx);
+            if (c.JS_IsException(object)) return false;
+            _ = c.JS_SetPropertyStr(ctx, object, "x", c.JS_NewFloat64(ctx, press.x));
+            _ = c.JS_SetPropertyStr(ctx, object, "y", c.JS_NewFloat64(ctx, press.y));
+            _ = c.JS_SetPropertyStr(ctx, object, "w", c.JS_NewFloat64(ctx, press.width));
+            _ = c.JS_SetPropertyStr(ctx, object, "h", c.JS_NewFloat64(ctx, press.height));
+            break :block object;
+        },
+    } else qjs.nullValue();
     defer c.JS_FreeValue(ctx, payload_value);
     var arguments = [_]c.JSValue{ c.JS_NewUint32(ctx, node_id), kind_value, payload_value };
     defer c.JS_FreeValue(ctx, arguments[0]);
@@ -666,6 +682,12 @@ pub fn dispatchEvent(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.
     const succeeded = !c.JS_IsException(result);
     c.JS_FreeValue(ctx, result);
     return succeeded;
+}
+
+fn isColorProperty(key: []const u8) bool {
+    return std.mem.eql(u8, key, "background") or std.mem.eql(u8, key, "textColor") or std.mem.eql(u8, key, "borderColor") or
+        std.mem.eql(u8, key, "hoverBackground") or std.mem.eql(u8, key, "hoverTextColor") or std.mem.eql(u8, key, "hoverBorderColor") or
+        std.mem.eql(u8, key, "pressedBackground") or std.mem.eql(u8, key, "pressedTextColor") or std.mem.eql(u8, key, "pressedBorderColor");
 }
 
 pub fn dispatchProvider(ctx: *c.JSContext, bridge_state: *State, line: []const u8) bool {

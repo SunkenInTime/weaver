@@ -47,6 +47,17 @@ pub const BoxShadow = struct {
     color: native_sdk.canvas.Color,
 };
 
+pub const InteractionStyle = struct {
+    background: ?native_sdk.canvas.Color = null,
+    text_color: ?native_sdk.canvas.Color = null,
+    opacity: f32 = -1,
+    border_color: ?native_sdk.canvas.Color = null,
+
+    pub fn isEmpty(self: InteractionStyle) bool {
+        return self.background == null and self.text_color == null and self.opacity < 0 and self.border_color == null;
+    }
+};
+
 /// One bounded retained node. M0 deliberately keeps ownership simple: JS ids
 /// index this table, strings and child lists live inline, and a whole widget
 /// cannot silently turn bridge traffic into an unbounded native heap.
@@ -78,6 +89,8 @@ pub const Node = struct {
     background: ?native_sdk.canvas.Color = null,
     border_color: ?native_sdk.canvas.Color = null,
     text_color: ?native_sdk.canvas.Color = null,
+    hover_style: InteractionStyle = .{},
+    pressed_style: InteractionStyle = .{},
     shadow: ?BoxShadow = null,
     shadow_inset: bool = false,
     text_shadow: ?native_sdk.canvas.TextShadow = null,
@@ -110,6 +123,8 @@ pub const Node = struct {
     truncate: bool = false,
     overflow_hidden: bool = false,
     handles_press: bool = false,
+    handles_double_press: bool = false,
+    handles_right_press: bool = false,
     handles_change: bool = false,
     value: f32 = 0,
     max: f32 = 1,
@@ -282,6 +297,10 @@ pub const Tree = struct {
             &target.border_width
         else if (std.mem.eql(u8, key, "opacity"))
             &target.opacity
+        else if (std.mem.eql(u8, key, "hoverOpacity"))
+            &target.hover_style.opacity
+        else if (std.mem.eql(u8, key, "pressedOpacity"))
+            &target.pressed_style.opacity
         else if (std.mem.eql(u8, key, "fontScale"))
             &target.font_scale
         else if (std.mem.eql(u8, key, "lineHeight"))
@@ -318,6 +337,8 @@ pub const Tree = struct {
             return error.InvalidProperty;
         const normalized = if (std.mem.eql(u8, key, "opacity"))
             std.math.clamp(value, 0, 1)
+        else if (std.mem.eql(u8, key, "hoverOpacity") or std.mem.eql(u8, key, "pressedOpacity"))
+            if (value < 0) -1 else std.math.clamp(value, 0, 1)
         else if (std.mem.startsWith(u8, key, "margin"))
             value
         else if (std.mem.eql(u8, key, "letterSpacing"))
@@ -377,6 +398,27 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (std.meta.eql(target.border_color, color)) return;
         target.border_color = color;
+        self.changed();
+    }
+
+    pub fn setInteractionColor(self: *Tree, id: NodeId, key: []const u8, color: ?native_sdk.canvas.Color) Error!void {
+        const target = try self.node(id);
+        const slot: *?native_sdk.canvas.Color = if (std.mem.eql(u8, key, "hoverBackground"))
+            &target.hover_style.background
+        else if (std.mem.eql(u8, key, "hoverTextColor"))
+            &target.hover_style.text_color
+        else if (std.mem.eql(u8, key, "hoverBorderColor"))
+            &target.hover_style.border_color
+        else if (std.mem.eql(u8, key, "pressedBackground"))
+            &target.pressed_style.background
+        else if (std.mem.eql(u8, key, "pressedTextColor"))
+            &target.pressed_style.text_color
+        else if (std.mem.eql(u8, key, "pressedBorderColor"))
+            &target.pressed_style.border_color
+        else
+            return error.InvalidProperty;
+        if (std.meta.eql(slot.*, color)) return;
+        slot.* = color;
         self.changed();
     }
 
@@ -455,7 +497,16 @@ pub const Tree = struct {
 
     pub fn setHandler(self: *Tree, id: NodeId, kind: []const u8, enabled: bool) Error!void {
         const target = try self.node(id);
-        const slot: *bool = if (std.mem.eql(u8, kind, "press")) &target.handles_press else if (std.mem.eql(u8, kind, "change")) &target.handles_change else return error.InvalidProperty;
+        const slot: *bool = if (std.mem.eql(u8, kind, "press"))
+            &target.handles_press
+        else if (std.mem.eql(u8, kind, "doublepress"))
+            &target.handles_double_press
+        else if (std.mem.eql(u8, kind, "rightpress"))
+            &target.handles_right_press
+        else if (std.mem.eql(u8, kind, "change"))
+            &target.handles_change
+        else
+            return error.InvalidProperty;
         if (slot.* == enabled) return;
         slot.* = enabled;
         self.changed();
@@ -753,6 +804,11 @@ test "tree owns a bounded hierarchy" {
     try std.testing.expectError(error.InvalidNode, tree.node(label));
 }
 
+test "interaction style storage stays fixed and bounded" {
+    try std.testing.expectEqual(@as(usize, 64), @sizeOf(InteractionStyle));
+    try std.testing.expectEqual(@as(usize, 16 * 1024), @sizeOf(InteractionStyle) * 2 * max_nodes);
+}
+
 test "tree stores styling breadth layout wire properties" {
     var tree: Tree = .{};
     const id = try tree.createNode(.stack);
@@ -775,6 +831,13 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setNumberProp(id, "lineClamp", 3);
     const border = native_sdk.canvas.Color.rgba8(229, 231, 235, 255);
     try tree.setBorderColor(id, border);
+    try tree.setInteractionColor(id, "hoverBackground", native_sdk.canvas.Color.rgba8(10, 20, 30, 255));
+    try tree.setInteractionColor(id, "hoverTextColor", native_sdk.canvas.Color.rgba8(240, 240, 240, 255));
+    try tree.setNumberProp(id, "hoverOpacity", 0.75);
+    try tree.setInteractionColor(id, "pressedBorderColor", native_sdk.canvas.Color.rgba8(1, 2, 3, 255));
+    try tree.setNumberProp(id, "pressedOpacity", 0.5);
+    try tree.setHandler(id, "doublepress", true);
+    try tree.setHandler(id, "rightpress", true);
     try tree.setMainAlign(id, "evenly");
     try tree.setAlignSelf(id, "stretch");
     try tree.setFlexWrap(id, true);
@@ -805,6 +868,11 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, -0.5), node.letter_spacing);
     try std.testing.expectEqual(@as(f32, 3), node.line_clamp);
     try std.testing.expectEqualDeep(border, node.border_color.?);
+    try std.testing.expectEqual(@as(f32, 0.75), node.hover_style.opacity);
+    try std.testing.expectEqual(@as(f32, 0.5), node.pressed_style.opacity);
+    try std.testing.expect(!node.hover_style.isEmpty());
+    try std.testing.expect(node.handles_double_press);
+    try std.testing.expect(node.handles_right_press);
     try std.testing.expectEqual(MainAlign.evenly, node.main_align);
     try std.testing.expectEqual(SelfAlign.stretch, node.align_self);
     try std.testing.expect(node.flex_wrap);

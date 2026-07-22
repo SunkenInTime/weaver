@@ -290,3 +290,34 @@ test("styling 09 rejects unsupported overflow policies", () => {
   }
 });
 
+test("styling 11 accepts every hover and pressed visual channel", () => {
+  const cases = [
+    ["hover:bg-zinc-800", { hoverBackground: "#27272AFF" }],
+    ["hover:text-[#abc]/50", { hoverTextColor: "#AABBCC80" }],
+    ["hover:opacity-75", { hoverOpacity: 0.75 }],
+    ["hover:border-red-500/40", { hoverBorderColor: "#FB2C3666" }],
+    ["pressed:bg-black", { pressedBackground: "#000000FF" }],
+    ["pressed:text-white", { pressedTextColor: "#FFFFFFFF" }],
+    ["pressed:opacity-60", { pressedOpacity: 0.6 }],
+    ["pressed:border-[#12345678]", { pressedBorderColor: "#12345678" }],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+  assert.deepEqual(
+    compileClass("bg-zinc-900 hover:bg-zinc-800 pressed:bg-black hover:opacity-90 pressed:opacity-70"),
+    { background: "#18181BFF", hoverBackground: "#27272AFF", pressedBackground: "#000000FF", hoverOpacity: 0.9, pressedOpacity: 0.7 },
+  );
+});
+
+test("styling 11 rejects unsupported state channels with the supported-form fix-it", () => {
+  for (const utility of [
+    "hover:p-2", "hover:border-2", "hover:text-sm", "hover:shadow-md",
+    "pressed:rounded-lg", "pressed:font-bold", "pressed:bg-red-975", "pressed:opacity-101",
+  ]) {
+    assert.throws(
+      () => compileClass(utility),
+      /supports only (?:hover|pressed):bg-<color>, (?:hover|pressed):text-<color>, (?:hover|pressed):opacity-N, or (?:hover|pressed):border-<color>/,
+      utility,
+    );
+  }
+});
+
