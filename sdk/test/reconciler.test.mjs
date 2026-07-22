@@ -67,7 +67,7 @@ test("widget renders one native generation and providers use native timers", asy
     reverse = () => setReversed(true);
     saveMinutes = setMinutes;
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
-    return sdk.h("column", { class: "p-2" },
+    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-h-[60px] aspect-square" },
       sdk.h("text", null, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
@@ -99,6 +99,13 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(operations.filter(([name]) => name === "endBatch").length, 1);
   assert.deepEqual(operations.filter(([name]) => name === "setInterval").map((operation) => operation[1]), [1000, 2500]);
   assert.equal(callbacks.size, 2);
+  const rootColumnId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "column")[2];
+  for (const [key, value] of [
+    ["padding", 8], ["paddingTop", 0], ["marginLeft", 4], ["marginRight", 4],
+    ["widthPercent", 50], ["minWidth", 16], ["maxHeight", 60], ["aspectRatio", 1],
+  ]) {
+    assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === rootColumnId && operation[2] === key && operation[3] === value), `${key} wire prop`);
+  }
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   eventCallback(buttonId, "press", null);
