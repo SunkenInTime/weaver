@@ -183,6 +183,49 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
   }
 });
 
+test("styling 07 discovers, validates, bundles, and names TrueType faces", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-font-bundle-"));
+  try {
+    const widget = join(root, "widget");
+    mkdirSync(widget, { recursive: true });
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["widget.tsx"],
+    }));
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "Font Test", size: [160, 80] }, () => <text class="font-[Geist] font-bold">Bundled</text>);
+`);
+    writeFileSync(join(widget, "Geist-Regular.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const check = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stderr);
+    const bundle = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
+    assert.equal(bundle.status, 0, bundle.stderr);
+    const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
+    assert.deepEqual(manifest.fonts, [{
+      id: 64, name: "Geist-Regular.ttf", stem: "Geist-Regular", family: "Geist", weight: "regular", file: "Geist-Regular.ttf",
+    }]);
+    assert.deepEqual(readFileSync(join(widget, "dist", "Geist-Regular.ttf")), readFileSync(join(widget, "Geist-Regular.ttf")));
+
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "Font Test", size: [160, 80] }, () => <text class="font-[Missing]">Missing</text>);
+`);
+    const missing = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /Unknown bundled font "Missing".*Geist-Regular.*Geist/s);
+
+    writeFileSync(join(widget, "Broken.ttf"), "not a font");
+    const broken = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(broken.status, 1);
+    assert.match(broken.stderr, /Broken\.ttf: not a parseable TrueType face/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function waitForPath(path) {
   const deadline = Date.now() + 5000;
   while (!existsSync(path)) {
