@@ -6,7 +6,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | `styling/01-spacing-sizing` (in progress) | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | N1 pushed; Weaver 01 in progress |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19), implementation through `279a877516c683cae82ae5b4edf35af0d7ab624c` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
 | 02 / N2 | `styling/02-flex-completeness` | `styling/N2-flex` | pending |
 | 03 / N3 | `styling/03-radii-borders` | `styling/N3-radii-borders` | pending |
 | 04 | `styling/04-palette` | none | pending |
@@ -50,4 +50,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Finish Weaver PR 01 gates, push `styling/01-spacing-sizing`, and open its draft PR against `master`; then branch Native `styling/N2-flex` from N1.
+Branch Native `styling/N2-flex` from `styling/N1-layout-spacing`, implement shrink/grow/self/wrap and around/evenly layout with Zig tests, then run both required Native suites.
