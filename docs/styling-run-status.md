@@ -10,7 +10,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20), implementation `f646b7ecb3b979cb01ec04551dc9ee54fbc4e8f5` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
 | 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
-| 05 / N4 | `styling/05-text-pack` | `styling/N4-text` | pending |
+| 05 / N4 | `styling/05-text-pack`, implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | implementation complete and locally verified; Weaver push/PR pending |
 | 06 / N5 | `styling/06-shadows` | `styling/N5-shadows` if required | pending |
 | 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
 | 08 | `styling/08-icons` | none expected | pending |
@@ -31,6 +31,8 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Native N3 focused canvas suite PASS in 35.6s; stock suite PASS in 82.03s; widget-profile suite PASS in 51.61s. Exact commands assert independent corner radii and explicit stroke width/color.
 - Weaver 03: `npm test` PASS 28/28; `npm run typecheck` PASS; runtime Zig tests PASS in 7.3s; updated example check and explicit ReleaseFast runtime build PASS. Final dev smoke stayed alive 15s with one startup/no restart and software/pixels presentation.
 - Weaver 04: `npm test` PASS 30/30; `npm run typecheck` PASS; runtime Zig tests PASS; CLI build and example check PASS. Dev stayed alive 15s with status `running`, 12s uptime, one startup/no restart, and cleanup left no run-owned process.
+- Native N4 focused canvas suite PASS in 41.1s after the final plain-text scale/weight follow-up; stock suite PASS in 76.2s; widget-profile suite PASS in 62.3s. Exact tests cover tracking, tabular digits, two-line clamp/ellipsis, span-path measurement, and retained projection. `zig build validate` PASS. Draft PR: https://github.com/SunkenInTime/native/pull/10.
+- Weaver 05: `npm test` PASS 32/32; `npm run typecheck` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS; CLI build and `weaver check examples/styling-spacing` PASS; explicit ReleaseFast runtime build PASS. Dev smoke produced one startup, software/pixels presentation, status `running` at 35s uptime, and no crash/restart line; the temporary registration and run-owned host were removed.
 
 ## Assumptions
 
@@ -44,6 +46,11 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 8. Tailwind border numeric suffixes are literal pixel widths (`border-2` = 2px), not spacing-scale units; arbitrary `[Npx]` is also accepted and per-side borders remain deferred by the brief.
 9. Radius classes resolve left-to-right per affected corner: a later uniform radius clears earlier corner overrides, while a later side/corner utility overrides only its selected corners.
 10. "Tailwind v4" is pinned to the current published `tailwindcss@4.3.3` palette (286 shade names, including mauve/olive/mist/taupe) at tarball shasum `c006861611c213c1877893ab5b23daa16be2bb55`. Because the frozen Weaver wire accepts only RGBA8, official OKLCH values are converted through the CSS Color 4 OKLab-to-sRGB matrix with channel clipping and byte rounding; named `/NN` multiplies existing alpha so `transparent/NN` stays transparent.
+11. Tailwind text alignment maps physical `text-left/right` to the contract's available logical `start/end`; Weaver has no bidi direction property yet.
+12. Tailwind line-height semantics are frozen as named multipliers (`none` 1, `tight` 1.25, `snug` 1.375, `normal` 1.5, `relaxed` 1.625, `loose` 2); numeric `leading-N` uses the 4px spacing scale, bracketed unitless values are multipliers, and pixel forms resolve against the final font size regardless of class order.
+13. Named and arbitrary-em tracking resolve to logical pixels against the final font size regardless of class order; arbitrary pixel tracking is stored verbatim and may be negative.
+14. Weaver clamps `lineClamp` to Native SDK's existing 64-line paragraph capacity at projection time. Compiler utilities still preserve the requested positive integer on the wire; values above 64 render as 64 lines rather than exceeding bounded Native storage.
+15. Clamped and truncated Weaver text uses Native's plain text path so `text_layout.zig` owns wrap/ellipsis; Native N4 adds plain-leaf scale/weight fields to preserve arbitrary font size and weight. Unclamped text keeps the existing inline-span path.
 
 ## UNVERIFIED / BLOCKED
 
@@ -52,6 +59,8 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - The same unrelated `examples-native` failure reproduced for N2 against N1; all other affected fast-gate groups passed.
 - The same unrelated `examples-native` failure reproduced for N3 against N2; zig-test, validate, frontend examples, and mobile examples passed.
 - `UNVERIFIED (needs Mac)`: N3 asymmetric surface pixels. Evidence available now: Native exact display-list radius/stroke assertions and all Windows stock/profile suites pass; physical macOS output remains unobserved.
+- `UNVERIFIED (needs Mac)`: N4 CoreText kern and monospaced-number feature application, plus physical clamp/alignment pixels. Evidence available now: Objective-C packet wiring, platform-neutral exact tests, static validation, and both full Windows suites pass; macOS compilation/physical output awaits CI/hardware.
+- `BLOCKED (unrelated Native fast gate)`: N4 fast gate reproduces the same five `examples-native` exhaustive-switch failures for the pre-existing `window_frame` event. The N4 changed canvas tests, validate, frontend, and mobile groups pass; macOS-only CEF link validation is skipped on Windows.
 - `RESOLVED during PR03`: the first `weaver dev` attempt used a stale runtime after a parallel ReleaseFast build was canceled by the stale-CLI check failure, causing three `unsupported property` crash restarts. An explicit runtime rebuild followed by a fresh 15s smoke produced one startup and no exception/restart. Both outcomes are in PR21 evidence.
 
 ## Cleanup state
@@ -63,4 +72,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Branch Native `styling/N4-text` from N3; expose text alignment/line height, add letter spacing, tabular figures, and line-clamp behavior to both text paths with exact layout/render tests, then pin it from Weaver `styling/05-text-pack`.
+Push Weaver `styling/05-text-pack`, open its draft PR against `styling/04-palette`, paste final test/dev evidence, then branch `styling/N5-shadows` from Native N4 only if the PR06 drawing-layer audit proves inset/text-shadow primitives are missing.
