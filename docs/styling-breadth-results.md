@@ -133,11 +133,13 @@ for short inputs; maximum capacities and truncation semantics do not change.
 
 ## Final CI rollup
 
-The arena repair is confirmed by green Apple-silicon headless CI on every final
-Weaver head PR21-30. PR19-30 are fully green across the Windows gate, Intel
-headless, Apple-silicon headless, and Apple-silicon session jobs. PR21's Intel
-job required two reruns because the unchanged loopback HTTPS test twice parsed
-an empty temporary port file; the third attempt passed without a styling-code
-or test change. Native PR7-14 have no configured GitHub checks; all required
-Native suites pass locally at their exact pushed heads as recorded in the run
-status ledger.
+The arena and independent-review repairs are confirmed by green Apple-silicon
+headless CI on every final Weaver head PR19-30. All twelve PRs are green across
+the Windows gate, Intel headless, Apple-silicon headless, and Apple-silicon
+session jobs. PR28's first Intel attempt failed because the unchanged loopback
+HTTPS setup read an empty temporary port file; a failed-job rerun on the same
+`a0d567b` head passed the formerly failing step, the full Intel job, and the
+dependent Apple-silicon session without a styling-code or test change. Native
+PR7-14 have no configured GitHub checks; focused canvas plus stock and
+widget-profile suites pass locally at every exact pushed head as recorded in
+the run-status ledger. Physical macOS pixels remain `UNVERIFIED (needs Mac)`.
