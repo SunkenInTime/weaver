@@ -33,16 +33,16 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19), implementation through `279a877516c683cae82ae5b4edf35af0d7ab624c` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
-| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20), implementation `f646b7ecb3b979cb01ec04551dc9ee54fbc4e8f5` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
-| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
-| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
-| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` (PR06 pins the shadow-complete `f8455262`; the later commit is the brief-authorized PR07 font seam) | complete, pushed, draft PRs open |
-| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25), Native pin `8121bf6`, implementation `a18f4ac` plus extension edge-case `da5130d` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` | complete, pushed, draft PR open |
-| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26), implementation `6392b29` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27), pin `8e1ae72`, implementation `22c04a1` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
-| 10 / N7 | `styling/10-image-v2` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | Native complete/pushed; Weaver in progress |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `e7648949` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `457c2dd9` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
+| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `bb20a1f5` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `85cda5d7` | none | complete, pushed, draft PR open |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `0d36b403` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `b96b72f8` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` (PR06 pins the shadow-complete `f8455262`; the later commit is the brief-authorized PR07 font seam) | complete, pushed, draft PRs open |
+| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `65aff3ea` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` | complete, pushed, draft PR open |
+| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `e66ea8cd` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `16e49390` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `8669cfae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | complete, pushed, draft PRs open |
 | 11 / N8 | `styling/11-interaction` | `styling/N8-interaction` | pending |
 | 12 | `styling/12-showcase` | none | pending |
 
@@ -68,6 +68,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Native N6: focused canvas suite PASS in 58.7s; `zig build validate` PASS in 21.3s; stock suite PASS in 95.5s; widget-profile suite PASS in 71.3s. Exact tests cover the public stack clipping option, asymmetric emitted masks, render-plan propagation, reference corner pixels, packet JSON/version prose, and fingerprint changes. Draft PR: https://github.com/SunkenInTime/native/pull/12.
 - Weaver 09: `npm test` PASS 41/41 in 19.9s; `npm run typecheck` PASS in 2.4s; example TypeScript, CLI build/check/bundle, and `git diff --check` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 22.1s; ReleaseFast runtime build PASS in 63.3s. Isolated dev smoke reached `running` at 52s uptime with one startup and software/pixels presentation, with no exception/crash/restart line; `weaver down`, watcher shutdown, and final process audit left no clone-owned process.
 - Native N7: focused canvas suite PASS in 55.8s; `zig build validate` PASS in 10.4s; stock suite PASS in 95.8s; widget-profile suite PASS in 52.2s. Exact tests cover native-size 2x1 tiling across a 5x2 destination, public UI propagation, asymmetric image masks, packet JSON/wire-v7, and fingerprint changes. Draft PR: https://github.com/SunkenInTime/native/pull/13.
+- Weaver 10: `npm test` PASS 42/42 in 22.1s; `npm run typecheck` PASS in 4.0s; example TypeScript/check/bundle and `git diff --check` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 25.8s; ReleaseFast runtime build PASS in 68.7s. Isolated `weaver dev examples/styling-images` reached `running` at 55s uptime with one startup, software/pixels presentation, and no exception/crash/restart line; shutdown and the broad process audit left no clone-owned process.
+- Release-audit repair: PR01 through PR10 now each require their branch's exact Native gitlink. A branch-by-branch checkout, recursive submodule update, and `npm run audit:release` sweep passed all ten heads (`e7648949`, `457c2dd9`, `bb20a1f5`, `85cda5d7`, `0d36b403`, `b96b72f8`, `65aff3ea`, `e66ea8cd`, `16e49390`, `8669cfae`).
 
 ## Assumptions
 
@@ -101,6 +103,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 28. `<stack>` remains a layout-only overlay primitive, matching Native's stack kind: its own radius shapes `overflow-hidden`, while a visible backdrop/border is authored as the first full-size child `<panel>`. This preserves child-order painting and avoids silently changing stack identity into a panel.
 29. Image `tile` ignores `fit` and repeats the selected source rectangle at its native logical-pixel dimensions, anchored at the normalized destination's top-left. Sampling and the destination's asymmetric rounded mask still apply.
 30. The AppKit host caps one image command at 65,536 repeated tile draws; a pathological command beyond that refuses packet presentation through the existing fallback path instead of hanging the host.
+31. Image `fit` and `tile` are typed `<image>` attributes rather than pseudo-CSS utilities; the existing `rounded-*` compiler surface is the single source of image mask radii. Consequently PR10 adds prop acceptance/rejection and exact projection tests but no duplicate fit/tile class family.
 
 ## UNVERIFIED / BLOCKED
 
@@ -122,6 +125,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `UNVERIFIED (needs Mac)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Evidence available now: exact reference pixels, retained projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; PR27 macOS headless CI is pending and physical output still requires Mac hardware.
 - `UNVERIFIED (needs Mac)`: N7 wire-v7 image tiling and physical rounded image pixels. Evidence available now: exact reference tiling, UI/draw propagation, packet/version tests, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
 - `BLOCKED (unrelated Native fast gate)`: N7 fast gate passes zig-test (31s), validate (<1s), frontend examples (5s), and mobile examples (38s), but the same five `examples-native` switches omit `Event.window_frame`; `examples-native` failed after 99s and total gate time was 173.7s.
+- `RESOLVED (stack release audit)`: PR27's first post-push CI run failed its Windows gate and both macOS headless jobs only at `npm run audit:release`: actual Native pin `9411bc45`, stale expected pin `91949e15`. No test or CI step was removed or weakened. The stack was rebased bottom-up so PR01–PR10 each require their own exact gitlink, and the ten-branch local audit sweep passed; GitHub reruns were triggered by the force-with-lease pushes.
+- `UNVERIFIED (needs Mac)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence available now: exact reference tiling, retained/wire projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; physical output still requires Mac hardware.
 
 ## Cleanup state
 
@@ -133,7 +138,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - PR07 isolated install/dev data under `.dev-smoke-pr07` and its temporary `.weave` archive were removed after uninstall and `weaver down`; the final process audit found no clone-owned runtime, host, watcher, or esbuild process.
 - PR08 isolated install/dev data under `.dev-smoke-pr08` and its temporary `.weave` archive were removed after uninstall and `weaver down`; the final process audit found no clone-owned runtime, host, watcher, or esbuild process.
 - Before PR09 smoke, a fresh audit found two stale clone-owned Node/esbuild watcher pairs for the PR07 and PR08 examples despite the earlier narrower audits; PIDs 20764/9468 and 44400/1928 were terminated. PR09 isolated data and generated output were removed after shutdown, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
+- PR10 isolated data and generated output were removed after `weaver down`; the dev watcher and its esbuild helper were explicitly stopped, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
 
 ## Next executable task
 
-Implement Weaver `styling/10-image-v2` on pinned Native N7: type and lower image `fit`/`tile`, project class radii onto the draw mask, add compiler accept/reject and exact runtime tests, build a local-image example, run all Weaver gates, and complete a crash-free live smoke.
+Implement Native `styling/N8-interaction` from N7: add retained hover/pressed visual overrides at the surface-render resolution point, expose double/right press handlers plus node-local press coordinates, add exact state/event tests, then run focused/validate/stock/profile/fast gates and open the draft fork PR.
