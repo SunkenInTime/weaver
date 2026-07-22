@@ -129,6 +129,7 @@ function applyUtility(output: ClassProps, utility: string): void {
   if ((match = /^p-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
     output.padding = utilityNumber(match[1], utility);
     clearPaddingSides(output);
+    return;
   }
   if ((match = /^(px|py|pt|pr|pb|pl)-(\d+(?:\.\d+)?)$/.exec(utility))) {
     applyPaddingSides(output, match[1], utilityNumber(match[2], utility, 4));
