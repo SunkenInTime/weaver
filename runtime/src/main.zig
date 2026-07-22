@@ -511,6 +511,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
                 .grow = 1,
                 .cross = options.cross,
                 .main = options.main,
+                .flex_wrap = retained.flex_wrap,
             };
             options.gap = 0;
             break :block ui.panel(options, .{ui.column(column_options, children)});
@@ -521,6 +522,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
                 .grow = 1,
                 .cross = options.cross,
                 .main = options.main,
+                .flex_wrap = retained.flex_wrap,
             };
             options.gap = 0;
             break :block ui.panel(options, .{ui.row(row_options, children)});
@@ -829,4 +831,22 @@ test "renderer backend status uses the portable public spelling" {
 test "corner radius projection preserves authored values and maps retained unset in-band" {
     try std.testing.expectEqual(@as(f32, 12.5), nativeCornerRadius(12.5));
     try std.testing.expect(nativeCornerRadius(-1) == -std.math.inf(f32));
+}
+
+test "painted row lowering preserves flex wrap on the inner layout node" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const row = try retained_tree.createNode(.row);
+    const child = try retained_tree.createNode(.panel);
+    try retained_tree.appendChild(row, child);
+    try retained_tree.setBackground(row, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    try retained_tree.setFlexWrap(row, true);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, row, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
+    try std.testing.expect(built.root.children[0].layout.flex_wrap);
 }

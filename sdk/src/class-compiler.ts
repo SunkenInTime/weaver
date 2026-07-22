@@ -223,11 +223,11 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^grow-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output.grow = Number(match[1]);
+    output.grow = utilityNumber(match[1], utility);
     return;
   }
   if ((match = /^grow-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
-    output.grow = Number(match[1]);
+    output.grow = utilityNumber(match[1], utility);
     return;
   }
   if (utility === "shrink") {
