@@ -11,7 +11,7 @@ export default widget({
     <row class="justify-between items-center">
       <column class="gap-1">
         <text class="text-xs tracking-widest text-amber-300 font-[GeistPixel-Square] text-shadow-sm">WEAVER HI-FI SYSTEM</text>
-        <text class="text-sm text-stone-400 font-mono">MODEL WR-04 · STATIC SIGNAL</text>
+        <text class="text-sm text-stone-400 font-mono">MODEL WR-04 / STATIC SIGNAL</text>
       </column>
       <panel class="p-2 rounded-lg border border-amber-500 bg-black shadow-inner">
         <text class="text-sm tabular-nums tracking-wide text-amber-300 font-[GeistPixel-Square] text-shadow">10:24 PM</text>
@@ -30,7 +30,7 @@ export default widget({
         </row>
         <column class="gap-2">
           <text class="text-3xl tracking-wide text-white font-[GeistPixel-Square] font-bold text-shadow-lg">SECOND NATURE</text>
-          <text class="text-sm tracking-wider text-amber-200 font-[GeistPixel-Square] text-shadow-md">CHANNEL SURFING · SIDE A</text>
+          <text class="text-sm tracking-wider text-amber-200 font-[GeistPixel-Square] text-shadow-md">CHANNEL SURFING / SIDE A</text>
           <panel class="w-full h-2 rounded-full bg-black/70 border border-white/20 overflow-hidden">
             <panel class="w-1/2 h-full rounded-full bg-amber-400" />
           </panel>
