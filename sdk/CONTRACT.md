@@ -127,7 +127,7 @@ utility.
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
 | `font-{light,normal,medium,semibold,bold}` | font weight |
 | `opacity-NN` | node opacity |
-| `items-{start,center,end,baseline}` | cross-axis align |
+| `items-{start,center,end,baseline,stretch}` | cross-axis align; the default is `stretch` |
 | `justify-{start,center,end,between}` | main-axis align |
 | `grow` | flex grow 1 |
 | `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | fixed size |
