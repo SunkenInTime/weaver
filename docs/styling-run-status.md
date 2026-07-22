@@ -11,7 +11,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
 | 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
-| 06 / N5 | `styling/06-shadows`, implementation in progress above pin `0aaf7f0` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `f84552629aa076b134e5a6c21465248be47daf15` | Native complete/pushed/draft; Weaver in progress |
+| 06 / N5 | `styling/06-shadows`, implementation `5fff1ee` plus final test follow-up | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `f84552629aa076b134e5a6c21465248be47daf15` | complete and pushed; Weaver draft PR pending creation |
 | 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
 | 08 | `styling/08-icons` | none expected | pending |
 | 09 / N6 | `styling/09-stack-overflow` | `styling/N6-stack-overflow` | pending |
@@ -34,6 +34,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Native N4 focused canvas suite PASS in 41.1s after the final plain-text scale/weight follow-up; stock suite PASS in 76.2s; widget-profile suite PASS in 62.3s. Exact tests cover tracking, tabular digits, two-line clamp/ellipsis, span-path measurement, and retained projection. `zig build validate` PASS. Draft PR: https://github.com/SunkenInTime/native/pull/10.
 - Weaver 05: `npm test` PASS 32/32; `npm run typecheck` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS; CLI build and `weaver check examples/styling-spacing` PASS; explicit ReleaseFast runtime build PASS. Dev smoke produced one startup, software/pixels presentation, status `running` at 35s uptime, and no crash/restart line; the temporary registration and run-owned host were removed.
 - Native N5 focused canvas suite PASS in 43.9s; `zig build validate` PASS in 13.1s; final stock suite PASS in 25.2s; widget-profile suite PASS in 69.8s. Exact tests cover reference inset pixels, reference text-shadow pixels, widget panel ordering, and widget text-shadow projection. Draft PR: https://github.com/SunkenInTime/native/pull/11.
+- Weaver 06: `npm test` PASS 34/34; `npm run typecheck` PASS; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 7.8s; CLI build and `weaver check examples/styling-shadows` PASS; ReleaseFast runtime build PASS in 117.9s. Isolated dev smoke reached status `running` at 27s uptime with one startup, software/pixels presentation, and no exception/crash/restart line; isolated host/watchers and the temporary registry were removed.
 
 ## Assumptions
 
@@ -76,7 +77,8 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - No default branch was changed or merged; no frozen `weaver-fork*` branch was extended.
 - No Weaver dev process is currently running.
 - Isolated PR 01 dev data under `%TEMP%\weaver-styling-run-pr01` was removed after shutdown.
+- PR06 isolated data under `.dev-smoke-pr06` was removed after `weaver down`; all clone-owned dev watchers and their esbuild helpers were stopped. The cleanup also removed one stale PR05 spacing watcher discovered during the audit.
 
 ## Next executable task
 
-Finish Weaver PR06 verification: run the shadow example under a freshly built ReleaseFast runtime via `weaver dev`, confirm one startup/no crash-restart, then record evidence, push, and open the draft PR against PR05.
+Open the Weaver PR06 draft against `styling/05-text-pack`, link Native N5, then branch `styling/07-fonts` from PR06 and audit the existing bundle/font registry seams before implementation.

@@ -712,3 +712,16 @@ fn parseShadowFloat(value: ?[]const u8) ?f32 {
     const number = std.fmt.parseFloat(f32, value orelse return null) catch return null;
     return if (std.math.isFinite(number)) number else null;
 }
+
+test "packed shadow properties accept bounded tuples and reject malformed values" {
+    const box = parseBoxShadow("-2 3 8 -1 #11223344") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, -2), box.offset.dx);
+    try std.testing.expectEqual(@as(f32, 8), box.blur);
+    try std.testing.expectEqual(@as(f32, -1), box.spread);
+    const text_shadow = parseTextShadow("1 2 4 #AABBCCDD") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(f32, 2), text_shadow.offset.dy);
+    try std.testing.expectEqual(@as(f32, 4), text_shadow.blur);
+    try std.testing.expect(parseBoxShadow("0 2 -4 0 #000000FF") == null);
+    try std.testing.expect(parseBoxShadow("0 2 4 #000000FF") == null);
+    try std.testing.expect(parseTextShadow("0 2 4 1 #000000FF") == null);
+}
