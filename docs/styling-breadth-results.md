@@ -20,6 +20,31 @@ stacks. Weaver is based on `master`; Native is based on `weaver-main`.
 | 11 / N8 | [#29 interaction](https://github.com/SunkenInTime/weaver/pull/29) | [#14 interaction](https://github.com/SunkenInTime/native/pull/14) |
 | 12 | [#30 retro player showcase](https://github.com/SunkenInTime/weaver/pull/30) | none |
 
+## Independent-review repairs
+
+| Finding | Lowest layer | Final result |
+|---:|---|---|
+| 1 | Native N5 | Windows D3D decodes packet v7, parses the current header/command layout, renders per-corner solid rounded rectangles, and retains CPU fallback for unsupported command features. The build ratchet pins encoder, D3D, and AppKit versions together. |
+| 2 | Weaver 06 | `attachEffects` copies existing rare-command metadata before appending box/text shadows and font ids. Exact tests cover text style plus text shadow and hover/pressed plus box shadow. |
+| 3 | Native N1 / Weaver 01 | Width/height are optional preferred flex bases, min/max remain independent clamps, default shrink can compress, grow can expand, and authored zero is distinct from unset. |
+| 4 | Weaver 02 | Cross-axis default is `stretch` through compiler, reconciler, retained tree, and Native projection; explicit `items-*` still wins. |
+| 5 | Weaver 03 | Painted row/column lowering copies `flex_wrap` onto the inner layout node. |
+| 6 | Weaver 03 | `weaver check` computes painted-lowered node/depth counts against Native limits 128/32 and emits `LoweredWidgetNodeLimit` or `LoweredWidgetDepthLimit` before runtime. |
+| 7 | Weaver 01 and PR04 regression repair | `p-[Npx]` returns after compilation; its regression test passes at every final descendant. |
+| 8 | Native N2 | Grow and shrink use bounded freeze-and-redistribute loops, including redistribution after max/min clamps. |
+| 9 | Native N5 | Non-layout, hot-swap, hover, and pressed invalidation unions old/new `widgetShadowPaintBounds`, preventing stale halo pixels. |
+| 10 | Native N6 | Stack percentages resolve from the parent content box; margins inset placement afterward. |
+| 11 | Native N2 | Wrapped self-stretch measures intrinsic line cross size first and stretches only within that line's band. |
+| 12 | Weaver 01 | Central numeric parsing rejects non-finite/absurd values; zero or invalid aspect ratios are check errors. |
+| 13 | Weaver 01 contract | Contract states: utilities apply left to right; the last conflicting utility wins. |
+| 14 | Weaver 05 | Named text sizes carry Tailwind paired defaults (`sm` 14/20, etc.); explicit `leading-*` overrides the pair. |
+| 15 | Weaver 07 contract | Contract states that an exact file-stem match wins over family/weight resolution. |
+
+The review rerun also fixed one deeper N8 defect exposed by the new composition
+test: simultaneous hover and pressed metadata previously added two inferred
+one-bit integers and overflowed in Debug. N8 now widens each presence bit to
+`usize` before addition and has a direct two-style regression test.
+
 ## Acceptance anchor
 
 `examples/retro-player-shell` is static and subscribes to no provider. It uses
@@ -77,6 +102,11 @@ Win32 `PrintWindow` and visually inspected. The computer-control plugin's
 native pipe was unavailable on this host. macOS physical pixels remain
 `UNVERIFIED (needs Mac)`; headless CI is compile/test evidence, not a physical
 pixel claim.
+
+Independent-review re-verification: PASS. The overlay row now spans the cover
+and places `03:18 / 05:42` at the far right. The live bundle registers
+`GeistPixel-Square.ttf` as font id 65; exact-stem resolution selects that face,
+and `SECOND NATURE` renders through `font-[GeistPixel-Square]` in the capture.
 
 ## Contract and verification
 
