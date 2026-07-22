@@ -20,6 +20,69 @@ test("class compiler maps the frozen M1 utility surface", () => {
 
 test("unknown utilities carry an actionable fix-it", () => {
   assert.throws(() => compileClass("pad-13"), /Unknown class utility "pad-13"\. Did you mean "p-\[13px\]"\?/);
-  assert.throws(() => compileClass("px-4"), /arrives in M2\+/);
+});
+
+test("styling 01 accepts directional spacing sizing fractions and aspect ratios", () => {
+  assert.deepEqual(
+    compileClass("p-2 px-4 pt-[3px] m-2 -mx-1 mb-[5px] w-1/2 h-full min-w-12 max-w-[160px] min-h-4 max-h-20 aspect-[4/3]"),
+    {
+      padding: 8,
+      paddingLeft: 16,
+      paddingRight: 16,
+      paddingTop: 3,
+      marginTop: 8,
+      marginRight: -4,
+      marginBottom: 5,
+      marginLeft: -4,
+      widthPercent: 50,
+      heightPercent: 100,
+      minWidth: 48,
+      maxWidth: 160,
+      minHeight: 16,
+      maxHeight: 80,
+      aspectRatio: 4 / 3,
+    },
+  );
+  assert.deepEqual(compileClass("px-4 p-2"), { padding: 8 });
+  assert.deepEqual(compileClass("w-full w-12 w-auto h-1/4 size-[20px]"), { width: 20, height: 20 });
+  assert.deepEqual(compileClass("aspect-video aspect-auto aspect-square"), { aspectRatio: 1 });
+});
+
+test("styling 01 utility families each have an accept case", () => {
+  const cases = [
+    ["px-1", { paddingLeft: 4, paddingRight: 4 }],
+    ["py-[3px]", { paddingTop: 3, paddingBottom: 3 }],
+    ["pt-1", { paddingTop: 4 }], ["pr-1", { paddingRight: 4 }],
+    ["pb-1", { paddingBottom: 4 }], ["pl-1", { paddingLeft: 4 }],
+    ["m-1", { marginTop: 4, marginRight: 4, marginBottom: 4, marginLeft: 4 }],
+    ["mx-1", { marginLeft: 4, marginRight: 4 }],
+    ["my-1", { marginTop: 4, marginBottom: 4 }],
+    ["mt-1", { marginTop: 4 }], ["mr-1", { marginRight: 4 }],
+    ["mb-1", { marginBottom: 4 }], ["ml-1", { marginLeft: 4 }],
+    ["-m-[2px]", { marginTop: -2, marginRight: -2, marginBottom: -2, marginLeft: -2 }],
+    ["w-full", { widthPercent: 100 }], ["h-3/4", { heightPercent: 75 }],
+    ["w-4 w-auto", {}], ["h-full h-auto", {}],
+    ["size-3", { width: 12, height: 12 }],
+    ["size-[7px]", { width: 7, height: 7 }],
+    ["size-full", { widthPercent: 100, heightPercent: 100 }],
+    ["min-w-2", { minWidth: 8 }], ["min-h-[9px]", { minHeight: 9 }],
+    ["max-w-10", { maxWidth: 40 }], ["max-h-[11px]", { maxHeight: 11 }],
+    ["aspect-square", { aspectRatio: 1 }], ["aspect-video", { aspectRatio: 16 / 9 }],
+    ["aspect-[3/2]", { aspectRatio: 1.5 }], ["aspect-[1.25]", { aspectRatio: 1.25 }],
+    ["aspect-square aspect-auto", {}],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+});
+
+test("styling 01 rejects malformed new utilities with fix-its", () => {
+  assert.throws(() => compileClass("w-3/0"), /Unknown class utility "w-3\/0"\. Did you mean/);
+  assert.throws(() => compileClass("w-0/1"), /Unknown class utility "w-0\/1"\. Did you mean/);
+  assert.throws(() => compileClass("w-3/2"), /Unknown class utility "w-3\/2"\. Did you mean/);
+  assert.throws(() => compileClass("aspect-[4/0]"), /Unknown class utility "aspect-\[4\/0\]"\. Did you mean/);
+  assert.throws(() => compileClass("-pt-4"), /Unknown class utility "-pt-4"\. Did you mean/);
+  assert.throws(() => compileClass("px-[-1px]"), /Unknown class utility "px-\[-1px\]"\. Did you mean/);
+  assert.throws(() => compileClass("mx-[2rem]"), /Unknown class utility "mx-\[2rem\]"\. Did you mean/);
+  assert.throws(() => compileClass("size-auto"), /Unknown class utility "size-auto"\. Did you mean/);
+  assert.throws(() => compileClass("min-w-full"), /Unknown class utility "min-w-full"\. Did you mean/);
 });
 

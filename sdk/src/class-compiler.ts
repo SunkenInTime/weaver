@@ -3,6 +3,14 @@ export type MainAlign = "start" | "center" | "end" | "between";
 
 export interface ClassProps {
   padding?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  marginTop?: number;
+  marginRight?: number;
+  marginBottom?: number;
+  marginLeft?: number;
   gap?: number;
   radius?: number;
   background?: string;
@@ -15,6 +23,13 @@ export interface ClassProps {
   grow?: number;
   width?: number;
   height?: number;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  widthPercent?: number;
+  heightPercent?: number;
+  aspectRatio?: number;
   truncate?: boolean;
 }
 
@@ -50,14 +65,18 @@ const radii: Readonly<Record<string, number>> = {
 };
 
 const exampleUtilities = [
-  "p-4", "p-[13px]", "gap-2", "gap-[13px]", "rounded", "rounded-md",
+  "p-4", "p-[13px]", "px-4", "py-4", "pt-4", "pr-4", "pb-4", "pl-4",
+  "m-4", "mx-4", "my-4", "mt-4", "mr-4", "mb-4", "ml-4", "-mt-4",
+  "gap-2", "gap-[13px]", "rounded", "rounded-md",
   "rounded-lg", "rounded-xl", "rounded-2xl", "rounded-3xl", "rounded-full",
   "rounded-[13px]", "bg-[#11141c]/86", "text-[#ffffff]", "text-xs",
   "text-sm", "text-base", "text-lg", "text-xl", "text-2xl", "text-3xl",
   "text-4xl", "font-light", "font-normal", "font-medium", "font-semibold",
   "font-bold", "opacity-70", "items-start", "items-center", "items-end",
   "items-baseline", "justify-start", "justify-center", "justify-end",
-  "justify-between", "grow", "w-12", "w-[48px]", "h-12", "h-[48px]",
+  "justify-between", "grow", "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
+  "h-12", "h-[48px]", "h-full", "size-12", "min-w-12", "max-w-[160px]",
+  "min-h-12", "max-h-[160px]", "aspect-square", "aspect-video", "aspect-[4/3]",
   "truncate",
 ] as const;
 
@@ -70,17 +89,35 @@ export function compileClass(className: string): ClassProps {
 }
 
 function applyUtility(output: ClassProps, utility: string): void {
-  if (/^(?:px|py|pt|pr|pb|pl)-/.test(utility) || /^(?:border|shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
+  if (/^(?:border|shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
 
   let match: RegExpExecArray | null;
   if ((match = /^p-(\d+(?:\.\d+)?)$/.exec(utility))) {
     output.padding = Number(match[1]) * 4;
+    clearPaddingSides(output);
     return;
   }
   if ((match = /^p-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
     output.padding = Number(match[1]);
+    clearPaddingSides(output);
+    return;
+  }
+  if ((match = /^(px|py|pt|pr|pb|pl)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    applyPaddingSides(output, match[1], Number(match[2]) * 4);
+    return;
+  }
+  if ((match = /^(px|py|pt|pr|pb|pl)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    applyPaddingSides(output, match[1], Number(match[2]));
+    return;
+  }
+  if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    applyMarginSides(output, match[2], Number(match[3]) * 4 * (match[1] ? -1 : 1));
+    return;
+  }
+  if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    applyMarginSides(output, match[2], Number(match[3]) * (match[1] ? -1 : 1));
     return;
   }
   if ((match = /^gap-(\d+(?:\.\d+)?)$/.exec(utility))) {
@@ -135,11 +172,77 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output[match[1] === "w" ? "width" : "height"] = Number(match[2]) * 4;
+    setAxisSize(output, match[1], Number(match[2]) * 4);
     return;
   }
   if ((match = /^(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output[match[1] === "w" ? "width" : "height"] = Number(match[2]);
+    setAxisSize(output, match[1], Number(match[2]));
+    return;
+  }
+  if ((match = /^(w|h)-full$/.exec(utility))) {
+    setAxisPercent(output, match[1], 100);
+    return;
+  }
+  if ((match = /^(w|h)-(\d+)\/(\d+)$/.exec(utility))) {
+    const numerator = Number(match[2]);
+    const denominator = Number(match[3]);
+    if (denominator > 0 && numerator > 0 && numerator <= denominator) {
+      setAxisPercent(output, match[1], numerator * 100 / denominator);
+      return;
+    }
+  }
+  if ((match = /^(w|h)-auto$/.exec(utility))) {
+    clearAxisSize(output, match[1]);
+    return;
+  }
+  if ((match = /^size-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    setAxisSize(output, "w", Number(match[1]) * 4);
+    setAxisSize(output, "h", Number(match[1]) * 4);
+    return;
+  }
+  if ((match = /^size-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    setAxisSize(output, "w", Number(match[1]));
+    setAxisSize(output, "h", Number(match[1]));
+    return;
+  }
+  if (utility === "size-full") {
+    setAxisPercent(output, "w", 100);
+    setAxisPercent(output, "h", 100);
+    return;
+  }
+  if ((match = /^(min|max)-(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    setBound(output, match[1], match[2], Number(match[3]) * 4);
+    return;
+  }
+  if ((match = /^(min|max)-(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    setBound(output, match[1], match[2], Number(match[3]));
+    return;
+  }
+  if (utility === "aspect-square") {
+    output.aspectRatio = 1;
+    return;
+  }
+  if (utility === "aspect-video") {
+    output.aspectRatio = 16 / 9;
+    return;
+  }
+  if (utility === "aspect-auto") {
+    delete output.aspectRatio;
+    return;
+  }
+  if ((match = /^aspect-\[(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    const denominator = Number(match[2]);
+    if (denominator > 0) {
+      output.aspectRatio = Number(match[1]) / denominator;
+      return;
+    }
+  }
+  if ((match = /^aspect-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    const ratio = Number(match[1]);
+    if (ratio > 0) {
+      output.aspectRatio = ratio;
+      return;
+    }
     return;
   }
   if (utility === "truncate") {
@@ -147,6 +250,68 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   throw unknownUtility(utility);
+}
+
+type PaddingSide = "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
+type MarginSide = "marginTop" | "marginRight" | "marginBottom" | "marginLeft";
+
+function clearPaddingSides(output: ClassProps): void {
+  delete output.paddingTop;
+  delete output.paddingRight;
+  delete output.paddingBottom;
+  delete output.paddingLeft;
+}
+
+function applyPaddingSides(output: ClassProps, axis: string, value: number): void {
+  const sides: Record<string, PaddingSide[]> = {
+    px: ["paddingLeft", "paddingRight"], py: ["paddingTop", "paddingBottom"],
+    pt: ["paddingTop"], pr: ["paddingRight"], pb: ["paddingBottom"], pl: ["paddingLeft"],
+  };
+  for (const side of sides[axis]) output[side] = value;
+}
+
+function applyMarginSides(output: ClassProps, axis: string, value: number): void {
+  const sides: Record<string, MarginSide[]> = {
+    m: ["marginTop", "marginRight", "marginBottom", "marginLeft"],
+    mx: ["marginLeft", "marginRight"], my: ["marginTop", "marginBottom"],
+    mt: ["marginTop"], mr: ["marginRight"], mb: ["marginBottom"], ml: ["marginLeft"],
+  };
+  for (const side of sides[axis]) output[side] = value;
+}
+
+function setAxisSize(output: ClassProps, axis: string, value: number): void {
+  if (axis === "w") {
+    output.width = value;
+    delete output.widthPercent;
+  } else {
+    output.height = value;
+    delete output.heightPercent;
+  }
+}
+
+function setAxisPercent(output: ClassProps, axis: string, value: number): void {
+  if (axis === "w") {
+    output.widthPercent = value;
+    delete output.width;
+  } else {
+    output.heightPercent = value;
+    delete output.height;
+  }
+}
+
+function clearAxisSize(output: ClassProps, axis: string): void {
+  if (axis === "w") {
+    delete output.width;
+    delete output.widthPercent;
+  } else {
+    delete output.height;
+    delete output.heightPercent;
+  }
+}
+
+function setBound(output: ClassProps, bound: string, axis: string, value: number): void {
+  const key = `${bound}${axis === "w" ? "Width" : "Height"}` as "minWidth" | "minHeight" | "maxWidth" | "maxHeight";
+  output[key] = value;
 }
 
 function normalizeColor(source: string, alphaPercent?: string): string {
