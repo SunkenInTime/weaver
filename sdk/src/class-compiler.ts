@@ -22,6 +22,9 @@ export interface ClassProps {
   radiusBottomLeft?: number;
   borderWidth?: number;
   borderColor?: string;
+  shadow?: string;
+  shadowInset?: boolean;
+  textShadow?: string;
   background?: string;
   textColor?: string;
   fontScale?: number;
@@ -104,6 +107,34 @@ type CompileOutput = ClassProps & {
   lineHeightPx?: number;
   letterSpacingEm?: number;
   lineHeightExplicit?: boolean;
+  shadowGeometry?: string;
+  shadowColor?: string;
+  textShadowGeometry?: string;
+};
+
+const boxShadows: Readonly<Record<string, string>> = {
+  shadow: "0 1 3 0",
+  "shadow-sm": "0 1 2 0",
+  "shadow-md": "0 4 6 -1",
+  "shadow-lg": "0 10 15 -3",
+  "shadow-xl": "0 20 25 -5",
+  "shadow-inner": "0 2 4 0",
+};
+
+const boxShadowColors: Readonly<Record<string, string>> = {
+  shadow: "#0000001A",
+  "shadow-sm": "#0000000D",
+  "shadow-md": "#0000001A",
+  "shadow-lg": "#0000001A",
+  "shadow-xl": "#0000001A",
+  "shadow-inner": "#0000000F",
+};
+
+const textShadows: Readonly<Record<string, string>> = {
+  "text-shadow": "0 1 2",
+  "text-shadow-sm": "0 1 1",
+  "text-shadow-md": "0 2 4",
+  "text-shadow-lg": "0 4 8",
 };
 
 const radii: Readonly<Record<string, number>> = {
@@ -141,6 +172,9 @@ const exampleUtilities = [
   "items-baseline", "items-stretch", "justify-start", "justify-center", "justify-end",
   "font-bold", "text-left", "text-center", "text-right", "text-[13px]",
   "leading-tight", "tracking-wide", "line-clamp-2", "tabular-nums",
+  "shadow", "shadow-sm", "shadow-md", "shadow-lg", "shadow-xl", "shadow-inner",
+  "shadow-red-500", "shadow-[0_4px_12px_-2px_#00000066]",
+  "text-shadow", "text-shadow-sm", "text-shadow-md", "text-shadow-lg",
   "justify-between", "justify-around", "justify-evenly", "grow", "grow-2", "shrink", "shrink-0",
   "self-auto", "self-start", "self-center", "self-end", "self-stretch", "flex-wrap", "flex-nowrap",
   "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
@@ -157,18 +191,62 @@ export function compileClass(className: string): ClassProps {
   const fontPixels = 14 * (output.fontScale ?? 1);
   if (output.lineHeightPx !== undefined) output.lineHeight = output.lineHeightPx / fontPixels;
   if (output.letterSpacingEm !== undefined) output.letterSpacing = output.letterSpacingEm * fontPixels;
+  if (output.shadowGeometry !== undefined) output.shadow = `${output.shadowGeometry} ${output.shadowColor ?? "#0000001A"}`;
+  if (output.textShadowGeometry !== undefined) output.textShadow = `${output.textShadowGeometry} #00000026`;
   delete output.lineHeightPx;
   delete output.letterSpacingEm;
   delete output.lineHeightExplicit;
+  delete output.shadowGeometry;
+  delete output.shadowColor;
+  delete output.textShadowGeometry;
   return output;
 }
 
 function applyUtility(output: CompileOutput, utility: string): void {
-  if (/^(?:shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
+  if (/^(?:bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
 
   let match: RegExpExecArray | null;
+  if (utility in boxShadows) {
+    output.shadowGeometry = boxShadows[utility];
+    output.shadowColor ??= boxShadowColors[utility];
+    output.shadowInset = utility === "shadow-inner";
+    return;
+  }
+  if (utility === "shadow-none") {
+    delete output.shadowGeometry;
+    delete output.shadowColor;
+    output.shadow = "";
+    output.shadowInset = false;
+    return;
+  }
+  if ((match = /^shadow-\[(-?\d+(?:\.\d+)?)(?:px)?_(-?\d+(?:\.\d+)?)(?:px)?_(\d+(?:\.\d+)?)(?:px)?_(-?\d+(?:\.\d+)?)(?:px)?_(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
+    output.shadowGeometry = `${utilityNumber(match[1], utility)} ${utilityNumber(match[2], utility)} ${utilityNumber(match[3], utility)} ${utilityNumber(match[4], utility)}`;
+    output.shadowColor = normalizeColor(match[5], match[6]);
+    output.shadowInset = false;
+    return;
+  }
+  if ((match = /^shadow-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
+    output.shadowColor = normalizeColor(match[1], match[2]);
+    return;
+  }
+  if ((match = /^shadow-([a-z]+(?:-\d+)?)(?:\/(\d{1,3}))?$/.exec(utility))) {
+    const color = tailwindColors[match[1]];
+    if (color !== undefined) {
+      output.shadowColor = namedColorWithAlpha(color, match[2]);
+      return;
+    }
+  }
+  if (utility in textShadows) {
+    output.textShadowGeometry = textShadows[utility];
+    return;
+  }
+  if (utility === "text-shadow-none") {
+    delete output.textShadowGeometry;
+    output.textShadow = "";
+    return;
+  }
   if ((match = /^p-(\d+(?:\.\d+)?)$/.exec(utility))) {
     output.padding = utilityNumber(match[1], utility, 4);
     clearPaddingSides(output);

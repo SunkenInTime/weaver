@@ -410,7 +410,28 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
 
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
     return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
-        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0;
+        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null;
+}
+
+fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi.Node) WidgetUi.Node {
+    const count: usize = @intFromBool(retained.shadow != null) + @intFromBool(retained.text_shadow != null);
+    if (count == 0) return source;
+    const effects = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, count) catch return source;
+    var cursor: usize = 0;
+    if (retained.shadow) |shadow| {
+        effects[cursor] = .{ .box_shadow = .{
+            .offset = shadow.offset,
+            .blur = shadow.blur,
+            .spread = shadow.spread,
+            .color = shadow.color,
+            .inset = retained.shadow_inset,
+        } };
+        cursor += 1;
+    }
+    if (retained.text_shadow) |shadow| effects[cursor] = .{ .text_shadow = shadow };
+    var result = source;
+    result.widget.immediate_commands = effects;
+    return result;
 }
 
 fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
@@ -501,7 +522,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
                 .medium => .medium,
                 .semibold, .bold => .bold,
             };
-            return ui.text(options, retained.textSlice());
+            return attachEffects(ui, retained, ui.text(options, retained.textSlice()));
         }
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
@@ -512,13 +533,13 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             },
             .scale = retained.font_scale,
         }};
-        return ui.paragraph(options, &span);
+        return attachEffects(ui, retained, ui.paragraph(options, &span));
     }
     const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch return ui.panel(.{}, .{});
     for (retained.children[0..retained.child_count], 0..) |child_id, index| {
         children[index] = buildNode(ui, tree, child_id, false);
     }
-    return switch (retained.kind) {
+    const result = switch (retained.kind) {
         // SDK layout-only rows/columns do not paint their own style. A
         // styled column is contractually a column-layout box, which is the
         // builder's panel primitive; unstyled columns keep the lean node.
@@ -558,6 +579,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
+    return attachEffects(ui, retained, result);
 }
 
 fn nativeCornerRadius(retained: f32) f32 {

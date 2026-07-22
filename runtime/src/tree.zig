@@ -36,6 +36,13 @@ pub const CrossAlign = enum { start, center, end, baseline, stretch };
 pub const MainAlign = enum { start, center, end, between, around, evenly };
 pub const SelfAlign = enum { auto, start, center, end, stretch };
 
+pub const BoxShadow = struct {
+    offset: native_sdk.geometry.OffsetF = .{},
+    blur: f32 = 0,
+    spread: f32 = 0,
+    color: native_sdk.canvas.Color,
+};
+
 /// One bounded retained node. M0 deliberately keeps ownership simple: JS ids
 /// index this table, strings and child lists live inline, and a whole widget
 /// cannot silently turn bridge traffic into an unbounded native heap.
@@ -67,6 +74,9 @@ pub const Node = struct {
     background: ?native_sdk.canvas.Color = null,
     border_color: ?native_sdk.canvas.Color = null,
     text_color: ?native_sdk.canvas.Color = null,
+    shadow: ?BoxShadow = null,
+    shadow_inset: bool = false,
+    text_shadow: ?native_sdk.canvas.TextShadow = null,
     font_scale: f32 = 1,
     font_weight: FontWeight = .regular,
     text_align: TextAlign = .start,
@@ -323,6 +333,27 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (std.meta.eql(target.border_color, color)) return;
         target.border_color = color;
+        self.changed();
+    }
+
+    pub fn setShadow(self: *Tree, id: NodeId, value: ?BoxShadow) Error!void {
+        const target = try self.node(id);
+        if (std.meta.eql(target.shadow, value)) return;
+        target.shadow = value;
+        self.changed();
+    }
+
+    pub fn setShadowInset(self: *Tree, id: NodeId, value: bool) Error!void {
+        const target = try self.node(id);
+        if (target.shadow_inset == value) return;
+        target.shadow_inset = value;
+        self.changed();
+    }
+
+    pub fn setTextShadow(self: *Tree, id: NodeId, value: ?native_sdk.canvas.TextShadow) Error!void {
+        const target = try self.node(id);
+        if (std.meta.eql(target.text_shadow, value)) return;
+        target.text_shadow = value;
         self.changed();
     }
 
@@ -656,6 +687,10 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setFlexWrap(id, true);
     try tree.setTextAlign(id, "center");
     try tree.setTabularNums(id, true);
+    const shadow_color = native_sdk.canvas.Color.rgba8(1, 2, 3, 64);
+    try tree.setShadow(id, .{ .offset = .{ .dx = 2, .dy = 3 }, .blur = 8, .spread = -1, .color = shadow_color });
+    try tree.setShadowInset(id, true);
+    try tree.setTextShadow(id, .{ .offset = .{ .dx = 1, .dy = 2 }, .blur = 4, .color = shadow_color });
     const node = try tree.nodeConst(id);
     try std.testing.expectEqual(@as(f32, 0), node.padding_top);
     try std.testing.expectEqual(@as(f32, 12), node.padding_right);
@@ -679,6 +714,10 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expect(node.flex_wrap);
     try std.testing.expectEqual(TextAlign.center, node.text_align);
     try std.testing.expect(node.tabular_nums);
+    try std.testing.expectEqual(@as(f32, 2), node.shadow.?.offset.dx);
+    try std.testing.expectEqual(@as(f32, -1), node.shadow.?.spread);
+    try std.testing.expect(node.shadow_inset);
+    try std.testing.expectEqual(@as(f32, 4), node.text_shadow.?.blur);
     try tree.setNumberProp(id, "paddingTop", -1);
     try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
 }

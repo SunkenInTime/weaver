@@ -283,6 +283,16 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setBorderColor(id, color) catch return fail(js, "setProp failed");
         }
+    } else if (std.mem.eql(u8, key.bytes, "shadow") or std.mem.eql(u8, key.bytes, "textShadow")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "shadow must be a packed string");
+        defer c.JS_FreeCString(js, value.raw);
+        if (std.mem.eql(u8, key.bytes, "shadow")) {
+            const shadow = if (value.bytes.len == 0) null else parseBoxShadow(value.bytes) orelse return fail(js, "shadow must be 'x y blur spread #RRGGBBAA'");
+            state(js).tree.setShadow(id, shadow) catch return fail(js, "setProp failed");
+        } else {
+            const shadow = if (value.bytes.len == 0) null else parseTextShadow(value.bytes) orelse return fail(js, "textShadow must be 'x y blur #RRGGBBAA'");
+            state(js).tree.setTextShadow(id, shadow) catch return fail(js, "setProp failed");
+        }
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);
@@ -305,15 +315,17 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset")) {
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
             state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "flexWrap")) {
             state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
-        } else {
+        } else if (std.mem.eql(u8, key.bytes, "tabularNums")) {
             state(js).tree.setTabularNums(id, value != 0) catch return fail(js, "setProp failed");
+        } else {
+            state(js).tree.setShadowInset(id, value != 0) catch return fail(js, "setProp failed");
         }
     } else {
         var value: f64 = 0;
@@ -673,4 +685,30 @@ fn parseColor(value: []const u8) ?@import("native_sdk").canvas.Color {
     if (value.len != 9 or value[0] != '#') return null;
     const rgba = std.fmt.parseInt(u32, value[1..], 16) catch return null;
     return @import("native_sdk").canvas.Color.rgba8(@truncate(rgba >> 24), @truncate(rgba >> 16), @truncate(rgba >> 8), @truncate(rgba));
+}
+
+fn parseBoxShadow(value: []const u8) ?tree_mod.BoxShadow {
+    var fields = std.mem.tokenizeScalar(u8, value, ' ');
+    const x = parseShadowFloat(fields.next()) orelse return null;
+    const y = parseShadowFloat(fields.next()) orelse return null;
+    const blur = parseShadowFloat(fields.next()) orelse return null;
+    const spread = parseShadowFloat(fields.next()) orelse return null;
+    const color = parseColor(fields.next() orelse return null) orelse return null;
+    if (fields.next() != null or blur < 0) return null;
+    return .{ .offset = .{ .dx = x, .dy = y }, .blur = blur, .spread = spread, .color = color };
+}
+
+fn parseTextShadow(value: []const u8) ?@import("native_sdk").canvas.TextShadow {
+    var fields = std.mem.tokenizeScalar(u8, value, ' ');
+    const x = parseShadowFloat(fields.next()) orelse return null;
+    const y = parseShadowFloat(fields.next()) orelse return null;
+    const blur = parseShadowFloat(fields.next()) orelse return null;
+    const color = parseColor(fields.next() orelse return null) orelse return null;
+    if (fields.next() != null or blur < 0) return null;
+    return .{ .offset = .{ .dx = x, .dy = y }, .blur = blur, .color = color };
+}
+
+fn parseShadowFloat(value: ?[]const u8) ?f32 {
+    const number = std.fmt.parseFloat(f32, value orelse return null) catch return null;
+    return if (std.math.isFinite(number)) number else null;
 }

@@ -420,7 +420,7 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     padding: 0, paddingTop: -1, paddingRight: -1, paddingBottom: -1, paddingLeft: -1,
     marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
     gap: 0, radius: 0, radiusTopLeft: -1, radiusTopRight: -1, radiusBottomRight: -1, radiusBottomLeft: -1,
-    borderWidth: 0, borderColor: "", background: "", textColor: "",
+    borderWidth: 0, borderColor: "", shadow: "", shadowInset: false, textShadow: "", background: "", textColor: "",
     fontScale: 1, fontWeight: "normal", textAlign: "start", lineHeight: 0,
     letterSpacing: 0, lineClamp: 0, tabularNums: false, opacity: 1, crossAlign: "stretch",
     mainAlign: "start", grow: 0, shrink: 1, alignSelf: "auto", flexWrap: false, width: -1, height: -1,

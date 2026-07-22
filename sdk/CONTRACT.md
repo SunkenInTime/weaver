@@ -136,6 +136,12 @@ utility.
 | `tracking-{tighter,tight,normal,wide,wider,widest}`, `tracking-[Npx]`, `tracking-[Nem]` | letter spacing in logical pixels; negative arbitrary values are accepted |
 | `line-clamp-N`, `line-clamp-none` | wrapped text capped at N lines with a last-line ellipsis |
 | `tabular-nums`, `normal-nums` | fixed-width ASCII digit advances on/off |
+| `shadow`, `shadow-{sm,md,lg,xl}` | one outset box-shadow preset, packed to the native renderer |
+| `shadow-inner` | inset box shadow |
+| `shadow-[X_Y_BLUR_SPREAD_#hex]` | one arbitrary box shadow; lengths are logical px, optional `px` suffixes use underscores as spaces, and blur must be non-negative |
+| `shadow-<palette>`, `shadow-[#hex]`, optional `/NN` | replace the current box-shadow color; color and geometry utilities are order-independent |
+| `shadow-none` | remove the box shadow |
+| `text-shadow`, `text-shadow-{sm,md,lg}`, `text-shadow-none` | one native text-shadow preset or removal |
 | `opacity-NN` | node opacity |
 | `items-{start,center,end,baseline,stretch}` | cross-axis align; the default is `stretch` |
 | `justify-{start,center,end,between}` | main-axis align |
@@ -148,8 +154,9 @@ Named text sizes use Tailwind's paired size/line-height defaults:
 `2xl` 24/32, `3xl` 30/36, and `4xl` 36/40 (logical pixels). An explicit
 `leading-*` utility overrides the paired default regardless of class order.
 
-Deliberately absent in M1 (check-error, "arrives M2+"): `px-/py-` split
-padding, borders, shadows, gradients, hover/state variants, transitions.
+Still deliberately absent (check-error): gradients, hover/state variants,
+and transitions. The shadow surface intentionally supports one shadow per
+node; comma-separated CSS shadow lists are not part of the packed wire form.
 
 ## CLI
 

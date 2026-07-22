@@ -67,9 +67,9 @@ test("widget renders one native generation and providers use native timers", asy
     reverse = () => setReversed(true);
     saveMinutes = setMinutes;
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
-    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square justify-evenly grow-2 shrink-0 self-end flex-wrap" },
+    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square justify-evenly grow-2 shrink-0 self-end flex-wrap shadow-inner shadow-red-500/40" },
       sdk.h("panel", { class: "w-0" }),
-      sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold" }, time.ss),
+      sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold text-shadow-md" }, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
       sdk.h("text", null, media.title),
@@ -105,6 +105,7 @@ test("widget renders one native generation and providers use native timers", asy
     ["padding", 8], ["paddingTop", 0], ["marginLeft", 4], ["marginRight", 4],
     ["widthPercent", 50], ["minWidth", 16], ["maxWidth", 0], ["maxHeight", 60], ["aspectRatio", 1],
     ["mainAlign", "evenly"], ["grow", 2], ["shrink", 0], ["alignSelf", "end"], ["flexWrap", true],
+    ["shadow", "0 2 4 0 #FB2C3666"], ["shadowInset", true],
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === rootColumnId && operation[2] === key && operation[3] === value), `${key} wire prop`);
   }
@@ -113,6 +114,7 @@ test("widget renders one native generation and providers use native timers", asy
   for (const [key, value] of [
     ["fontScale", 13 / 14], ["fontWeight", "bold"], ["textAlign", "center"],
     ["lineHeight", 1.25], ["letterSpacing", -0.5], ["lineClamp", 2], ["tabularNums", true],
+    ["textShadow", "0 2 4 #00000026"],
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === styledTextId && operation[2] === key && operation[3] === value), `${key} text wire prop`);
   }
