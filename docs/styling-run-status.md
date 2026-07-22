@@ -42,7 +42,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25), Native pin `8121bf6`, implementation `a18f4ac` plus extension edge-case `da5130d` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` | complete, pushed, draft PR open |
 | 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26), implementation `6392b29` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27), pin `8e1ae72`, implementation `22c04a1` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
-| 10 / N7 | `styling/10-image-v2` | `styling/N7-image-v2` | pending |
+| 10 / N7 | `styling/10-image-v2` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | Native complete/pushed; Weaver in progress |
 | 11 / N8 | `styling/11-interaction` | `styling/N8-interaction` | pending |
 | 12 | `styling/12-showcase` | none | pending |
 
@@ -67,6 +67,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Weaver 08: `npm test` PASS 39/39 in 21.1s; `npm run typecheck` PASS in 2.4s; SDK package dry-run includes the font/license/map; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 0.6s cached; ReleaseFast runtime build PASS in 68.2s; CLI check/bundle PASS. Pack/inspect produced artifact `da9c8fe7c3fdbe415ab7107d936cbf84a5673e3c195d996b36a4caac11a74bd9`; isolated install reconstructed the 26768-byte font and 3208-byte license in `dist`. Dev stayed `running` at 34s uptime with one dev startup and no font/exception/crash/restart line; temporary installation, host/watchers, archive, and data were removed.
 - Native N6: focused canvas suite PASS in 58.7s; `zig build validate` PASS in 21.3s; stock suite PASS in 95.5s; widget-profile suite PASS in 71.3s. Exact tests cover the public stack clipping option, asymmetric emitted masks, render-plan propagation, reference corner pixels, packet JSON/version prose, and fingerprint changes. Draft PR: https://github.com/SunkenInTime/native/pull/12.
 - Weaver 09: `npm test` PASS 41/41 in 19.9s; `npm run typecheck` PASS in 2.4s; example TypeScript, CLI build/check/bundle, and `git diff --check` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 22.1s; ReleaseFast runtime build PASS in 63.3s. Isolated dev smoke reached `running` at 52s uptime with one startup and software/pixels presentation, with no exception/crash/restart line; `weaver down`, watcher shutdown, and final process audit left no clone-owned process.
+- Native N7: focused canvas suite PASS in 55.8s; `zig build validate` PASS in 10.4s; stock suite PASS in 95.8s; widget-profile suite PASS in 52.2s. Exact tests cover native-size 2x1 tiling across a 5x2 destination, public UI propagation, asymmetric image masks, packet JSON/wire-v7, and fingerprint changes. Draft PR: https://github.com/SunkenInTime/native/pull/13.
 
 ## Assumptions
 
@@ -98,6 +99,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 26. The Native render packet can carry one rounded clip per command. Nested clips that contain one another retain the tighter rounded mask; partially overlapping rounded clips preserve their exact rectangular intersection and drop only the unrepresentable corner arcs rather than inventing a lens representation.
 27. Under a non-uniform or rotated affine transform, circular clip radii scale by the smaller finite axis magnitude. This keeps the flattened command mask circular and bounded; an exact elliptical-corner representation would require a broader wire change outside N6.
 28. `<stack>` remains a layout-only overlay primitive, matching Native's stack kind: its own radius shapes `overflow-hidden`, while a visible backdrop/border is authored as the first full-size child `<panel>`. This preserves child-order painting and avoids silently changing stack identity into a panel.
+29. Image `tile` ignores `fit` and repeats the selected source rectangle at its native logical-pixel dimensions, anchored at the normalized destination's top-left. Sampling and the destination's asymmetric rounded mask still apply.
+30. The AppKit host caps one image command at 65,536 repeated tile draws; a pathological command beyond that refuses packet presentation through the existing fallback path instead of hanging the host.
 
 ## UNVERIFIED / BLOCKED
 
@@ -117,6 +120,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `UNVERIFIED (needs Mac)`: N6 AppKit wire-v6 decoding and physical asymmetric rounded stack pixels. Evidence available now: version/prose ratchets, direct and raster-cache host paths, exact reference pixels, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
 - `BLOCKED (unrelated Native fast gate)`: N6 fast gate passes zig-test (29s), validate (1s), frontend examples (6s), and mobile examples (36s), but `examples-native` fails after 121s in the same five pre-existing exhaustive switches that omit `Event.window_frame`; N6 changes neither those examples nor `src/runtime/api.zig`. Total gate time: 193.3s.
 - `UNVERIFIED (needs Mac)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Evidence available now: exact reference pixels, retained projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; PR27 macOS headless CI is pending and physical output still requires Mac hardware.
+- `UNVERIFIED (needs Mac)`: N7 wire-v7 image tiling and physical rounded image pixels. Evidence available now: exact reference tiling, UI/draw propagation, packet/version tests, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
+- `BLOCKED (unrelated Native fast gate)`: N7 fast gate passes zig-test (31s), validate (<1s), frontend examples (5s), and mobile examples (38s), but the same five `examples-native` switches omit `Event.window_frame`; `examples-native` failed after 99s and total gate time was 173.7s.
 
 ## Cleanup state
 
@@ -131,4 +136,4 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## Next executable task
 
-Branch Native `styling/N7-image-v2` from N6, implement cover/contain/stretch fit plus rounded image masking and tiling with exact reference tests and full Native gates; then pin it on Weaver `styling/10-image-v2` and implement the compiler/runtime/example layer.
+Implement Weaver `styling/10-image-v2` on pinned Native N7: type and lower image `fit`/`tile`, project class radii onto the draw mask, add compiler accept/reject and exact runtime tests, build a local-image example, run all Weaver gates, and complete a crash-free live smoke.
