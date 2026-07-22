@@ -91,7 +91,9 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
 
 fn isLocalFontFile(path: []const u8) bool {
     if (path.len == 0 or std.fs.path.isAbsolute(path) or std.mem.indexOfAny(u8, path, "/\\") != null) return false;
-    return std.mem.endsWith(u8, path, ".ttf") or std.mem.endsWith(u8, path, ".otf");
+    if (path.len < 4) return false;
+    const extension = path[path.len - 4 ..];
+    return std.ascii.eqlIgnoreCase(extension, ".ttf") or std.ascii.eqlIgnoreCase(extension, ".otf");
 }
 
 fn roundPhysicalEdge(logical_edge: f32, scale: f32) i32 {
@@ -191,6 +193,8 @@ test "clock manifest shape parses" {
 test "font manifest paths stay root-adjacent and use supported extensions" {
     try std.testing.expect(isLocalFontFile("Cozette.ttf"));
     try std.testing.expect(isLocalFontFile("Pixel.otf"));
+    try std.testing.expect(isLocalFontFile("Display.TTF"));
+    try std.testing.expect(isLocalFontFile("Display.OTF"));
     try std.testing.expect(!isLocalFontFile("fonts/Cozette.ttf"));
     try std.testing.expect(!isLocalFontFile("..\\Cozette.ttf"));
     try std.testing.expect(!isLocalFontFile("Cozette.woff2"));
