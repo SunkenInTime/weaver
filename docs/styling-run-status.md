@@ -10,7 +10,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20), implementation `f646b7ecb3b979cb01ec04551dc9ee54fbc4e8f5` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
 | 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
-| 05 / N4 | `styling/05-text-pack`, implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | implementation complete and locally verified; Weaver push/PR pending |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
 | 06 / N5 | `styling/06-shadows` | `styling/N5-shadows` if required | pending |
 | 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
 | 08 | `styling/08-icons` | none expected | pending |
@@ -72,4 +72,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Push Weaver `styling/05-text-pack`, open its draft PR against `styling/04-palette`, paste final test/dev evidence, then branch `styling/N5-shadows` from Native N4 only if the PR06 drawing-layer audit proves inset/text-shadow primitives are missing.
+Audit Native's drawing layer for outset/inset box shadows and text shadows; branch `styling/N5-shadows` from N4 only for missing primitives, then implement Weaver `styling/06-shadows` from PR05.
