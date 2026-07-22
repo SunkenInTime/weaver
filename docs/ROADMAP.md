@@ -27,6 +27,9 @@ than being relabeled as implementation work.
 5. **The manager + API breadth** — weaverd tray + widget-list/cost/permission
    surface (candidate: first Weaver app built with Weaver). Remote images,
    canvas gradients/paths, media control, network/battery providers.
+   Styling + media ordering set 2026-07-21: see
+   [API breadth — ordered work list](api-breadth-orders.md); gate is a
+   pixel-faithful noro-player port.
 6. **[macOS](macos-port-brief.md) — developer stack complete, physical gates open** —
    performance-native AppKit windowing, measured retained Metal with software
    fallback, host-owned providers, artifact/daemon parity, and Apple
