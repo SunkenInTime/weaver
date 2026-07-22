@@ -7,7 +7,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
 | 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19), implementation through `279a877516c683cae82ae5b4edf35af0d7ab624c` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
-| 02 / N2 | `styling/02-flex-completeness` (in progress) | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | N2 pushed; Weaver 02 in progress |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20), implementation `f646b7ecb3b979cb01ec04551dc9ee54fbc4e8f5` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
 | 03 / N3 | `styling/03-radii-borders` | `styling/N3-radii-borders` | pending |
 | 04 | `styling/04-palette` | none | pending |
 | 05 / N4 | `styling/05-text-pack` | `styling/N4-text` | pending |
@@ -54,4 +54,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Commit/push Weaver 02 and open its draft PR against Weaver 01; then branch Native N3 for per-corner radii and border projection.
+Branch Native `styling/N3-radii-borders` from N2; add per-corner `WidgetStyle` radii and verify panel stroke projection with renderer tests.
