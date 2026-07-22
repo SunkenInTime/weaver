@@ -13,7 +13,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
 | 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` (PR06 pins the shadow-complete `f8455262`; the later commit is the brief-authorized PR07 font seam) | complete, pushed, draft PRs open |
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25), Native pin `8121bf6`, implementation `a18f4ac` plus extension edge-case `da5130d` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` | complete, pushed, draft PR open |
-| 08 | `styling/08-icons` | none expected | pending |
+| 08 | `styling/08-icons`, curated Lucide implementation and example in progress | none expected | in progress |
 | 09 / N6 | `styling/09-stack-overflow` | `styling/N6-stack-overflow` | pending |
 | 10 / N7 | `styling/10-image-v2` | `styling/N7-image-v2` | pending |
 | 11 / N8 | `styling/11-interaction` | `styling/N8-interaction` | pending |
@@ -62,6 +62,9 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 20. Root-adjacent `.ttf` and `.otf` are discovered as font assets. The bounded renderer requires `glyf`/`loca`/`hmtx` plus Unicode cmap format 4; OTF/CFF is rejected with an explicit TrueType-outline conversion instruction because accepting it would make reference and macOS rendering disagree.
 21. Exact `font-[file-stem]` always selects that face. A terminal `-Light/-Regular/-Medium/-Semibold/-Bold` (or underscore) additionally creates a family alias, and the closest registered weight wins. With one custom face every requested weight deliberately degrades to that face; built-in sans keeps Native's three real rungs and mono its single face.
 22. Font files and adjacent licenses reuse the existing ordinary-source `.weave` and `dist` asset paths; no opaque font sub-format or duplicate archive channel is introduced.
+23. The binding Lucide source is `lucide-static@1.25.0` (ISC; npm tarball SHA-1 `d44930d6e5815faace63d9fd9c46c0cadabaaae8`). Its 843668-byte font exceeds the 512 KiB face cap, so PR08 freezes an explicit alphabetized subset of 79 common widget/media/navigation/status names; the generated face is 26768 bytes and includes the upstream Lucide/Feather license.
+24. Because PR08 is not authorized to change Native and rides PR07's two-face registry, a widget containing `<icon>` reserves id 64 for `WeaverLucide` and may bundle one custom face at id 65. Widgets with no icon retain both custom-face slots.
+25. Icon names must be literal JSX attribute strings (including literal string expressions) so `weaver check` can prove membership and issue a deterministic nearest-name fix-it. Dynamic names are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
 
 ## UNVERIFIED / BLOCKED
 
@@ -89,4 +92,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Branch `styling/08-icons` from `styling/07-fonts`, implement the bounded compiler icon set and example, then run the PR08 Weaver gates and open its draft against PR07.
+Finish PR08 runtime/Native gates and live-dev evidence for `examples/styling-icons`, push/open the draft against PR07, then branch `styling/09-stack-overflow` and start Native N6 from N5.

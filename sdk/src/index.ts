@@ -23,3 +23,5 @@ export {
   type WidgetModule,
 } from "./reconciler.js";
 
+export { iconNames, type IconName } from "./icons.js";
+

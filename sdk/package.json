@@ -15,6 +15,7 @@
   },
   "files": [
     "src",
+    "assets",
     "index.d.ts",
     "jsx-runtime.d.ts",
     "CONTRACT.md"

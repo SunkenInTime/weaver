@@ -226,6 +226,52 @@ export default widget({ name: "Font Test", size: [160, 80] }, () => <text class=
   }
 });
 
+test("styling 08 validates, lowers, and bundles the curated Lucide font", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-icon-bundle-"));
+  try {
+    const widget = join(root, "widget");
+    mkdirSync(widget, { recursive: true });
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["widget.tsx"],
+    }));
+    const validSource = `import { widget } from "@weaver/sdk";
+export default widget({ name: "Icon Test", size: [160, 80] }, () => <row><icon name="play" class="text-xl text-red-500 w-6" /><icon name="skip-forward" /><text class="font-[Geist]">Label</text></row>);
+`;
+    writeFileSync(join(widget, "widget.tsx"), validSource);
+    writeFileSync(join(widget, "Geist-Regular.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const check = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stderr);
+    const bundle = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
+    assert.equal(bundle.status, 0, bundle.stderr);
+    const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
+    assert.deepEqual(manifest.fonts, [
+      { id: 64, name: "WeaverLucide.ttf", stem: "WeaverLucide", family: "WeaverLucide", weight: "regular", file: "WeaverLucide.ttf" },
+      { id: 65, name: "Geist-Regular.ttf", stem: "Geist-Regular", family: "Geist", weight: "regular", file: "Geist-Regular.ttf" },
+    ]);
+    assert.deepEqual(readFileSync(join(widget, "dist", "WeaverLucide.ttf")), readFileSync(join(process.cwd(), "sdk/assets/WeaverLucide.ttf")));
+    assert.deepEqual(readFileSync(join(widget, "dist", "WeaverLucide-LICENSE.txt")), readFileSync(join(process.cwd(), "sdk/assets/LUCIDE-LICENSE.txt")));
+    assert.match(readFileSync(join(widget, "dist", "bundle.js"), "utf8"), /\ue13c|\uE13C|57660/);
+
+    writeFileSync(join(widget, "widget.tsx"), validSource.replace('name="play"', 'name="plaay"'));
+    const unknown = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /Unknown icon "plaay"\. Did you mean "play"\?/);
+
+    writeFileSync(join(widget, "widget.tsx"), validSource);
+    writeFileSync(join(widget, "Geist-Bold.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const overBudget = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(overBudget.status, 1);
+    assert.match(overBudget.stderr, /Registered fonts exceed.*2 faces; <icon> reserves one face/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function waitForPath(path) {
   const deadline = Date.now() + 5000;
   while (!existsSync(path)) {
