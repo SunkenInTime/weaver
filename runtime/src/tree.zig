@@ -64,12 +64,14 @@ pub const Node = struct {
     cross_align: CrossAlign = .start,
     main_align: MainAlign = .start,
     grow: f32 = 0,
-    width: f32 = 0,
-    height: f32 = 0,
+    /// -1 is unset; zero is an authored preferred size.
+    width: f32 = -1,
+    height: f32 = -1,
     min_width: f32 = 0,
     min_height: f32 = 0,
-    max_width: f32 = 0,
-    max_height: f32 = 0,
+    /// -1 is unbounded; zero is an authored clamp.
+    max_width: f32 = -1,
+    max_height: f32 = -1,
     width_percent: f32 = 0,
     height_percent: f32 = 0,
     aspect_ratio: f32 = 0,
@@ -240,6 +242,9 @@ pub const Tree = struct {
         else if (std.mem.startsWith(u8, key, "margin"))
             value
         else if (std.mem.startsWith(u8, key, "padding") and !std.mem.eql(u8, key, "padding"))
+            @max(value, -1)
+        else if (std.mem.eql(u8, key, "width") or std.mem.eql(u8, key, "height") or
+            std.mem.eql(u8, key, "maxWidth") or std.mem.eql(u8, key, "maxHeight"))
             @max(value, -1)
         else
             @max(value, 0);
@@ -561,6 +566,8 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setNumberProp(id, "maxHeight", 120);
     try tree.setNumberProp(id, "widthPercent", 50);
     try tree.setNumberProp(id, "aspectRatio", 4.0 / 3.0);
+    try tree.setNumberProp(id, "width", 0);
+    try tree.setNumberProp(id, "maxWidth", 0);
     const node = try tree.nodeConst(id);
     try std.testing.expectEqual(@as(f32, 0), node.padding_top);
     try std.testing.expectEqual(@as(f32, 12), node.padding_right);
@@ -569,6 +576,8 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, 120), node.max_height);
     try std.testing.expectEqual(@as(f32, 50), node.width_percent);
     try std.testing.expectApproxEqAbs(@as(f32, 4.0 / 3.0), node.aspect_ratio, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), node.width);
+    try std.testing.expectEqual(@as(f32, 0), node.max_width);
     try tree.setNumberProp(id, "paddingTop", -1);
     try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
 }

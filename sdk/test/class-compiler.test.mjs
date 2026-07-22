@@ -22,6 +22,10 @@ test("unknown utilities carry an actionable fix-it", () => {
   assert.throws(() => compileClass("pad-13"), /Unknown class utility "pad-13"\. Did you mean "p-\[13px\]"\?/);
 });
 
+test("arbitrary uniform padding returns its compiled value", () => {
+  assert.deepEqual(compileClass("p-[13px]"), { padding: 13 });
+});
+
 test("styling 01 accepts directional spacing sizing fractions and aspect ratios", () => {
   assert.deepEqual(
     compileClass("p-2 px-4 pt-[3px] m-2 -mx-1 mb-[5px] w-1/2 h-full min-w-12 max-w-[160px] min-h-4 max-h-20 aspect-[4/3]"),
@@ -46,6 +50,9 @@ test("styling 01 accepts directional spacing sizing fractions and aspect ratios"
   assert.deepEqual(compileClass("px-4 p-2"), { padding: 8 });
   assert.deepEqual(compileClass("w-full w-12 w-auto h-1/4 size-[20px]"), { width: 20, height: 20 });
   assert.deepEqual(compileClass("aspect-video aspect-auto aspect-square"), { aspectRatio: 1 });
+  assert.deepEqual(compileClass("w-0 h-[0px] max-w-0 max-h-[0px]"), {
+    width: 0, height: 0, maxWidth: 0, maxHeight: 0,
+  });
 });
 
 test("styling 01 utility families each have an accept case", () => {
@@ -84,5 +91,9 @@ test("styling 01 rejects malformed new utilities with fix-its", () => {
   assert.throws(() => compileClass("mx-[2rem]"), /Unknown class utility "mx-\[2rem\]"\. Did you mean/);
   assert.throws(() => compileClass("size-auto"), /Unknown class utility "size-auto"\. Did you mean/);
   assert.throws(() => compileClass("min-w-full"), /Unknown class utility "min-w-full"\. Did you mean/);
+  assert.throws(() => compileClass("aspect-[0]"), /requires an aspect ratio greater than zero/);
+  assert.throws(() => compileClass(`p-[${"9".repeat(400)}px]`), /non-finite or absurd numeric value/);
+  assert.throws(() => compileClass("w-[1000001px]"), /non-finite or absurd numeric value/);
+  assert.throws(() => compileClass("aspect-[1000001]"), /non-finite or absurd numeric value/);
 });
 

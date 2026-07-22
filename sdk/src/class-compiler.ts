@@ -64,6 +64,19 @@ const radii: Readonly<Record<string, number>> = {
   "rounded-full": 9999,
 };
 
+const maxUtilityNumber = 1_000_000;
+
+function utilityNumber(raw: string, utility: string, multiplier = 1): number {
+  const value = Number(raw) * multiplier;
+  if (!Number.isFinite(value) || Math.abs(value) > maxUtilityNumber) {
+    throw new UtilityError(
+      utility,
+      `Class utility "${utility}" has a non-finite or absurd numeric value (maximum ${maxUtilityNumber})`,
+    );
+  }
+  return value;
+}
+
 const exampleUtilities = [
   "p-4", "p-[13px]", "px-4", "py-4", "pt-4", "pr-4", "pb-4", "pl-4",
   "m-4", "mx-4", "my-4", "mt-4", "mr-4", "mb-4", "ml-4", "-mt-4",
@@ -95,37 +108,37 @@ function applyUtility(output: ClassProps, utility: string): void {
 
   let match: RegExpExecArray | null;
   if ((match = /^p-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output.padding = Number(match[1]) * 4;
+    output.padding = utilityNumber(match[1], utility, 4);
     clearPaddingSides(output);
     return;
   }
   if ((match = /^p-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.padding = Number(match[1]);
+    output.padding = utilityNumber(match[1], utility);
     clearPaddingSides(output);
     return;
   }
   if ((match = /^(px|py|pt|pr|pb|pl)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    applyPaddingSides(output, match[1], Number(match[2]) * 4);
+    applyPaddingSides(output, match[1], utilityNumber(match[2], utility, 4));
     return;
   }
   if ((match = /^(px|py|pt|pr|pb|pl)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    applyPaddingSides(output, match[1], Number(match[2]));
+    applyPaddingSides(output, match[1], utilityNumber(match[2], utility));
     return;
   }
   if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    applyMarginSides(output, match[2], Number(match[3]) * 4 * (match[1] ? -1 : 1));
+    applyMarginSides(output, match[2], utilityNumber(match[3], utility, 4) * (match[1] ? -1 : 1));
     return;
   }
   if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    applyMarginSides(output, match[2], Number(match[3]) * (match[1] ? -1 : 1));
+    applyMarginSides(output, match[2], utilityNumber(match[3], utility) * (match[1] ? -1 : 1));
     return;
   }
   if ((match = /^gap-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output.gap = Number(match[1]) * 4;
+    output.gap = utilityNumber(match[1], utility, 4);
     return;
   }
   if ((match = /^gap-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.gap = Number(match[1]);
+    output.gap = utilityNumber(match[1], utility);
     return;
   }
   if (utility in radii) {
@@ -133,7 +146,7 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^rounded-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.radius = Number(match[1]);
+    output.radius = utilityNumber(match[1], utility);
     return;
   }
   if ((match = /^bg-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
@@ -153,7 +166,7 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^opacity-(\d{1,3})$/.exec(utility))) {
-    const percent = Number(match[1]);
+    const percent = utilityNumber(match[1], utility);
     if (percent <= 100) {
       output.opacity = percent / 100;
       return;
@@ -172,11 +185,11 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    setAxisSize(output, match[1], Number(match[2]) * 4);
+    setAxisSize(output, match[1], utilityNumber(match[2], utility, 4));
     return;
   }
   if ((match = /^(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    setAxisSize(output, match[1], Number(match[2]));
+    setAxisSize(output, match[1], utilityNumber(match[2], utility));
     return;
   }
   if ((match = /^(w|h)-full$/.exec(utility))) {
@@ -184,8 +197,8 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^(w|h)-(\d+)\/(\d+)$/.exec(utility))) {
-    const numerator = Number(match[2]);
-    const denominator = Number(match[3]);
+    const numerator = utilityNumber(match[2], utility);
+    const denominator = utilityNumber(match[3], utility);
     if (denominator > 0 && numerator > 0 && numerator <= denominator) {
       setAxisPercent(output, match[1], numerator * 100 / denominator);
       return;
@@ -196,13 +209,15 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^size-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    setAxisSize(output, "w", Number(match[1]) * 4);
-    setAxisSize(output, "h", Number(match[1]) * 4);
+    const value = utilityNumber(match[1], utility, 4);
+    setAxisSize(output, "w", value);
+    setAxisSize(output, "h", value);
     return;
   }
   if ((match = /^size-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    setAxisSize(output, "w", Number(match[1]));
-    setAxisSize(output, "h", Number(match[1]));
+    const value = utilityNumber(match[1], utility);
+    setAxisSize(output, "w", value);
+    setAxisSize(output, "h", value);
     return;
   }
   if (utility === "size-full") {
@@ -211,11 +226,11 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^(min|max)-(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    setBound(output, match[1], match[2], Number(match[3]) * 4);
+    setBound(output, match[1], match[2], utilityNumber(match[3], utility, 4));
     return;
   }
   if ((match = /^(min|max)-(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    setBound(output, match[1], match[2], Number(match[3]));
+    setBound(output, match[1], match[2], utilityNumber(match[3], utility));
     return;
   }
   if (utility === "aspect-square") {
@@ -231,19 +246,24 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^aspect-\[(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\]$/.exec(utility))) {
-    const denominator = Number(match[2]);
+    const numerator = utilityNumber(match[1], utility);
+    const denominator = utilityNumber(match[2], utility);
     if (denominator > 0) {
-      output.aspectRatio = Number(match[1]) / denominator;
+      const ratio = numerator / denominator;
+      if (!Number.isFinite(ratio) || ratio > maxUtilityNumber) {
+        throw new UtilityError(utility, `Class utility "${utility}" has an absurd aspect ratio`);
+      }
+      output.aspectRatio = ratio;
       return;
     }
   }
   if ((match = /^aspect-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
-    const ratio = Number(match[1]);
+    const ratio = utilityNumber(match[1], utility);
     if (ratio > 0) {
       output.aspectRatio = ratio;
       return;
     }
-    return;
+    throw new UtilityError(utility, `Class utility "${utility}" requires an aspect ratio greater than zero`);
   }
   if (utility === "truncate") {
     output.truncate = true;

@@ -67,7 +67,8 @@ test("widget renders one native generation and providers use native timers", asy
     reverse = () => setReversed(true);
     saveMinutes = setMinutes;
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
-    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-h-[60px] aspect-square" },
+    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square" },
+      sdk.h("panel", { class: "w-0" }),
       sdk.h("text", null, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
@@ -102,10 +103,11 @@ test("widget renders one native generation and providers use native timers", asy
   const rootColumnId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "column")[2];
   for (const [key, value] of [
     ["padding", 8], ["paddingTop", 0], ["marginLeft", 4], ["marginRight", 4],
-    ["widthPercent", 50], ["minWidth", 16], ["maxHeight", 60], ["aspectRatio", 1],
+    ["widthPercent", 50], ["minWidth", 16], ["maxWidth", 0], ["maxHeight", 60], ["aspectRatio", 1],
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === rootColumnId && operation[2] === key && operation[3] === value), `${key} wire prop`);
   }
+  assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[2] === "width" && operation[3] === 0), "explicit w-0 wire prop");
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   eventCallback(buttonId, "press", null);

@@ -111,6 +111,8 @@ loud, dated refusal instead of a silent nothing.
 
 ## `class` utilities (M1 set)
 
+Utilities apply left to right; the last conflicting utility wins.
+
 Tailwind semantics and scale (1 unit = 4px). Arbitrary values in brackets.
 Anything not in this table is a check-time error naming the nearest supported
 utility.
