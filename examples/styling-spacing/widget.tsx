@@ -15,7 +15,7 @@ export default widget({
       <panel class="h-[48px] aspect-square shrink-0 self-end bg-[#f59e0b] rounded-full" />
       <column class="grow-2 shrink min-w-[80px] max-w-[180px] self-center py-1">
         <text class="text-sm text-white">Directional padding</text>
-        <text class="text-xs text-slate-300 truncate">Fractions, bounds, and aspect ratio</text>
+        <text class="w-full text-[13px] leading-tight tracking-wide text-center text-slate-300 tabular-nums line-clamp-2">02:47 · Fractions, bounds, aspect ratio, and clamped text</text>
       </column>
       <panel class="size-[24px] self-start bg-[#10b981] rounded-full" />
     </row>

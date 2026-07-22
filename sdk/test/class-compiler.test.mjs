@@ -182,3 +182,50 @@ test("styling 04 accepts named colors and alpha for every color channel", () => 
   assert.throws(() => compileClass("text-slate-400/101"), /Color alpha must be between 0 and 100/);
 });
 
+test("styling 05 accepts every text-pack utility family", () => {
+  const cases = [
+    ["text-left", { textAlign: "start" }],
+    ["text-center", { textAlign: "center" }],
+    ["text-right", { textAlign: "end" }],
+    ["text-[13px]", { fontScale: 13 / 14 }],
+    ["leading-tight", { lineHeight: 1.25 }],
+    ["leading-6", { lineHeight: 24 / 14 }],
+    ["leading-[19px]", { lineHeight: 19 / 14 }],
+    ["leading-[1.7]", { lineHeight: 1.7 }],
+    ["tracking-tighter", { letterSpacing: 14 * -0.05 }],
+    ["tracking-wide", { letterSpacing: 14 * 0.025 }],
+    ["tracking-[-1.5px]", { letterSpacing: -1.5 }],
+    ["tracking-[0.08em]", { letterSpacing: 14 * 0.08 }],
+    ["line-clamp-3", { lineClamp: 3 }],
+    ["line-clamp-3 line-clamp-none", { lineClamp: 0 }],
+    ["tabular-nums", { tabularNums: true }],
+    ["tabular-nums normal-nums", { tabularNums: false }],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+  assert.deepEqual(compileClass("leading-6 text-[12px] tracking-wide"), {
+    lineHeight: 2, fontScale: 12 / 14, letterSpacing: 12 * 0.025,
+  });
+  assert.deepEqual(compileClass("text-[12px] tracking-wide leading-6"), {
+    fontScale: 12 / 14, letterSpacing: 12 * 0.025, lineHeight: 2,
+  });
+
+  const namedPairs = {
+    xs: [12, 16], sm: [14, 20], base: [16, 24], lg: [18, 28],
+    xl: [20, 28], "2xl": [24, 32], "3xl": [30, 36], "4xl": [36, 40],
+  };
+  for (const [name, [size, leading]] of Object.entries(namedPairs)) {
+    assert.deepEqual(compileClass(`text-${name}`), { fontScale: size / 14, lineHeight: leading / size }, `text-${name}`);
+  }
+  assert.deepEqual(compileClass("leading-tight text-sm"), { lineHeight: 1.25, fontScale: 1 });
+  assert.deepEqual(compileClass("text-sm leading-tight"), { fontScale: 1, lineHeight: 1.25 });
+});
+
+test("styling 05 rejects malformed text-pack utilities", () => {
+  for (const utility of [
+    "text-[0px]", "text-[13pt]", "text-middle", "leading-[0]", "leading-[-2px]",
+    "tracking-[wide]", "tracking-[1rem]", "line-clamp-0", "line-clamp-1.5", "tabular-num",
+  ]) assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
+  assert.throws(() => compileClass(`tracking-[${"9".repeat(400)}px]`), /non-finite or absurd numeric value/);
+  assert.throws(() => compileClass(`line-clamp-${"9".repeat(400)}`), /non-finite or absurd numeric value/);
+});
+

@@ -129,13 +129,24 @@ utility.
 | `bg-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | background color |
 | `text-[#…]` | text color |
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
+| `text-[Npx]` | arbitrary font size (`N / 14` font scale) |
 | `font-{light,normal,medium,semibold,bold}` | font weight |
+| `text-{left,center,right}` | horizontal text alignment |
+| `leading-{none,tight,snug,normal,relaxed,loose}`, `leading-N`, `leading-[Npx]`, `leading-[multiplier]` | line-height multiplier; pixel forms resolve against final font size |
+| `tracking-{tighter,tight,normal,wide,wider,widest}`, `tracking-[Npx]`, `tracking-[Nem]` | letter spacing in logical pixels; negative arbitrary values are accepted |
+| `line-clamp-N`, `line-clamp-none` | wrapped text capped at N lines with a last-line ellipsis |
+| `tabular-nums`, `normal-nums` | fixed-width ASCII digit advances on/off |
 | `opacity-NN` | node opacity |
 | `items-{start,center,end,baseline,stretch}` | cross-axis align; the default is `stretch` |
 | `justify-{start,center,end,between}` | main-axis align |
 | `grow` | flex grow 1 |
 | `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | fixed size |
 | `truncate` | single-line ellipsis (text only) |
+
+Named text sizes use Tailwind's paired size/line-height defaults:
+`xs` 12/16, `sm` 14/20, `base` 16/24, `lg` 18/28, `xl` 20/28,
+`2xl` 24/32, `3xl` 30/36, and `4xl` 36/40 (logical pixels). An explicit
+`leading-*` utility overrides the paired default regardless of class order.
 
 Deliberately absent in M1 (check-error, "arrives M2+"): `px-/py-` split
 padding, borders, shadows, gradients, hover/state variants, transitions.

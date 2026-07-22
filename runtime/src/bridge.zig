@@ -291,6 +291,10 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setFontWeight(id, value.bytes) catch return fail(js, "invalid fontWeight");
+    } else if (std.mem.eql(u8, key.bytes, "textAlign")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "textAlign must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setTextAlign(id, value.bytes) catch return fail(js, "invalid textAlign");
     } else if (std.mem.eql(u8, key.bytes, "crossAlign") or std.mem.eql(u8, key.bytes, "mainAlign") or std.mem.eql(u8, key.bytes, "alignSelf")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "alignment must be a string");
         defer c.JS_FreeCString(js, value.raw);
@@ -301,13 +305,15 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums")) {
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
             state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
-        } else {
+        } else if (std.mem.eql(u8, key.bytes, "flexWrap")) {
             state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
+        } else {
+            state(js).tree.setTabularNums(id, value != 0) catch return fail(js, "setProp failed");
         }
     } else {
         var value: f64 = 0;

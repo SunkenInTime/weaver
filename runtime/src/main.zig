@@ -483,8 +483,26 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .on_change = if (retained.handles_change) Msg{ .slider = id } else null,
     };
     if (retained.kind == .text) {
-        options.wrap = false;
-        options.overflow = if (retained.truncate) .ellipsis else .clip;
+        options.text_alignment = switch (retained.text_align) {
+            .start => .start,
+            .center => .center,
+            .end => .end,
+        };
+        options.text_line_height = if (retained.line_height > 0) retained.line_height * 14 * retained.font_scale else 0;
+        options.text_letter_spacing = retained.letter_spacing;
+        options.text_tabular_numbers = retained.tabular_nums;
+        options.text_max_lines = @intFromFloat(@floor(std.math.clamp(retained.line_clamp, 0, 64)));
+        options.wrap = retained.line_clamp > 0;
+        options.overflow = if (retained.truncate or retained.line_clamp > 0) .ellipsis else .clip;
+        if (retained.truncate or retained.line_clamp > 0) {
+            options.text_scale = retained.font_scale;
+            options.text_weight = switch (retained.font_weight) {
+                .light, .regular => .regular,
+                .medium => .medium,
+                .semibold, .bold => .bold,
+            };
+            return ui.text(options, retained.textSlice());
+        }
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
             .weight = switch (retained.font_weight) {
