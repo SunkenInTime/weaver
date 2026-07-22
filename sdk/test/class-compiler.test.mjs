@@ -262,3 +262,17 @@ test("styling 06 rejects malformed shadow utilities", () => {
   assert.throws(() => compileClass("shadow-red-500/101"), /Color alpha must be between 0 and 100/);
 });
 
+test("styling 07 accepts built-in and bundled font families", () => {
+  assert.deepEqual(compileClass("font-sans"), { fontFamily: "sans" });
+  assert.deepEqual(compileClass("font-mono"), { fontFamily: "mono" });
+  assert.deepEqual(compileClass("font-[CozetteVector] font-semibold"), {
+    fontFamily: "CozetteVector", fontWeight: "semibold",
+  });
+});
+
+test("styling 07 rejects malformed font family utilities", () => {
+  for (const utility of ["font-[]", "font-[has space]", "font-[-leading]", "font-[name.ttf]"]) {
+    assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
+  }
+});
+

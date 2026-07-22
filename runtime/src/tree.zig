@@ -5,6 +5,7 @@ pub const max_nodes: usize = 128;
 pub const max_children: usize = 24;
 pub const max_text_bytes: usize = 192;
 pub const max_source_bytes: usize = 260;
+pub const max_font_family_bytes: usize = 63;
 pub const max_canvases: usize = 8;
 pub const max_canvas_commands: usize = 256;
 pub const max_canvas_points: usize = 1024;
@@ -79,6 +80,8 @@ pub const Node = struct {
     text_shadow: ?native_sdk.canvas.TextShadow = null,
     font_scale: f32 = 1,
     font_weight: FontWeight = .regular,
+    font_family: [max_font_family_bytes]u8 = @splat(0),
+    font_family_len: usize = 0,
     text_align: TextAlign = .start,
     line_height: f32 = 0,
     letter_spacing: f32 = 0,
@@ -116,6 +119,10 @@ pub const Node = struct {
 
     pub fn sourceSlice(self: *const Node) []const u8 {
         return self.source[0..self.source_len];
+    }
+
+    pub fn fontFamilySlice(self: *const Node) []const u8 {
+        return self.font_family[0..self.font_family_len];
     }
 };
 
@@ -304,6 +311,15 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (target.font_weight == weight) return;
         target.font_weight = weight;
+        self.changed();
+    }
+
+    pub fn setFontFamily(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_font_family_bytes) return error.TextTooLong;
+        const target = try self.node(id);
+        if (std.mem.eql(u8, target.fontFamilySlice(), value)) return;
+        @memcpy(target.font_family[0..value.len], value);
+        target.font_family_len = value.len;
         self.changed();
     }
 
@@ -686,6 +702,7 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setAlignSelf(id, "stretch");
     try tree.setFlexWrap(id, true);
     try tree.setTextAlign(id, "center");
+    try tree.setFontFamily(id, "CozetteVector");
     try tree.setTabularNums(id, true);
     const shadow_color = native_sdk.canvas.Color.rgba8(1, 2, 3, 64);
     try tree.setShadow(id, .{ .offset = .{ .dx = 2, .dy = 3 }, .blur = 8, .spread = -1, .color = shadow_color });
@@ -713,6 +730,7 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(SelfAlign.stretch, node.align_self);
     try std.testing.expect(node.flex_wrap);
     try std.testing.expectEqual(TextAlign.center, node.text_align);
+    try std.testing.expectEqualStrings("CozetteVector", node.fontFamilySlice());
     try std.testing.expect(node.tabular_nums);
     try std.testing.expectEqual(@as(f32, 2), node.shadow.?.offset.dx);
     try std.testing.expectEqual(@as(f32, -1), node.shadow.?.spread);

@@ -19,6 +19,17 @@ pub const Anchor = struct {
     offset: [2]f32 = .{ 24, 24 },
 };
 
+pub const FontWeight = enum { light, regular, medium, semibold, bold };
+
+pub const Font = struct {
+    id: u64,
+    name: []const u8,
+    stem: []const u8,
+    family: []const u8,
+    weight: FontWeight,
+    file: []const u8,
+};
+
 pub const Manifest = struct {
     name: []const u8,
     size: [2]f32,
@@ -29,6 +40,7 @@ pub const Manifest = struct {
     origins: []const []const u8 = &.{},
     subscribe: []const []const u8 = &.{},
     renderBackend: []const u8 = "software",
+    fonts: []const Font = &.{},
 };
 
 pub const Loaded = struct {
@@ -70,7 +82,16 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     for (parsed.subscribe) |provider| {
         if (!std.mem.eql(u8, provider, "time") and !std.mem.eql(u8, provider, "cpu") and !std.mem.eql(u8, provider, "memory") and !std.mem.eql(u8, provider, "audio") and !std.mem.eql(u8, provider, "media")) return error.InvalidProvider;
     }
+    if (parsed.fonts.len > native_sdk.runtime.max_registered_canvas_fonts) return error.TooManyFonts;
+    for (parsed.fonts) |font| {
+        if (font.id < native_sdk.canvas.min_registered_font_id or font.name.len == 0 or font.stem.len == 0 or font.family.len == 0 or !isLocalFontFile(font.file)) return error.InvalidFont;
+    }
     return .{ .manifest = parsed, .bundle = bundle };
+}
+
+fn isLocalFontFile(path: []const u8) bool {
+    if (path.len == 0 or std.fs.path.isAbsolute(path) or std.mem.indexOfAny(u8, path, "/\\") != null) return false;
+    return std.mem.endsWith(u8, path, ".ttf") or std.mem.endsWith(u8, path, ".otf");
 }
 
 fn roundPhysicalEdge(logical_edge: f32, scale: f32) i32 {
@@ -165,6 +186,14 @@ test "clock manifest shape parses" {
     const parsed = try std.json.parseFromSlice(Manifest, std.testing.allocator, source, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(f32, 240), parsed.value.size[0]);
+}
+
+test "font manifest paths stay root-adjacent and use supported extensions" {
+    try std.testing.expect(isLocalFontFile("Cozette.ttf"));
+    try std.testing.expect(isLocalFontFile("Pixel.otf"));
+    try std.testing.expect(!isLocalFontFile("fonts/Cozette.ttf"));
+    try std.testing.expect(!isLocalFontFile("..\\Cozette.ttf"));
+    try std.testing.expect(!isLocalFontFile("Cozette.woff2"));
 }
 
 test "anchors use target monitor DPI and preserve negative work-area coordinates" {

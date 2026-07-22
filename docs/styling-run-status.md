@@ -11,8 +11,8 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
 | 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `f84552629aa076b134e5a6c21465248be47daf15` | complete, pushed, draft PRs open |
-| 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` (PR06 pins the shadow-complete `f8455262`; the later commit is the brief-authorized PR07 font seam) | complete, pushed, draft PRs open |
+| 07 | `styling/07-fonts`, Native pin `8121bf6`, implementation in progress | per-text selection follow-up in N5 at `b487d48b` | in progress |
 | 08 | `styling/08-icons` | none expected | pending |
 | 09 / N6 | `styling/09-stack-overflow` | `styling/N6-stack-overflow` | pending |
 | 10 / N7 | `styling/10-image-v2` | `styling/N7-image-v2` | pending |
@@ -34,6 +34,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Native N4 focused canvas suite PASS in 41.1s after the final plain-text scale/weight follow-up; stock suite PASS in 76.2s; widget-profile suite PASS in 62.3s. Exact tests cover tracking, tabular digits, two-line clamp/ellipsis, span-path measurement, and retained projection. `zig build validate` PASS. Draft PR: https://github.com/SunkenInTime/native/pull/10.
 - Weaver 05: `npm test` PASS 32/32; `npm run typecheck` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS; CLI build and `weaver check examples/styling-spacing` PASS; explicit ReleaseFast runtime build PASS. Dev smoke produced one startup, software/pixels presentation, status `running` at 35s uptime, and no crash/restart line; the temporary registration and run-owned host were removed.
 - Native N5 focused canvas suite PASS in 43.9s; `zig build validate` PASS in 13.1s; final stock suite PASS in 25.2s; widget-profile suite PASS in 69.8s. Exact tests cover reference inset pixels, reference text-shadow pixels, widget panel ordering, and widget text-shadow projection. Draft PR: https://github.com/SunkenInTime/native/pull/11.
+- Native N5 PR07 font follow-up `b487d48b`: focused canvas suite PASS in 43.2s with exact plain/paragraph registered-id projection; validate + stock suite PASS together in 89.6s; final widget-profile suite PASS in 94.2s. The face id rides the pre-existing bounded immediate-command slice, preserving the Widget size bound.
 - Weaver 06: `npm test` PASS 34/34; `npm run typecheck` PASS; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 7.8s; CLI build and `weaver check examples/styling-shadows` PASS; ReleaseFast runtime build PASS in 117.9s. Isolated dev smoke reached status `running` at 27s uptime with one startup, software/pixels presentation, and no exception/crash/restart line; isolated host/watchers and the temporary registry were removed.
 
 ## Assumptions
@@ -56,6 +57,10 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 16. Weaver's frozen shadow wire carries one shadow, so Tailwind's multi-layer preset shapes are represented by one primary layer: `sm=0 1 2 0`, default=`0 1 3 0`, `md=0 4 6 -1`, `lg=0 10 15 -3`, and `xl=0 20 25 -5`, with the documented preset alpha. Multiple comma-separated CSS shadows remain out of scope.
 17. Arbitrary box shadows use underscore-separated class syntax `shadow-[x_y_blur_spread_#hex]`, accept optional `px` suffixes, require a non-negative blur, and allow negative offsets/spread. This is the narrowest class-safe encoding of the brief's packed wire tuple.
 18. Shadow geometry and `shadow-<palette>` color resolve independently after the complete class string, making their result order-independent. A color utility without shadow geometry is accepted but emits no visible shadow until a geometry utility is also present.
+19. Native widget profile is the binding font budget: at most two registered faces and 512 KiB per face. `weaver check` enforces the same limits before bundle/pack so registration cannot fail later for a budget mismatch.
+20. Root-adjacent `.ttf` and `.otf` are discovered as font assets. The bounded renderer requires `glyf`/`loca`/`hmtx` plus Unicode cmap format 4; OTF/CFF is rejected with an explicit TrueType-outline conversion instruction because accepting it would make reference and macOS rendering disagree.
+21. Exact `font-[file-stem]` always selects that face. A terminal `-Light/-Regular/-Medium/-Semibold/-Bold` (or underscore) additionally creates a family alias, and the closest registered weight wins. With one custom face every requested weight deliberately degrades to that face; built-in sans keeps Native's three real rungs and mono its single face.
+22. Font files and adjacent licenses reuse the existing ordinary-source `.weave` and `dist` asset paths; no opaque font sub-format or duplicate archive channel is introduced.
 
 ## UNVERIFIED / BLOCKED
 
@@ -81,4 +86,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Branch `styling/07-fonts` from PR06 and audit the existing bundle/font registry seams before implementing discovery, validation, pack transport, registration, family selection, and weight degradation.
+Finish PR07 live verification with the bundled pixel-font example, record pack/install/dev evidence, push/open the draft against PR06, then branch `styling/08-icons`.
