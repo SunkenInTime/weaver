@@ -1122,7 +1122,7 @@ test "retained stack projects overlay kind and rounded content clipping" {
     var ui = WidgetUi.init(arena_state.allocator());
     const projected = buildNode(&ui, &tree, &.{}, stack_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, projected.widget.kind);
-    try std.testing.expect(projected.widget.layout.clip_content);
+    try std.testing.expect(projected.widget.layout.flags.clip_content);
     try std.testing.expectEqual(@as(?f32, 14), projected.widget.style.radius);
     try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_bottom_left);
     try std.testing.expectEqual(@as(usize, 2), projected.nodes.len);
