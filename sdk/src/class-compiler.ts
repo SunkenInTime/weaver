@@ -1,5 +1,6 @@
-export type CrossAlign = "start" | "center" | "end" | "baseline";
-export type MainAlign = "start" | "center" | "end" | "between";
+export type CrossAlign = "start" | "center" | "end" | "baseline" | "stretch";
+export type MainAlign = "start" | "center" | "end" | "between" | "around" | "evenly";
+export type SelfAlign = "auto" | "start" | "center" | "end" | "stretch";
 
 export interface ClassProps {
   padding?: number;
@@ -21,6 +22,9 @@ export interface ClassProps {
   crossAlign?: CrossAlign;
   mainAlign?: MainAlign;
   grow?: number;
+  shrink?: number;
+  alignSelf?: SelfAlign;
+  flexWrap?: boolean;
   width?: number;
   height?: number;
   minWidth?: number;
@@ -86,8 +90,10 @@ const exampleUtilities = [
   "text-sm", "text-base", "text-lg", "text-xl", "text-2xl", "text-3xl",
   "text-4xl", "font-light", "font-normal", "font-medium", "font-semibold",
   "font-bold", "opacity-70", "items-start", "items-center", "items-end",
-  "items-baseline", "justify-start", "justify-center", "justify-end",
-  "justify-between", "grow", "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
+  "items-baseline", "items-stretch", "justify-start", "justify-center", "justify-end",
+  "justify-between", "justify-around", "justify-evenly", "grow", "grow-2", "shrink", "shrink-0",
+  "self-auto", "self-start", "self-center", "self-end", "self-stretch", "flex-wrap", "flex-nowrap",
+  "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
   "h-12", "h-[48px]", "h-full", "size-12", "min-w-12", "max-w-[160px]",
   "min-h-12", "max-h-[160px]", "aspect-square", "aspect-video", "aspect-[4/3]",
   "truncate",
@@ -172,16 +178,44 @@ function applyUtility(output: ClassProps, utility: string): void {
       return;
     }
   }
-  if ((match = /^items-(start|center|end|baseline)$/.exec(utility))) {
+  if ((match = /^items-(start|center|end|baseline|stretch)$/.exec(utility))) {
     output.crossAlign = match[1] as CrossAlign;
     return;
   }
-  if ((match = /^justify-(start|center|end|between)$/.exec(utility))) {
+  if ((match = /^justify-(start|center|end|between|around|evenly)$/.exec(utility))) {
     output.mainAlign = match[1] as MainAlign;
     return;
   }
   if (utility === "grow") {
     output.grow = 1;
+    return;
+  }
+  if ((match = /^grow-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    output.grow = Number(match[1]);
+    return;
+  }
+  if ((match = /^grow-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    output.grow = Number(match[1]);
+    return;
+  }
+  if (utility === "shrink") {
+    output.shrink = 1;
+    return;
+  }
+  if (utility === "shrink-0") {
+    output.shrink = 0;
+    return;
+  }
+  if ((match = /^self-(auto|start|center|end|stretch)$/.exec(utility))) {
+    output.alignSelf = match[1] as SelfAlign;
+    return;
+  }
+  if (utility === "flex-wrap") {
+    output.flexWrap = true;
+    return;
+  }
+  if (utility === "flex-nowrap") {
+    output.flexWrap = false;
     return;
   }
   if ((match = /^(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
