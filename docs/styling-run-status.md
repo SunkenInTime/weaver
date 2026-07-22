@@ -44,7 +44,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `16e49390` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `8669cfae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | complete, pushed, draft PRs open |
 | 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `25f6f63` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `52c7627a` | complete, pushed, draft PRs open |
-| 12 | `styling/12-showcase` at evidence commit `a5183c6` (draft creation next) | none | complete, pushed; all local gates green |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at evidence commit `a5183c6` | none | complete, pushed, draft PR open; all local gates green |
 
 ## Completed gates
 
@@ -165,4 +165,4 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## Next executable task
 
-Commit and push this final PR12 gate ledger, open the draft PR against `styling/11-interaction`, then audit every draft's CI and final branch/submodule topology without changing either default branch.
+Audit every draft's CI and final branch/submodule topology; resolve any actionable stack-owned failure, then record the final audit without changing either default branch.
