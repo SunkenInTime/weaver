@@ -1,4 +1,5 @@
 import { compileClass, type ClassProps } from "./class-compiler.js";
+import { ICON_FONT_FAMILY, iconGlyph } from "./icons.js";
 
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
@@ -60,6 +61,8 @@ interface VNode {
   readonly children: WidgetChild[];
   readonly key?: string | number;
 }
+
+type ElementType = VNode["type"] | "icon";
 
 interface HostInstance {
   kind: "host";
@@ -137,19 +140,26 @@ interface CanvasBinding {
 const canvases = new Map<number, CanvasBinding>();
 const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
-export function h(type: VNode["type"], props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
+export function h(type: ElementType, props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
   const propChildren = source.children as WidgetChild | WidgetChild[] | undefined;
+  const resolvedChildren = flatten(children.length > 0 ? children : propChildren === undefined ? [] : [propChildren]);
+  if (type === "icon") {
+    if (resolvedChildren.some(isRenderable)) throw new Error("<icon> does not accept children");
+    if (typeof source.name !== "string" || source.name.length === 0) throw new Error("<icon> requires a name");
+    const iconClass = `${typeof source.class === "string" ? source.class : ""} font-[${ICON_FONT_FAMILY}]`.trim();
+    return h("text", { ...source, class: iconClass }, iconGlyph(source.name));
+  }
   return {
     __weaverElement: true,
     type,
     props: source,
     key: source.key as string | number | undefined,
-    children: flatten(children.length > 0 ? children : propChildren === undefined ? [] : [propChildren]),
+    children: resolvedChildren,
   };
 }
 
-export function jsx(type: VNode["type"], props: Record<string, unknown>, key?: string | number): VNode {
+export function jsx(type: ElementType, props: Record<string, unknown>, key?: string | number): VNode {
   return h(type, key === undefined ? props : { ...props, key });
 }
 

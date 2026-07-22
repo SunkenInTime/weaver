@@ -101,6 +101,7 @@ Evaluation failure leaves the prior context, window, and state running; window-c
 | `<row>` | yes | — |
 | `<panel>` | yes | — (a styled box; column layout) |
 | `<text>` | yes | — (children: strings/numbers only) |
+| `<icon>` | yes | `name` (curated Lucide name; no children) |
 | `<image>` | check-error "arrives in M2" | `src` |
 | `<button>` | check-error "arrives in M2" | `onPress` |
 | `<slider>` | check-error "arrives in M2" | `value` `max` `onChange` |
@@ -181,6 +182,21 @@ degrades every requested weight to that face rather than fabricating or
 silently switching families. Built-in sans maps five requested weights to
 the three bundled Native rungs (regular, medium, bold); built-in mono has
 one face.
+
+### Icons
+
+`<icon name="play" class="text-xl text-white w-6" />` lowers to a native text
+node using Weaver's vendored Lucide font. `text-*` controls glyph size and
+color; `w-*`/`h-*` use the ordinary retained text-node sizing path. Icons do
+not accept children.
+
+The SDK freezes 79 common widget/media/navigation/status Lucide names in
+`iconNames`. `weaver check` requires a literal name and returns the nearest
+supported name as a fix-it. The upstream 843,668-byte font exceeds the Native
+widget face cap, so Weaver ships the explicit 26,768-byte subset and its
+Lucide/Feather license. A widget using `<icon>` reserves one of the two
+registered-font slots; it may therefore bundle at most one additional custom
+face. Widgets without icons retain both custom slots.
 
 ## CLI
 
