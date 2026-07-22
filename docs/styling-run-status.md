@@ -9,7 +9,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19), implementation through `279a877516c683cae82ae5b4edf35af0d7ab624c` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
 | 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20), implementation `f646b7ecb3b979cb01ec04551dc9ee54fbc4e8f5` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
 | 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21), implementation `01c49e0` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `e26de471a25b0293d270cf31517eb6e5c6936b31` | complete, pushed, draft PRs open |
-| 04 | `styling/04-palette` | none | pending |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22), implementation `4d0c4a8` | none | complete, pushed, draft PR open |
 | 05 / N4 | `styling/05-text-pack` | `styling/N4-text` | pending |
 | 06 / N5 | `styling/06-shadows` | `styling/N5-shadows` if required | pending |
 | 07 | `styling/07-fonts` | registry plumbing in prior fork layer if required | pending |
@@ -30,6 +30,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Weaver 02: `npm test` PASS 26/26; `npm run typecheck` PASS; runtime Zig tests PASS; updated example check and ReleaseFast runtime build PASS. Dev stayed alive 15s, status `running` with 12s uptime, one startup/no restart, and cleanup left zero processes/data.
 - Native N3 focused canvas suite PASS in 35.6s; stock suite PASS in 82.03s; widget-profile suite PASS in 51.61s. Exact commands assert independent corner radii and explicit stroke width/color.
 - Weaver 03: `npm test` PASS 28/28; `npm run typecheck` PASS; runtime Zig tests PASS in 7.3s; updated example check and explicit ReleaseFast runtime build PASS. Final dev smoke stayed alive 15s with one startup/no restart and software/pixels presentation.
+- Weaver 04: `npm test` PASS 30/30; `npm run typecheck` PASS; runtime Zig tests PASS; CLI build and example check PASS. Dev stayed alive 15s with status `running`, 12s uptime, one startup/no restart, and cleanup left no run-owned process.
 
 ## Assumptions
 
@@ -42,6 +43,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 7. Tailwind's default `flex-shrink: 1` is Weaver-specific projection; Native SDK's public default remains zero to preserve existing Native applications, while every Weaver retained node defaults to one.
 8. Tailwind border numeric suffixes are literal pixel widths (`border-2` = 2px), not spacing-scale units; arbitrary `[Npx]` is also accepted and per-side borders remain deferred by the brief.
 9. Radius classes resolve left-to-right per affected corner: a later uniform radius clears earlier corner overrides, while a later side/corner utility overrides only its selected corners.
+10. "Tailwind v4" is pinned to the current published `tailwindcss@4.3.3` palette (286 shade names, including mauve/olive/mist/taupe) at tarball shasum `c006861611c213c1877893ab5b23daa16be2bb55`. Because the frozen Weaver wire accepts only RGBA8, official OKLCH values are converted through the CSS Color 4 OKLab-to-sRGB matrix with channel clipping and byte rounding; named `/NN` multiplies existing alpha so `transparent/NN` stays transparent.
 
 ## UNVERIFIED / BLOCKED
 
@@ -61,4 +63,4 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 
 ## Next executable task
 
-Branch Weaver `styling/04-palette` from PR03; add the checked-in generated Tailwind v4 named color table, generator/source provenance, spot-value tests, alpha handling for `bg-`/`text-`/`border-`, contract docs, and example coverage.
+Branch Native `styling/N4-text` from N3; expose text alignment/line height, add letter spacing, tabular figures, and line-clamp behavior to both text paths with exact layout/render tests, then pin it from Weaver `styling/05-text-pack`.
