@@ -18,7 +18,7 @@ stacks. Weaver is based on `master`; Native is based on `weaver-main`.
 | 09 / N6 | [#27 stack and overflow](https://github.com/SunkenInTime/weaver/pull/27) | [#12 stack and overflow](https://github.com/SunkenInTime/native/pull/12) |
 | 10 / N7 | [#28 image v2](https://github.com/SunkenInTime/weaver/pull/28) | [#13 image v2](https://github.com/SunkenInTime/native/pull/13) |
 | 11 / N8 | [#29 interaction](https://github.com/SunkenInTime/weaver/pull/29) | [#14 interaction](https://github.com/SunkenInTime/native/pull/14) |
-| 12 | `styling/12-showcase` (draft link added after creation) | none |
+| 12 | [#30 retro player showcase](https://github.com/SunkenInTime/weaver/pull/30) | none |
 
 ## Acceptance anchor
 
