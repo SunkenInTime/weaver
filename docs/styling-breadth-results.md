@@ -1,6 +1,6 @@
 # Styling breadth results
 
-Run date: 2026-07-21 on Windows 11. Both stacks remain unmerged draft-PR
+Run date: 2026-07-21–22 on Windows 11. Both stacks remain unmerged draft-PR
 stacks. Weaver is based on `master`; Native is based on `weaver-main`.
 
 ## Stack summary
@@ -44,7 +44,11 @@ presentation, isolated Weaver data roots, and one widget process at a time.
 Each row is ten host `status.json` snapshots two seconds apart after startup;
 CPU is Weaver host-reported process CPU percentage and memory is private MiB.
 The parent was detached `origin/master` `a6d48af` with Native pin `78137351`.
-The showcase was the final PR12 tree with Native pin `8aae6aa2`.
+The measured showcase was the accepted PR12 tree with Native pin `8aae6aa2`.
+After CI exposed common-shape arena regressions, the final review head was
+repinned to behavior-equivalent compact Native `709989d2`; the live acceptance
+smoke was rerun at that pin, while the original matched A/B samples below were
+not relabeled or recomputed.
 
 | Widget | Sample uptime | CPU avg (min–max) | Private MiB avg (min–max) |
 |---|---:|---:|---:|
@@ -82,3 +86,11 @@ gradients, transitions, positioned layout, and unsupported state utilities
 remain loud `UtilityError` failures. The complete command/evidence ledger,
 assumptions, inherited Native fast-gate blocker, Mac-only unverified items,
 and cleanup state live in `docs/styling-run-status.md`.
+
+The final N4 repair stores non-default plain-text scale, weight, line height,
+tracking, tabular-number, and max-line values as one rare retained metadata
+record in the existing bounded command slice. The common `Widget` is exactly
+728 bytes again (N3 size), default widgets allocate no record, and later
+font/shadow/hover/pressed metadata composes in the same slice. Final Native
+N4–N8 focused/stock/profile gates, every Weaver 05–12 npm/typecheck/runtime
+gate, and the all-12-head release-audit sweep pass locally.
