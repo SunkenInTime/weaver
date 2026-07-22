@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { compileClass, UtilityError } from "../src/class-compiler.ts";
 
-const contract = readFileSync(new URL("../CONTRACT.md", import.meta.url), "utf8");
+const contract = readFileSync(new URL("../CONTRACT.md", import.meta.url), "utf8").replaceAll("\r\n", "\n");
 const consolidated = contract.slice(contract.indexOf("## Consolidated v0.4 authoring tables"));
 
 function firstColumnAfter(header) {
