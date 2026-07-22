@@ -276,3 +276,17 @@ test("styling 07 rejects malformed font family utilities", () => {
   }
 });
 
+test("styling 09 accepts bounded overflow", () => {
+  assert.deepEqual(compileClass("overflow-hidden"), { overflowHidden: true });
+  assert.deepEqual(compileClass("rounded-tl-xl overflow-hidden"), {
+    radiusTopLeft: 12,
+    overflowHidden: true,
+  });
+});
+
+test("styling 09 rejects unsupported overflow policies", () => {
+  for (const utility of ["overflow-visible", "overflow-auto", "overflow-clip", "overflow-hidden-x"]) {
+    assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
+  }
+});
+

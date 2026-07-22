@@ -412,3 +412,18 @@ children never compress. If all floors still exceed the container, overflow
 remains explicit and the Native debug diagnostic fires. Wrapped lines use the
 container's `gap` on both axes. `items-baseline` remains an end-alignment
 approximation; true font baseline layout is outside this styling slice.
+
+## PR 09: overlay stacks and bounded overflow
+
+`<stack>` is the overlay sibling of `<row>` and `<column>`. Every child starts
+at the stack's content-box origin, paints in child order, and uses its own
+width, height, margin, and alignment utilities. Overlay composition therefore
+uses ordinary child utilities such as `w-full h-full`; there is no positioned
+layout API.
+
+| Utility | Maps to |
+|---|---|
+| `overflow-hidden` | clip descendant painting to this element's resolved rounded bounds |
+
+The clip applies to images, text, panels, and nested content. Per-corner
+`rounded-*` utilities shape the mask, including asymmetric corners.

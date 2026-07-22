@@ -2,7 +2,7 @@ import { compileClass, type ClassProps } from "./class-compiler.js";
 
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
-export type NodeType = "column" | "row" | "panel" | "text" | "icon" | "button" | "slider" | "image" | "canvas";
+export type NodeType = "column" | "row" | "stack" | "panel" | "text" | "icon" | "button" | "slider" | "image" | "canvas";
 export type ProviderName = "time" | "cpu" | "memory" | "audio" | "media";
 
 export interface WidgetConfig {
@@ -439,7 +439,7 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     letterSpacing: 0, lineClamp: 0, tabularNums: false, opacity: 1, crossAlign: "stretch",
     mainAlign: "start", grow: 0, shrink: 1, alignSelf: "auto", flexWrap: false, width: -1, height: -1,
     minWidth: 0, minHeight: 0, maxWidth: -1, maxHeight: -1,
-    widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false,
+    widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false, overflowHidden: false,
   };
   for (const key of Object.keys(defaults) as (keyof ClassProps)[]) {
     const before = previous[key] ?? defaults[key];

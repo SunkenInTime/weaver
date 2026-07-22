@@ -107,6 +107,7 @@ declare global {
     interface IntrinsicElements {
       column: BoxProps;
       row: BoxProps;
+      stack: BoxProps;
       panel: BoxProps;
       text: TextProps;
       icon: IconProps;
