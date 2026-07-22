@@ -120,6 +120,8 @@ pub const Node = struct {
     icon_path: []u8 = &.{},
     icon_view_box: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 24, 24),
     icon_stroke: f32 = 0,
+    image_fit: native_sdk.canvas.ImageFit = .stretch,
+    image_tile: bool = false,
     canvas_slot: u8 = 0,
 
     pub fn textSlice(self: *const Node) []const u8 {
@@ -500,6 +502,21 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (std.meta.eql(target.icon_view_box, next)) return;
         target.icon_view_box = next;
+        self.changed();
+    }
+
+    pub fn setImageFit(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        const fit: native_sdk.canvas.ImageFit = if (std.mem.eql(u8, value, "cover")) .cover else if (std.mem.eql(u8, value, "contain")) .contain else if (std.mem.eql(u8, value, "stretch")) .stretch else return error.InvalidProperty;
+        const target = try self.node(id);
+        if (target.image_fit == fit) return;
+        target.image_fit = fit;
+        self.changed();
+    }
+
+    pub fn setImageTile(self: *Tree, id: NodeId, value: bool) Error!void {
+        const target = try self.node(id);
+        if (target.image_tile == value) return;
+        target.image_tile = value;
         self.changed();
     }
 

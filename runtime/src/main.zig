@@ -517,6 +517,8 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
         .width_percent = retained.width_percent,
         .height_percent = retained.height_percent,
         .aspect_ratio = retained.aspect_ratio,
+        .image_fit = retained.image_fit,
+        .image_tile = retained.image_tile,
         .cross = switch (retained.cross_align) {
             .start => .start,
             .center => .center,
@@ -1128,4 +1130,24 @@ test "retained stack projects overlay kind and rounded content clipping" {
     try std.testing.expectEqual(@as(usize, 2), projected.nodes.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, projected.nodes[0].widget.kind);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, projected.nodes[1].widget.kind);
+}
+
+test "retained image projects fit tiling and class corner radii" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var tree: tree_mod.Tree = .{};
+    const image_id = try tree.createNode(.image);
+    try tree.setImageFit(image_id, "contain");
+    try tree.setImageTile(image_id, true);
+    try tree.setNumberProp(image_id, "radius", 12);
+    try tree.setNumberProp(image_id, "radiusTopRight", 3);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const projected = buildNode(&ui, &tree, &.{}, image_id, false);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.image, projected.widget.kind);
+    try std.testing.expectEqual(native_sdk.canvas.ImageFit.contain, projected.widget.image_fit);
+    try std.testing.expect(projected.widget.image_tile);
+    try std.testing.expectEqual(@as(?f32, 12), projected.widget.style.radius);
+    try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_top_right);
 }

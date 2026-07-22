@@ -82,6 +82,7 @@ test("widget renders one native generation and providers use native timers", asy
       sdk.h("stack", { class: "w-full h-[32px] overflow-hidden rounded-xl" },
         sdk.h("panel", { class: "size-full bg-slate-800" }),
         sdk.h("text", null, "overlay")),
+      sdk.h("image", { src: "./cover.png", fit: "cover", tile: true, class: "w-6 h-4 rounded-tl-lg rounded-br-2xl" }),
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
@@ -143,6 +144,10 @@ test("widget renders one native generation and providers use native timers", asy
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === stackId && operation[2] === key && operation[3] === value), `${key} stack wire prop`);
   }
   assert.equal(operations.filter((operation) => operation[0] === "appendChild" && operation[1] === stackId).length, 2);
+  const imageId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "image")[2];
+  for (const [key, value] of [["source", "./cover.png"], ["imageFit", "cover"], ["imageTile", true], ["radiusTopLeft", 8], ["radiusBottomRight", 16]]) {
+    assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === imageId && operation[2] === key && operation[3] === value), `${key} image wire prop`);
+  }
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   eventCallback(buttonId, "press", null);
@@ -186,6 +191,13 @@ test("styling 08 runtime accepts only bundle-lowered path icons and rejects chil
   const operationCount = operations.length;
   assert.throws(() => sdk.h("icon", { name: "play" }), /must be lowered to path data/);
   assert.throws(() => sdk.h("icon", { iconPath: "M 0 0", iconViewBox: "0 0 24 24", iconStroke: 0 }, "child"), /does not accept children/);
+  assert.equal(operations.length, operationCount);
+});
+
+test("styling 10 image props reject invalid fit and tile before native mutation", () => {
+  const operationCount = operations.length;
+  assert.throws(() => sdk.h("image", { src: "./cover.png", fit: "scale-down" }), /fit must be "cover", "contain", or "stretch"/);
+  assert.throws(() => sdk.h("image", { src: "./cover.png", tile: "yes" }), /tile must be boolean/);
   assert.equal(operations.length, operationCount);
 });
 
