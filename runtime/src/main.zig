@@ -471,10 +471,10 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             .background = retained.background,
             .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
-            .radius_top_left = if (retained.radius_top_left >= 0) retained.radius_top_left else null,
-            .radius_top_right = if (retained.radius_top_right >= 0) retained.radius_top_right else null,
-            .radius_bottom_right = if (retained.radius_bottom_right >= 0) retained.radius_bottom_right else null,
-            .radius_bottom_left = if (retained.radius_bottom_left >= 0) retained.radius_bottom_left else null,
+            .radius_top_left = nativeCornerRadius(retained.radius_top_left),
+            .radius_top_right = nativeCornerRadius(retained.radius_top_right),
+            .radius_bottom_right = nativeCornerRadius(retained.radius_bottom_right),
+            .radius_bottom_left = nativeCornerRadius(retained.radius_bottom_left),
             .border = retained.border_color,
             .stroke_width = retained.border_width,
             .quiet_hover = true,
@@ -538,6 +538,10 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
+}
+
+fn nativeCornerRadius(retained: f32) f32 {
+    return if (retained >= 0) retained else -std.math.inf(f32);
 }
 
 fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
@@ -820,4 +824,9 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "corner radius projection preserves authored values and maps retained unset in-band" {
+    try std.testing.expectEqual(@as(f32, 12.5), nativeCornerRadius(12.5));
+    try std.testing.expect(nativeCornerRadius(-1) == -std.math.inf(f32));
 }
