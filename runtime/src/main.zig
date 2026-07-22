@@ -408,6 +408,11 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
     return buildNode(ui, &model.tree, root_id, true);
 }
 
+fn hasPaintStyle(node: *const tree_mod.Node) bool {
+    return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
+        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0;
+}
+
 fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
     const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
     var options: WidgetUi.ElementOptions = .{
@@ -466,6 +471,12 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             .background = retained.background,
             .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
+            .radius_top_left = if (retained.radius_top_left >= 0) retained.radius_top_left else null,
+            .radius_top_right = if (retained.radius_top_right >= 0) retained.radius_top_right else null,
+            .radius_bottom_right = if (retained.radius_bottom_right >= 0) retained.radius_bottom_right else null,
+            .radius_bottom_left = if (retained.radius_bottom_left >= 0) retained.radius_bottom_left else null,
+            .border = retained.border_color,
+            .stroke_width = retained.border_width,
             .quiet_hover = true,
         },
         .on_press = if (retained.handles_press) Msg{ .press = id } else null,
@@ -494,7 +505,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         // styled column is contractually a column-layout box, which is the
         // builder's panel primitive; unstyled columns keep the lean node.
         // A styled row gets the same painting panel around its row layout.
-        .column => if (retained.background != null) block: {
+        .column => if (hasPaintStyle(retained)) block: {
             const column_options: WidgetUi.ElementOptions = .{
                 .gap = retained.gap,
                 .grow = 1,
@@ -504,7 +515,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             options.gap = 0;
             break :block ui.panel(options, .{ui.column(column_options, children)});
         } else ui.column(options, children),
-        .row => if (retained.background != null) block: {
+        .row => if (hasPaintStyle(retained)) block: {
             const row_options: WidgetUi.ElementOptions = .{
                 .gap = retained.gap,
                 .grow = 1,

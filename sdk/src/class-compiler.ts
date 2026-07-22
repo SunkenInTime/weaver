@@ -14,6 +14,12 @@ export interface ClassProps {
   marginLeft?: number;
   gap?: number;
   radius?: number;
+  radiusTopLeft?: number;
+  radiusTopRight?: number;
+  radiusBottomRight?: number;
+  radiusBottomLeft?: number;
+  borderWidth?: number;
+  borderColor?: string;
   background?: string;
   textColor?: string;
   fontScale?: number;
@@ -108,7 +114,7 @@ export function compileClass(className: string): ClassProps {
 }
 
 function applyUtility(output: ClassProps, utility: string): void {
-  if (/^(?:border|shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
+  if (/^(?:shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
 
@@ -149,10 +155,36 @@ function applyUtility(output: ClassProps, utility: string): void {
   }
   if (utility in radii) {
     output.radius = radii[utility];
+    clearRadiusCorners(output);
     return;
   }
   if ((match = /^rounded-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
     output.radius = utilityNumber(match[1], utility);
+    clearRadiusCorners(output);
+    return;
+  }
+  if ((match = /^rounded-(t|r|b|l|tl|tr|br|bl)(?:-(md|lg|xl|2xl|3xl|full|\[(\d+(?:\.\d+)?)px\]))?$/.exec(utility))) {
+    const value = match[3] === undefined ? (match[2] === undefined ? radii.rounded : radii[`rounded-${match[2]}`]) : utilityNumber(match[3], utility);
+    applyRadiusCorners(output, match[1], value);
+    return;
+  }
+  if (utility === "border") {
+    output.borderWidth = 1;
+    output.borderColor ??= "#E5E7EBFF";
+    return;
+  }
+  if ((match = /^border-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    output.borderWidth = utilityNumber(match[1], utility);
+    output.borderColor ??= "#E5E7EBFF";
+    return;
+  }
+  if ((match = /^border-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    output.borderWidth = utilityNumber(match[1], utility);
+    output.borderColor ??= "#E5E7EBFF";
+    return;
+  }
+  if ((match = /^border-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
+    output.borderColor = normalizeColor(match[1], match[2]);
     return;
   }
   if ((match = /^bg-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
@@ -308,6 +340,23 @@ function applyUtility(output: ClassProps, utility: string): void {
 
 type PaddingSide = "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
 type MarginSide = "marginTop" | "marginRight" | "marginBottom" | "marginLeft";
+type RadiusCorner = "radiusTopLeft" | "radiusTopRight" | "radiusBottomRight" | "radiusBottomLeft";
+
+function clearRadiusCorners(output: ClassProps): void {
+  delete output.radiusTopLeft;
+  delete output.radiusTopRight;
+  delete output.radiusBottomRight;
+  delete output.radiusBottomLeft;
+}
+
+function applyRadiusCorners(output: ClassProps, side: string, value: number): void {
+  const corners: Record<string, RadiusCorner[]> = {
+    t: ["radiusTopLeft", "radiusTopRight"], r: ["radiusTopRight", "radiusBottomRight"],
+    b: ["radiusBottomLeft", "radiusBottomRight"], l: ["radiusTopLeft", "radiusBottomLeft"],
+    tl: ["radiusTopLeft"], tr: ["radiusTopRight"], br: ["radiusBottomRight"], bl: ["radiusBottomLeft"],
+  };
+  for (const corner of corners[side]) output[corner] = value;
+}
 
 function clearPaddingSides(output: ClassProps): void {
   delete output.paddingTop;
