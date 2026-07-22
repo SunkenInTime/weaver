@@ -33,20 +33,28 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `e7648949` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `1a02e1599749f5dab7f366b6af6e0a80dd86e8b1` | complete, pushed, draft PRs open |
-| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `457c2dd9` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `83a92a0dae98d2bb66e6c94b7315a9cf29df20cf` | complete, pushed, draft PRs open |
-| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `0cf86b8` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d4e8ac33e6510a0f6d776d4b49137183a02d0310` | complete, pushed, draft PRs open |
-| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `4438e8d` | none | complete, pushed, draft PR open |
-| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `dc41198` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `9dc298d02799519c46cb8330e8021ff74d5cb0c5` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `62938eb` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `d744f423` (PR06 pins the shadow-complete `0fadeee5`; PR07 advances to the authorized font seam) | complete, pushed, draft PRs open |
-| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `efa2ad8` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `d744f423` | complete, pushed, draft PR open |
-| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `d018948` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `80ecf5d` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `b9ca6cd1` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `1e1ac07` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `adc097c0` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `380dd0f` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `80e74357` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30), implementation/evidence head `447fdeb` plus this ledger-only CI record | none | complete, pushed, draft PR open |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `af4dbf0` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `2a78bbc` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
+| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `0a8dd30` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `661f4bd` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
+| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
+| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `619b0ec` | rides N5 `e1218fab` | complete, pushed, draft PR open |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `92f101c` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `157c57b9` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `a0d567b` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `c40a351f` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `86d12e3` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `8d2b1cf4` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30), implementation head `0e29739` plus this ledger/capture update | rides N8 `8d2b1cf4` | complete, pushed, draft PR open |
 
 ## Completed gates
+
+### Independent-review repair rerun (final heads above)
+
+- Weaver PR01-PR12: every head passed `npm test`, `npm run typecheck`, `runtime/ zig build test -Dweb-layer=exclude -Dtrace=off`, and `npm run audit:release`. Node suites ranged from 25 to 49 tests; runtime suites all passed with the expected one platform skip. Exact per-head durations are retained in the run evidence log.
+- Native N1-N8: every head passed focused `zig build test-canvas -Dwidget-profile=true`, full stock `zig build test`, and full `zig build test -Dwidget-profile=true`. Focused durations were 34.9-47.4s; stock 74.1-110.4s; widget profile 54.0-103.8s.
+- All 12 PR examples were rebuilt ReleaseFast, passed `weaver check`, reached live status `running` for 20s, emitted no exception/crash/backoff/restart line, and left zero clone-owned host/widget processes. PR01-PR05 used `styling-spacing`; PR06-PR12 used their layer example, ending with `retro-player-shell`.
+- The final retro-player capture shows the overlay elapsed-time text at the far right. `widget.json` registers `GeistPixel-Square.ttf` as id 65, the exact-stem resolver selects it, and the live headline is rendered with `font-[GeistPixel-Square]`.
+- Resolved rerun defects: every branch-local release audit now names its exact restacked gitlink; PR04 no longer reintroduces the missing `p-[Npx]` return; N8 casts each interaction-presence bit to `usize` before addition, so simultaneous hover and pressed metadata cannot overflow.
 
 - Virgin Weaver `master` (`origin/master`): `npm test` PASS 22/22; `npm run typecheck` PASS; `runtime/ zig build test -Dweb-layer=exclude -Dtrace=off` PASS.
 - Native N1 focused: `zig build test-canvas -Dwidget-profile=true` PASS.
@@ -130,6 +138,10 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 43. Per-corner Native style overrides use negative infinity as an in-band unset sentinel. Every finite value, including a negative author value that clamps to zero, remains semantically distinct; this reduces the common `WidgetStyle` from the original optional-corner design's 172 bytes to 156 bytes without weakening the hostile-arena test.
 44. N4 text styling is rare retained metadata, not common widget shape: a non-default text leaf gets one `WidgetTextStyle` command record, while default text and every non-text widget retain the N3 728-byte `Widget` and allocate no metadata. Later font, shadow, hover, and pressed records share that bounded slice and preserve authored order independently of drawing commands.
 45. The N3 ARM regression is repaired by allocation accuracy rather than a larger hostile bound or lossy radius storage: source-line counts are safe upper bounds because every parsed block/list item/table row consumes at least one source line. Capacity caps and truncation behavior remain identical, while short containers no longer reserve their full 64-node maximum.
+46. Numeric utilities use 1,000,000 logical units as the explicit absurd-value ceiling. This is far above the bounded widget surface while preventing finite exponential literals from becoming unusable layout magnitudes; non-finite values are always rejected.
+47. Native preserves backward compatibility for direct callers that historically used positive zero as an unbounded maximum by encoding Weaver's explicit `max-w-0`/`max-h-0` as negative zero internally. Preferred width/height presence is carried in the existing packed layout flags, so authored zero is distinct from unset without growing `Widget`.
+48. The lowered-budget check expands discoverable local JSX component return roots and conservatively checks each static root. Dynamic loop multiplicity and opaque `props.children` cannot be proven by the TypeScript AST; those cases remain bounded by the unchanged Native runtime limits, while every statically expressible painted row/column contributes its real extra node/depth.
+49. D3D supports the current v7 solid shape/line subset, including per-corner rounded rectangles. Current-layout commands requiring rounded command clips, gradients, text, effects, or images deliberately return `false` to the existing per-command CPU fallback rather than being approximated or causing the whole GPU-backed widget to silently demote.
 
 ## UNVERIFIED / BLOCKED
 
