@@ -416,10 +416,12 @@ fn hasPaintStyle(node: *const tree_mod.Node) bool {
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi.Node) WidgetUi.Node {
     const count: usize = @intFromBool(retained.shadow != null) + @intFromBool(retained.text_shadow != null);
     if (count == 0) return source;
-    const effects = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, count) catch return source;
-    var cursor: usize = 0;
+    const existing = source.widget.immediate_commands;
+    const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
+    @memcpy(combined[0..existing.len], existing);
+    var cursor: usize = existing.len;
     if (retained.shadow) |shadow| {
-        effects[cursor] = .{ .box_shadow = .{
+        combined[cursor] = .{ .box_shadow = .{
             .offset = shadow.offset,
             .blur = shadow.blur,
             .spread = shadow.spread,
@@ -428,9 +430,9 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi
         } };
         cursor += 1;
     }
-    if (retained.text_shadow) |shadow| effects[cursor] = .{ .text_shadow = shadow };
+    if (retained.text_shadow) |shadow| combined[cursor] = .{ .text_shadow = shadow };
     var result = source;
-    result.widget.immediate_commands = effects;
+    result.widget.immediate_commands = combined;
     return result;
 }
 
@@ -889,4 +891,31 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
+}
+
+test "attached effects preserve builder text metadata" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const text_node = try retained_tree.createNode(.text);
+    try retained_tree.setText(text_node, "styled");
+    try retained_tree.setNumberProp(text_node, "fontScale", 2);
+    try retained_tree.setTruncate(text_node, true);
+    try retained_tree.setTextShadow(text_node, .{
+        .offset = .{ .dx = 1, .dy = 2 },
+        .blur = 3,
+        .color = native_sdk.canvas.Color.rgb8(10, 20, 30),
+    });
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, text_node, true));
+    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
 }
