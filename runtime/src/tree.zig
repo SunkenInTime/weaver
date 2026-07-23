@@ -806,7 +806,9 @@ test "icon path has an independent 8192-byte budget and parsed viewBox" {
 }
 
 test "rare icon paths do not grow every retained node" {
-    try std.testing.expect(@sizeOf(Node) < 1024);
+    // Later styling layers may add compact common fields, but restoring the
+    // 8 KiB inline path buffer must always trip this bound.
+    try std.testing.expect(@sizeOf(Node) < max_icon_path_bytes / 2);
 
     var tree: Tree = .{ .allocator = std.testing.allocator };
     defer tree.deinit();
