@@ -19,6 +19,7 @@ stacks. Weaver is based on `master`; Native is based on `weaver-main`.
 | 10 / N7 | [#28 image v2](https://github.com/SunkenInTime/weaver/pull/28) | [#13 image v2](https://github.com/SunkenInTime/native/pull/13) |
 | 11 / N8 | [#29 interaction](https://github.com/SunkenInTime/weaver/pull/29) | [#14 interaction](https://github.com/SunkenInTime/native/pull/14) |
 | 12 | [#30 retro player showcase](https://github.com/SunkenInTime/weaver/pull/30) | none |
+| 13 | [#31 Noro shell fidelity showcase](https://github.com/SunkenInTime/weaver/pull/31) | rides repaired N7/N8 |
 
 ## Independent-review repairs
 
@@ -163,3 +164,34 @@ gate, Intel headless, Apple-silicon headless, and Apple-silicon session jobs.
 Native N5-N8 remain without configured GitHub checks and pass the full local
 stock plus widget-profile suites; N5 also passes the exact reference-pixel
 proof and N7 passes the production Windows baseline-JPEG boundary test.
+
+## Noro shell fidelity follow-up
+
+The fixed-height stack defect was a render-planner clip-composition error, not
+a layout-origin error. An image emitter's equal-bounds square clip replaced
+the rounded clip already pushed by the screen stack. Native N7 now combines
+coincident radii per corner, so the child can tighten but never relax its
+ancestor mask. An exact reference-renderer test places a real image inside a
+padded fixed-height rounded stack and proves transparent padding and both
+rounded top corners.
+
+`examples/noro-shell` restores the cover, unmodified GridTile, and 20% GrainTile
+inside the screen. Its grille opacity is 5%, tuned against the authoritative
+Noro preview. The mandatory physical capture was opened at original resolution:
+`E:\tmp\weaver-noro-pr13\noro-shell-visual-gate-final.png`. PASS: cover fills
+without top/right bleed; the 14px shell rim is visible on every side; the row
+reads `00:06 / LET IT GO / 03:58 AM` in the subsetted Cozette face; the record
+dot remains inside the top-right; the grille is subtle; and all three Lucide
+icons are centered.
+
+The installed widget also exposed an obsolete Win32 top-level repeating
+16ms frame timer. Removing that timer leaves explicit app timers, posted
+one-shot frame requests, and the GPU-surface demand scheduler intact. After a
+two-minute installed-mode settle, `TotalProcessorTime` advanced 0.000ms over
+59.943s and 0.000ms over a consecutive 60.002s confirmation window.
+
+Final CI is green for restacked Weaver PR28-PR31 across the Windows gate,
+Intel headless, Apple-silicon headless, and Apple-silicon session jobs (runs
+`29983968548`, `29983969846`, `29983972078`, and `29984071014`). Native
+PR13/PR14 have no configured checks; their exact pushed heads pass full local
+stock and widget-profile suites.
