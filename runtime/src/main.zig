@@ -414,7 +414,8 @@ fn hasPaintStyle(node: *const tree_mod.Node) bool {
 }
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi.Node) WidgetUi.Node {
-    const count: usize = @intFromBool(retained.shadow != null) + @intFromBool(retained.text_shadow != null);
+    const count = @as(usize, @intFromBool(retained.shadow != null)) +
+        @as(usize, @intFromBool(retained.text_shadow != null));
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
     const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
@@ -893,7 +894,7 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
 }
 
-test "attached effects preserve builder text metadata" {
+test "attached effects combine builder metadata with box and text shadows" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     var retained_tree: tree_mod.Tree = .{};
@@ -901,6 +902,12 @@ test "attached effects preserve builder text metadata" {
     try retained_tree.setText(text_node, "styled");
     try retained_tree.setNumberProp(text_node, "fontScale", 2);
     try retained_tree.setTruncate(text_node, true);
+    try retained_tree.setShadow(text_node, .{
+        .offset = .{ .dx = 0, .dy = 1 },
+        .blur = 4,
+        .spread = 0,
+        .color = native_sdk.canvas.Color.rgb8(0, 0, 0),
+    });
     try retained_tree.setTextShadow(text_node, .{
         .offset = .{ .dx = 1, .dy = 2 },
         .blur = 3,
@@ -909,12 +916,16 @@ test "attached effects preserve builder text metadata" {
 
     var ui = WidgetUi.init(arena_state.allocator());
     const built = try ui.finalize(buildNode(&ui, &retained_tree, text_node, true));
-    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
+    try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
         else => return error.TestExpectedEqual,
     }
     switch (built.root.immediate_commands[1]) {
+        .box_shadow => |shadow| try std.testing.expectEqual(@as(f32, 4), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[2]) {
         .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
         else => return error.TestExpectedEqual,
     }
