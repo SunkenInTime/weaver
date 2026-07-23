@@ -297,6 +297,17 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setSource(id, value.bytes) catch return fail(js, "image source is too long");
+    } else if (std.mem.eql(u8, key.bytes, "iconPath")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "iconPath must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setIconPath(id, value.bytes) catch |err| return if (err == error.IconPathTooLong)
+            fail(js, "iconPath exceeds the 8192-byte per-node limit")
+        else
+            fail(js, "invalid iconPath");
+    } else if (std.mem.eql(u8, key.bytes, "iconViewBox")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "iconViewBox must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setIconViewBox(id, value.bytes) catch return fail(js, "invalid iconViewBox");
     } else if (std.mem.eql(u8, key.bytes, "fontWeight")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);

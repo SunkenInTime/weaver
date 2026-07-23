@@ -1,6 +1,33 @@
 # Styling breadth run status
 
-Updated: 2026-07-21 (Windows 11, unattended run)
+Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
+
+## 2026-07-23 path-icon redesign
+
+- PR08 is being rewritten in place: `<icon>` is lowered at bundle time to
+  normalized absolute `M`/`L`/`C`/`Z` path data. The font subset, codepoint map,
+  reserved face id 64, and icon-font projection are removed.
+- Native N5 retains bounded icon-path metadata and projects it through the
+  existing display-list path command. D3D keeps its existing per-command CPU
+  fallback for paths.
+- Assumption: the binding full catalog is `lucide-static@1.26.0` (1,749 names),
+  npm tarball SHA-1 `cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d`, integrity
+  `sha512-6yCpa2ONICjlE19BuneIi75ASd9cCZhqJlzhAlQBi+99m2aZd2cNzxFVbDgPu7JLBZR2uDYO/EpLYtnhGw5Niw==`.
+  Only resolved icon paths are embedded in a widget bundle; the catalog itself
+  remains a pinned CLI build dependency.
+- Assumption: `svg-pathdata@7.2.0` is the binding bundle-time normalizer. It
+  requires Node 20.11.1 or newer, which is compatible with Weaver's existing
+  Node 22 development baseline.
+- Assumption: the Native widget profile's aggregate path-element allowance is
+  raised from 256 to 2,048 so one legal 8 KiB normalized icon path can always
+  be retained without growing every `Widget`; per-node normalized data remains
+  independently capped at 8 KiB by `weaver check`.
+- Assumption: Lucide named icons always use the upstream `0 0 24 24` view box,
+  two-unit round stroke, and current text color. Raw `d` icons default to fill;
+  a positive `stroke` prop selects round stroked rendering.
+- Assumption: Noro's solid controls will use the exact 24-unit Rainmeter paths
+  from upstream `NoroPlayer/Player.ini`; this belongs to PR13 and must preserve
+  the radii introduced by `4241b12`.
 
 ## Stack map
 

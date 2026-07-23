@@ -18,7 +18,7 @@ comptime {
         native_sdk.platform.max_views != 1 or
         native_sdk.platform.max_webviews != 1 or
         native_sdk.runtime.max_canvas_commands_per_view != 128 or
-        native_sdk.runtime.max_canvas_path_elements_per_view != 256 or
+        native_sdk.runtime.max_canvas_path_elements_per_view != 2048 or
         native_sdk.runtime.max_canvas_widget_nodes_per_view != 128)
     {
         @compileError("Weaver runtime must be built with the Native SDK widget profile");
@@ -415,9 +415,27 @@ fn hasPaintStyle(node: *const tree_mod.Node) bool {
 }
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
+    var icon_elements: ?[]const native_sdk.canvas.PathElement = null;
+    if (retained.iconPathSlice().len > 0) {
+        const element_count = native_sdk.canvas.normalized_path.countElements(retained.iconPathSlice()) catch |err| block: {
+            std.log.err("bundle emitted invalid normalized icon path: {s}", .{@errorName(err)});
+            break :block 0;
+        };
+        if (element_count > 0) {
+            if (ui.arena.alloc(native_sdk.canvas.PathElement, element_count)) |elements| {
+                icon_elements = native_sdk.canvas.normalized_path.parse(retained.iconPathSlice(), elements) catch |err| block: {
+                    std.log.err("bundle icon path decode failed: {s}", .{@errorName(err)});
+                    break :block null;
+                };
+            } else |_| {
+                std.log.err("bundle icon path exceeds the Native UI arena", .{});
+            }
+        }
+    }
     const count = @as(usize, @intFromBool(retained.shadow != null)) +
         @as(usize, @intFromBool(retained.text_shadow != null)) +
-        @as(usize, @intFromBool(font_id != null));
+        @as(usize, @intFromBool(font_id != null)) +
+        @as(usize, @intFromBool(icon_elements != null));
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
     const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
@@ -437,7 +455,17 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
         combined[cursor] = .{ .text_shadow = shadow };
         cursor += 1;
     }
-    if (font_id) |id| combined[cursor] = .{ .text_font = id };
+    if (font_id) |id| {
+        combined[cursor] = .{ .text_font = id };
+        cursor += 1;
+    }
+    if (icon_elements) |elements| {
+        combined[cursor] = .{ .icon_path = .{
+            .view_box = retained.icon_view_box,
+            .elements = elements,
+            .stroke_width = retained.icon_stroke,
+        } };
+    }
     var result = source;
     result.widget.immediate_commands = combined;
     return result;
@@ -576,6 +604,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             break :block ui.panel(options, .{ui.row(row_options, children)});
         } else ui.row(options, children),
         .panel => ui.panel(options, children),
+        .icon => ui.el(.icon, options, .{}),
         .button => ui.panel(options, children),
         .slider => ui.el(.slider, block: {
             options.value = std.math.clamp(retained.value / retained.max, 0, 1);
@@ -966,6 +995,36 @@ test "attached effects combine builder metadata with box and text shadows" {
     }
     switch (built.root.immediate_commands[2]) {
         .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "path icon projection parses normalized geometry and preserves viewBox stroke and color" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const icon_node = try retained_tree.createNode(.icon);
+    try retained_tree.setIconPath(icon_node, "M 1 2 L 3 4 C 5 6 7 8 9 10 Z");
+    try retained_tree.setIconViewBox(icon_node, "-2 -3 30 18");
+    try retained_tree.setNumberProp(icon_node, "iconStroke", 1.5);
+    try retained_tree.setNumberProp(icon_node, "width", 48);
+    try retained_tree.setNumberProp(icon_node, "height", 24);
+    try retained_tree.setTextColor(icon_node, native_sdk.canvas.Color.rgb8(251, 191, 36));
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, icon_node, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.icon, built.root.kind);
+    try std.testing.expectEqual(@as(f32, 48), built.root.frame.width);
+    try std.testing.expectEqual(@as(f32, 24), built.root.frame.height);
+    try std.testing.expectEqual(@as(usize, 1), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .icon_path => |path| {
+            try std.testing.expectEqual(native_sdk.geometry.RectF.init(-2, -3, 30, 18), path.view_box);
+            try std.testing.expectEqual(@as(f32, 1.5), path.stroke_width);
+            try std.testing.expectEqual(@as(usize, 4), path.elements.len);
+            try std.testing.expectEqual(native_sdk.canvas.PathVerb.cubic_to, path.elements[2].verb);
+            try std.testing.expectEqual(native_sdk.geometry.PointF.init(9, 10), path.elements[2].points[2]);
+        },
         else => return error.TestExpectedEqual,
     }
 }

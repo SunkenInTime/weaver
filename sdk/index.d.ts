@@ -1,24 +1,5 @@
 export type WidgetChild = JSX.Element | string | number | null | undefined | false;
 
-export type IconName =
-  | "activity" | "alarm-clock" | "album" | "archive"
-  | "arrow-down" | "arrow-left" | "arrow-right" | "arrow-up"
-  | "badge-alert" | "battery" | "bell" | "bluetooth" | "bookmark"
-  | "calendar" | "camera" | "cast" | "check" | "check-circle"
-  | "chevron-down" | "chevron-left" | "chevron-right" | "chevron-up"
-  | "circle" | "clock" | "cloud" | "download" | "external-link" | "eye"
-  | "file" | "folder" | "gauge" | "headphones" | "heart" | "home"
-  | "image" | "info" | "layers" | "link" | "list" | "lock" | "mail"
-  | "map-pin" | "maximize" | "menu" | "message-circle" | "mic"
-  | "minimize" | "monitor" | "moon" | "more-horizontal" | "more-vertical"
-  | "music" | "pause" | "play" | "plus" | "power" | "radio"
-  | "refresh-cw" | "repeat" | "search" | "settings" | "share" | "shuffle"
-  | "skip-back" | "skip-forward" | "smartphone" | "speaker" | "square"
-  | "star" | "sun" | "trash-2" | "triangle" | "upload" | "user"
-  | "volume-1" | "volume-2" | "volume-x" | "wifi" | "x";
-
-export const iconNames: readonly IconName[];
-
 export interface WidgetConfig {
   name: string;
   size: [width: number, height: number];
@@ -119,12 +100,16 @@ declare global {
       children?: string | number | (string | number)[];
     }
 
+    type IconProps =
+      | { class?: string; name: string; d?: never; viewBox?: never; stroke?: never }
+      | { class?: string; d: string; viewBox?: string; stroke?: number; name?: never };
+
     interface IntrinsicElements {
       column: BoxProps;
       row: BoxProps;
       panel: BoxProps;
       text: TextProps;
-      icon: { class?: string; name: IconName };
+      icon: IconProps;
       image: BoxProps & { src: string };
       button: BoxProps & { onPress: () => void };
       slider: BoxProps & { value: number; max: number; onChange: (value: number) => void };

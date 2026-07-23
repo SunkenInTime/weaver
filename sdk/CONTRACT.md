@@ -101,7 +101,7 @@ Evaluation failure leaves the prior context, window, and state running; window-c
 | `<row>` | yes | — |
 | `<panel>` | yes | — (a styled box; column layout) |
 | `<text>` | yes | — (children: strings/numbers only) |
-| `<icon>` | yes | `name` (curated Lucide name; no children) |
+| `<icon>` | yes | exactly one of literal `name` or literal `d`; custom paths also accept `viewBox`/`stroke`; no children |
 | `<image>` | check-error "arrives in M2" | `src` |
 | `<button>` | check-error "arrives in M2" | `onPress` |
 | `<slider>` | check-error "arrives in M2" | `value` `max` `onChange` |
@@ -185,18 +185,26 @@ one face.
 
 ### Icons
 
-`<icon name="play" class="text-xl text-white w-6" />` lowers to a native text
-node using Weaver's vendored Lucide font. `text-*` controls glyph size and
-color; `w-*`/`h-*` use the ordinary retained text-node sizing path. Icons do
-not accept children.
+`<icon name="play" class="w-6 h-6 text-white" />` resolves at bundle time
+against the complete pinned `lucide-static` catalog. Unknown names are check
+errors with a nearest-name fix-it over the full set. Only referenced geometry
+is embedded in the widget bundle. Named icons use Lucide's 24-unit viewBox,
+2-unit stroke, round caps/joins, and the node's text color (`currentColor`).
 
-The SDK freezes 79 common widget/media/navigation/status Lucide names in
-`iconNames`. `weaver check` requires a literal name and returns the nearest
-supported name as a fix-it. The upstream 843,668-byte font exceeds the Native
-widget face cap, so Weaver ships the explicit 26,768-byte subset and its
-Lucide/Feather license. A widget using `<icon>` reserves one of the two
-registered-font slots; it may therefore bundle at most one additional custom
-face. Widgets without icons retain both custom slots.
+`<icon d="M 9 5 L 21 12 L 9 19 Z" />` authors a filled custom path.
+`viewBox` defaults to `"0 0 24 24"`; `stroke={2}` switches custom geometry
+from fill to a round-capped/round-joined stroke of that width. `name` and `d`
+are mutually exclusive and one is required. All authored SVG commands are
+normalized during check/bundle to explicit absolute M/L/C/Z: relative
+commands, H/V, Q/T, S, and A are expanded before Native sees the path.
+Normalized data is capped at 8192 UTF-8 bytes per icon node.
+
+An icon is a normal geometry box: 24x24 logical pixels by default, with
+`w-*`/`h-*` scaling the viewBox contain-style and centering it in the box.
+It has no text baseline or glyph metrics; `text-*` color utilities color it,
+while text-size utilities do not size it. Icons consume no registered font
+face, so custom-font users retain both widget-profile slots. Weaver bundles
+the Lucide/Feather license beside bundles containing named Lucide geometry.
 
 ## CLI
 

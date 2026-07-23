@@ -1,9 +1,8 @@
 import { compileClass, type ClassProps } from "./class-compiler.js";
-import { ICON_FONT_FAMILY, iconGlyph } from "./icons.js";
 
 export type WidgetChild = VNode | string | number | null | undefined | false;
 export type Component = () => VNode;
-export type NodeType = "column" | "row" | "panel" | "text" | "button" | "slider" | "image" | "canvas";
+export type NodeType = "column" | "row" | "panel" | "text" | "icon" | "button" | "slider" | "image" | "canvas";
 export type ProviderName = "time" | "cpu" | "memory" | "audio" | "media";
 
 export interface WidgetConfig {
@@ -62,7 +61,7 @@ interface VNode {
   readonly key?: string | number;
 }
 
-type ElementType = VNode["type"] | "icon";
+type ElementType = VNode["type"];
 
 interface HostInstance {
   kind: "host";
@@ -80,6 +79,9 @@ interface HostElementProps {
   value?: number;
   max?: number;
   src?: string;
+  iconPath?: string;
+  iconViewBox?: string;
+  iconStroke?: number;
   onFrame?: (ctx: CanvasCtx, frame: CanvasFrame) => void;
   fps?: number;
 }
@@ -146,9 +148,11 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
   const resolvedChildren = flatten(children.length > 0 ? children : propChildren === undefined ? [] : [propChildren]);
   if (type === "icon") {
     if (resolvedChildren.some(isRenderable)) throw new Error("<icon> does not accept children");
-    if (typeof source.name !== "string" || source.name.length === 0) throw new Error("<icon> requires a name");
-    const iconClass = `${typeof source.class === "string" ? source.class : ""} font-[${ICON_FONT_FAMILY}]`.trim();
-    return h("text", { ...source, class: iconClass }, iconGlyph(source.name));
+    if (typeof source.iconPath !== "string" || source.iconPath.length === 0 ||
+        typeof source.iconViewBox !== "string" || typeof source.iconStroke !== "number") {
+      throw new Error("<icon> must be lowered to path data by weaver bundle");
+    }
+    source.class = `w-[24px] h-[24px] ${typeof source.class === "string" ? source.class : ""}`.trim();
   }
   return {
     __weaverElement: true,
@@ -463,6 +467,13 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
       throw new Error("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path");
     }
     next.src = props.src;
+  } else if (instance.type === "icon") {
+    if (typeof props.iconPath !== "string" || props.iconPath.length === 0) throw new Error("<icon> requires lowered iconPath");
+    if (typeof props.iconViewBox !== "string" || props.iconViewBox.length === 0) throw new Error("<icon> requires lowered iconViewBox");
+    if (typeof props.iconStroke !== "number" || !Number.isFinite(props.iconStroke) || props.iconStroke < 0) throw new Error("<icon> iconStroke must be non-negative");
+    next.iconPath = props.iconPath;
+    next.iconViewBox = props.iconViewBox;
+    next.iconStroke = props.iconStroke;
   } else if (instance.type === "canvas") {
     if (typeof props.onFrame !== "function") throw new Error("<canvas> requires onFrame={(ctx, frame) => ...}");
     if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps < 0)) {
@@ -476,6 +487,9 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (!Object.is(previous.value, next.value) && next.value !== undefined) native.setProp(instance.id, "value", next.value);
   if (!Object.is(previous.max, next.max) && next.max !== undefined) native.setProp(instance.id, "max", next.max);
   if (!Object.is(previous.src, next.src) && next.src !== undefined) native.setProp(instance.id, "source", next.src);
+  if (!Object.is(previous.iconPath, next.iconPath) && next.iconPath !== undefined) native.setProp(instance.id, "iconPath", next.iconPath);
+  if (!Object.is(previous.iconViewBox, next.iconViewBox) && next.iconViewBox !== undefined) native.setProp(instance.id, "iconViewBox", next.iconViewBox);
+  if (!Object.is(previous.iconStroke, next.iconStroke) && next.iconStroke !== undefined) native.setProp(instance.id, "iconStroke", next.iconStroke);
   instance.elementProps = next;
   if (instance.type === "canvas" && next.onFrame) {
     updateCanvasBinding(instance.id, next.onFrame, next.fps, instance.props.width ?? 0, instance.props.height ?? 0);
