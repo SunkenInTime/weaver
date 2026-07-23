@@ -64,11 +64,21 @@ npm test, typecheck, Windows-flag runtime tests, and release audit; the audit
 sweep passes all 13 Weaver heads. Installed Noro advanced `0.000 ms`
 TotalProcessorTime over `60.011 s` after a 129-second settle.
 
-The first PR08 Apple-silicon session run caught one icon-free regression:
-the onLoad hook reparsed/reprinted Clock even though the module contained no
-icon, and its provider tick overflowed during the hot-swap smoke. PR08 now
-returns icon-free TSX byte-for-byte before transformation, with a source
-ratchet in the Node suite; PR09-PR13 were restacked again from that fix.
+The first PR08 Apple-silicon session run caught a Clock provider stack
+overflow. Returning icon-free TSX byte-for-byte was retained as a useful
+no-op ratchet, but a second session failure proved it was not the cause. The
+real defect was an inline 8 KiB `icon_path` array on every Weaver retained
+node, inflating the 128-node tree by roughly 1 MiB and exhausting the smaller
+macOS callback stack. PR08 now heap-owns that bounded string only for icon
+nodes and frees it on replacement, removal, hot-swap failure/move, and
+teardown. A node-size ratchet prevents the inline buffer from returning.
+Windows Clock provider ticks plus a preserved-state hot swap pass with no
+exception; PR09-PR13 were restacked again from this lowest fix.
+
+Final path-icon heads before the CI ledger commit are Weaver PR08 `b26e362`,
+PR09 `3e85fc6`, PR10 `c1ecb1c`, PR11 `8b76dfa`, PR12 `9c27d23`, and
+PR13 `60c6976`; Native N5-N8 are `31d5710b`, `4981f66f`, `de432244`, and
+`85f5dbe5`.
 
 ## Independent-review repairs
 
