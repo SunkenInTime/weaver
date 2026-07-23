@@ -42,9 +42,10 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
 | 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `619b0ec` | rides N5 `e1218fab` | complete, pushed, draft PR open |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `92f101c` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `157c57b9` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `a0d567b` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `c40a351f` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `86d12e3` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `8d2b1cf4` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30), review/capture head `128983d` plus this final CI-ledger update | rides N8 `8d2b1cf4` | complete, pushed, draft PR open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `42682f0` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `64b89cf4` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `fc7353a` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `98c943e3` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `c065458` | rides N8 `98c943e3` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `bb65795` plus final evidence/CI ledger | rides N8 `98c943e3` | complete, pushed, draft PR open; final CI green |
 
 ## Completed gates
 
@@ -192,6 +193,54 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `RESOLVED (unrelated transient CI)`: PR21 Intel headless initially failed twice in the unchanged `network.test.macOS HTTPS transport preserves policy, bounds, timeout, trust, and cancellation` setup path because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. The third attempt passed the complete Intel job without a styling-code or test change; PR21's Apple-silicon headless and session jobs also pass.
 - `RESOLVED (unrelated transient CI)`: PR28 Intel headless initially failed the same unchanged loopback HTTPS setup because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. A failed-job rerun on the identical `a0d567b` head passed the previously failing network step, every downstream Native profile step, and the dependent Apple-silicon session; no code or test changed.
 
+## Noro fidelity follow-up
+
+- Native N7 root cause: `src/primitives/canvas/render.zig:460-489` replaced the
+  active rounded radius whenever a nested image emitter pushed its own
+  equal-bounds square clip. The screen stack and cover therefore shared the
+  correct offset rectangle, but the child erased the ancestor's rounded mask.
+  The equal-rectangle branch at lines 471-477 now intersects radii
+  corner-by-corner with `maxRadii`; the exact padded fixed-height cover test is
+  at `src/primitives/canvas/widget_builtin_tests.zig:364`.
+- Native N7 idle repair: the Win32 host unconditionally armed a repeating
+  16ms top-level `WM_TIMER` after window creation. That obsolete pump was the
+  only continuing main-thread wake; the explicit `kRequestFrameMessage` and
+  one-shot GPU emission scheduler already provide demand-driven delivery.
+  `src/platform/windows/root.zig:1535` now ratchets that the repeating timer is
+  absent while both demand paths remain.
+- Native N7 gates at `64b89cf4`: stock `zig build test` PASS and
+  `zig build test -Dwidget-profile=true` PASS. Native N8 at `98c943e3`:
+  stock and widget-profile suites PASS.
+- Weaver restack gates: PR10 `42682f0` PASS 47/47 Node tests, typecheck,
+  runtime Zig tests, and release audit; PR11 `fc7353a` PASS 50/50 plus the
+  same gates; PR12 `c065458` PASS 52/52 plus the same gates; PR13
+  `bb65795` PASS 52/52, typecheck, CLI build, example TypeScript, check,
+  bundle, exact-pin release audit, and runtime Zig tests.
+- Release audit PASS across all 13 Weaver heads at exact pins:
+  `0e16af24`, `d6389750`, `d903766c`, `d903766c`, `aa6eacd5`,
+  `eb6416df`, `eb6416df`, `eb6416df`, `5cfe3e82`, `64b89cf4`,
+  `98c943e3`, `98c943e3`, `98c943e3`.
+- Mandatory physical capture:
+  `E:\tmp\weaver-noro-pr13\noro-shell-visual-gate-final.png`, reopened with
+  the image viewer at original resolution. PASS: art fills the rounded screen
+  with no top/right bleed; 14px dark rim visible on all sides; overlay reads
+  `00:06 / LET IT GO / 03:58 AM` in Cozette pixel glyphs; record dot is
+  top-right inside the screen; 5% grille is subtle; all three Lucide icons are
+  centered.
+- Installed-mode idle acceptance after a two-minute settle: 0.000ms process
+  CPU over 59.943s; confirmation 0.000ms over 60.002s. Dev registration was
+  absent. The run-owned installation and PID 22008 were removed afterward.
+- Final affected Weaver CI: PR28 run `29983968548`, PR29 run `29983969846`,
+  PR30 run `29983972078`, and PR31 run `29984071014` all PASS the Windows
+  gate, Intel headless, Apple-silicon headless, and Apple-silicon session
+  jobs. Native PR13/PR14 have no configured checks; their full local stock and
+  widget-profile suites pass at the exact pushed heads.
+- Assumption: the pre-existing untracked `examples/noro-shell.weave` is a
+  generated isolation archive, not review source (no other `.weave` archive is
+  tracked). It was preserved as
+  `E:\tmp\weaver-noro-pr13\noro-shell-start.weave`; the authored source,
+  font, and assets are committed in PR31.
+
 ## Cleanup state
 
 - Work is confined to `E:\Projects\weaver-styling-run` and its submodule.
@@ -210,4 +259,5 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## Next executable task
 
-Review the two green draft stacks bottom-up, starting with Native N1 / Weaver PR01; no implementation or verification task remains.
+Review the two green draft stacks bottom-up, starting with Native N1 / Weaver
+PR01; no implementation or verification task remains.
