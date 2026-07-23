@@ -92,8 +92,23 @@ function loweredAttributes(sourceFile: ts.SourceFile, attributes: ts.JsxAttribut
   ]);
 }
 
+function sourceContainsIcon(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) &&
+        node.tagName.getText(sourceFile) === "icon") {
+      found = true;
+      return;
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
 export function lowerIconSource(sourcePath: string, source: string): string {
   const sourceFile = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  if (!sourceContainsIcon(sourceFile)) return source;
   const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => {
     const visit: ts.Visitor = (node) => {
       if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(sourceFile) === "icon") {
