@@ -31,9 +31,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ### Path-icon completion evidence
 
-- Final implementation heads before this evidence commit: Weaver PR08
-  `56b163df`, PR09 `34197d01`, PR10 `2c3efbae`, PR11 `5f7fb1ba`, PR12
-  `4b81d8a5`, PR13 `d01b7117`; Native N5 `31d5710b`, N6 `4981f66f`,
+- Final post-CI-repair heads before this evidence follow-up: Weaver PR08
+  `b26fee23`, PR09 `983a10ea`, PR10 `cd0843b7`, PR11 `76a586c9`, PR12
+  `89b68e8c`, PR13 `249aab8a`; Native N5 `31d5710b`, N6 `4981f66f`,
   N7 `de432244`, N8 `85f5dbe5`.
 - Native N5-N8 each PASS full stock `zig build test` and full
   `zig build test -Dwidget-profile=true` at the exact pushed head. The first
@@ -42,8 +42,14 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   N5 suites pass.
 - Weaver PR08-PR13 each PASS `npm test`, `npm run typecheck`, runtime
   `zig build test -Dweb-layer=exclude -Dtrace=off`, and `npm run
-  audit:release`. Test counts are 44/46/47/50/52/52. The release-audit sweep
+  audit:release`. Test counts are 45/47/48/51/53/53. The release-audit sweep
   also PASSes all 13 Weaver heads at their exact historical/restacked pins.
+- The first PR08 Apple-silicon session rollup exposed a real icon-free
+  regression: the icon onLoad hook reparsed/reprinted Clock even though it had
+  no icon, and provider ticks overflowed during the hot-swap smoke. PR08
+  `b26fee23` now returns the original source byte-for-byte before transformation
+  when a TSX module has no `<icon>`; the regression ratchet is in the Node
+  suite. Descendants were restacked again from that lowest fix.
 - Noro visual gate PASS, opened at original resolution:
   `E:\tmp\weaver-path-icons-20260723\noro-path-icons-visual-gate.png`.
   The exact upstream solid prev/pause/next shapes are centered at 28x28, the
@@ -73,12 +79,12 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
 | 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `56b163df` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `34197d01` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `2c3efbae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `5f7fb1ba` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `4b81d8a5` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `d01b7117` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
+| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26fee23` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `983a10ea` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `cd0843b7` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `76a586c9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `89b68e8c` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `8a58cc0` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
 
 ## Completed gates
 
