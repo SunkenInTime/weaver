@@ -43,19 +43,19 @@ export default widget({
     <row class="gap-3 justify-center items-center">
       <button
         onPress={noop}
-        class="size-14 p-3 rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
+        class="size-14 p-3 items-center justify-center rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
       >
         <icon name="skip-back" class="size-full" />
       </button>
       <button
         onPress={noop}
-        class="size-16 p-4 rounded-full border-2 border-amber-500 bg-amber-400 text-stone-950 shadow-inner hover:bg-amber-300 hover:border-amber-200 pressed:bg-amber-700 pressed:text-white pressed:border-white pressed:opacity-70"
+        class="size-16 p-4 items-center justify-center rounded-full border-2 border-amber-500 bg-amber-400 text-stone-950 shadow-inner hover:bg-amber-300 hover:border-amber-200 pressed:bg-amber-700 pressed:text-white pressed:border-white pressed:opacity-70"
       >
         <icon name="play" class="size-full" />
       </button>
       <button
         onPress={noop}
-        class="size-14 p-3 rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
+        class="size-14 p-3 items-center justify-center rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
       >
         <icon name="skip-forward" class="size-full" />
       </button>
