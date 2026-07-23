@@ -970,6 +970,51 @@ test "attached effects combine builder metadata with box and text shadows" {
     }
 }
 
+test "showcase headline keeps exact registered face through bold and text shadow" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const text_node = try retained_tree.createNode(.text);
+    try retained_tree.setText(text_node, "SECOND NATURE");
+    try retained_tree.setNumberProp(text_node, "fontScale", 30.0 / 14.0);
+    try retained_tree.setNumberProp(text_node, "lineHeight", 1.2);
+    try retained_tree.setNumberProp(text_node, "letterSpacing", 0.75);
+    try retained_tree.setFontFamily(text_node, "GeistPixel-Square");
+    try retained_tree.setFontWeight(text_node, "bold");
+    try retained_tree.setTextShadow(text_node, .{
+        .offset = .{ .dx = 0, .dy = 8 },
+        .blur = 10,
+        .color = native_sdk.canvas.Color.rgba8(0, 0, 0, 128),
+    });
+    const fonts = [_]manifest_mod.Font{.{
+        .id = 65,
+        .name = "GeistPixel-Square.ttf",
+        .stem = "GeistPixel-Square",
+        .family = "GeistPixel",
+        .weight = .regular,
+        .file = "assets/GeistPixel-Square.ttf",
+    }};
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &fonts, text_node, true));
+    try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .text_style => |style| {
+            try std.testing.expectEqual(@as(f32, 36), style.line_height);
+            try std.testing.expectEqual(@as(f32, 0.75), style.letter_spacing);
+        },
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 10), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[2]) {
+        .text_font => |font_id| try std.testing.expectEqual(@as(native_sdk.canvas.FontId, 65), font_id),
+        else => return error.TestExpectedEqual,
+    }
+}
+
 test "bundled font resolution honors exact stems families and nearest weights" {
     var tree: tree_mod.Tree = .{};
     const id = try tree.createNode(.text);
