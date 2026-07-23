@@ -103,10 +103,24 @@ native pipe was unavailable on this host. macOS physical pixels remain
 `UNVERIFIED (needs Mac)`; headless CI is compile/test evidence, not a physical
 pixel claim.
 
-Independent-review re-verification: PASS. The overlay row now spans the cover
-and places `03:18 / 05:42` at the far right. The live bundle registers
-`GeistPixel-Square.ttf` as font id 65; exact-stem resolution selects that face,
-and `SECOND NATURE` renders through `font-[GeistPixel-Square]` in the capture.
+Independent-review re-verification: PASS. The overlay row spans the cover and
+places `03:18 / 05:42` at the far right. The earlier capture-only font claim
+was insufficient: combined rare-command counts were inferred as `u1`, so the
+headline's text-shadow + registered-font pair could wrap in ReleaseFast. The
+final fix widens the count, and the exact Weaver projection now retains line
+height 36, tracking 0.75, shadow blur 10, and font id 65. Native's deterministic
+reference renderer draws `SECOND NATURE` at 30 px with the same bold/shadow
+metadata and finds 10,625 differing pixels between GeistPixel-Square and the
+built-in bold sans. The final live capture visibly has the square pixel glyphs.
+
+The final live follow-up also visibly contains `night-bloom.jpg`; its log has
+no image decode/register error. The WIC path now discards a failed one-shot
+RGBA decoder graph and retries from a fresh on-load decoder through native
+BGRA conversion, with a production decoder test using a real baseline JPEG at
+the exact stock decoded-image budget. With the event-driven dev source watcher
+alive, the static ReleaseFast widget's `TotalProcessorTime` advanced 15.625 ms
+over 60,006.731 ms: one Windows scheduler/accounting quantum and no 100 ms
+polling signature.
 
 ## Contract and verification
 
