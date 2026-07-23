@@ -308,3 +308,24 @@ PR pins exact either way.
 - Final: `docs/styling-breadth-results.md` includes the A/B idle-CPU and
   memory numbers for the showcase widget vs. `examples/now-playing` on
   master, and screenshots of the showcase.
+
+### The visual gate (added 2026-07-22, binding for all subsequent runs)
+
+Green tests are not visual proof: three defects in the first styling run
+(missing album art, a wrong font recorded as correct, a misaligned overlay)
+passed every automated gate and were caught only by looking at the screen.
+Therefore every PR whose change renders pixels must, inside the run's own
+loop:
+
+1. Launch the PR's example under `weaver dev` and let it settle.
+2. Minimize other windows (widgets live on the desktop layer), capture the
+   widget's actual screen region to a PNG, restore windows.
+3. **Open and view the capture** (view_image or equivalent) — a screenshot
+   that was saved but never looked at is not evidence.
+4. Write an explicit visual checklist for the PR (each named element:
+   present, positioned, styled as specified — fonts identified by their
+   distinctive letterforms, not assumed) and record PASS/FAIL per item in
+   the PR evidence with the capture path.
+5. Treat any FAIL, or a black/empty/occluded capture, as a blocking defect
+   equal to a failing test: fix, re-capture, re-verify. Never record a
+   visual claim that the capture does not show.
