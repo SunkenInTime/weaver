@@ -80,6 +80,14 @@ PR09 `3e85fc6`, PR10 `c1ecb1c`, PR11 `8b76dfa`, PR12 `9c27d23`, and
 PR13 `60c6976`; Native N5-N8 are `31d5710b`, `4981f66f`, `de432244`, and
 `85f5dbe5`.
 
+Final pre-ledger CI is green on every Weaver path-icon head across the Windows
+gate, Intel headless, Apple-silicon headless, and Apple-silicon session:
+PR08 run `30039910723`, PR09 `30039923141`, PR10 `30039925329`, PR11
+`30039927921`, PR12 `30039931561`, and PR13 `30040382089`. The PR08 session
+that originally reproduced the Clock overflow passes on the rare-storage fix.
+Native PR11-14 have no configured checks; their exact pushed heads pass the
+full local stock and widget-profile suites.
+
 ## Independent-review repairs
 
 | Finding | Lowest layer | Final result |
