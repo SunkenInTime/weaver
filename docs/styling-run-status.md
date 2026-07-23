@@ -85,13 +85,13 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `af4dbf0` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
-| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `2a78bbc` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
-| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `0a8dd30` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
-| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `661f4bd` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
-| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
-| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `5ca71974` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `59ab68b1` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
+| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `4bdeaa17` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `954d86dc` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `75a91fd2` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `8d1d8042` | pre-path N5 pin `eb6416df` | complete, pushed, draft PR open |
+| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `aaa1353a` | rides pre-path N5 `eb6416df` | complete, pushed, draft PR open |
 | 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
