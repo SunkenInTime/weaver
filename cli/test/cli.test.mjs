@@ -33,6 +33,10 @@ const devReloadBundle = await build({
   write: false,
 });
 const devReload = await import(`data:text/javascript;base64,${Buffer.from(devReloadBundle.outputFiles[0].contents).toString("base64")}`);
+test("icon lowering leaves icon-free widget sources byte-exact", () => {
+  const transformSource = readFileSync(fileURLToPath(new URL("../src/icon-transform.ts", import.meta.url)), "utf8");
+  assert.match(transformSource, /if \(!sourceContainsIcon\(sourceFile\)\) return source;/);
+});
 
 test("dev hot reload signals one loopback event instead of polling", { timeout: 5000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-dev-reload-"));
