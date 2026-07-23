@@ -74,6 +74,11 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Installed Noro idle gate PASS: after a 129-second settle, PID 32920 advanced
   `0.000 ms` TotalProcessorTime over `60.011 s` (62.5 ms before and after,
   two threads). The isolated installation was uninstalled and its host stopped.
+- Final post-storage-repair installed rerun PASS: after a 141-second settle,
+  PID 5408 advanced `15.625 ms` over `60.003 s` (125.000 ms to 140.625 ms,
+  five threads), exactly one Windows accounting quantum and below the
+  `<=30 ms` acceptance bound. The isolated installation was uninstalled and
+  its host stopped.
 - Final pre-ledger CI rollups PASS all four jobs (Windows gate, Intel
   headless, Apple-silicon headless, Apple-silicon session): PR08 run
   `30039910723`, PR09 `30039923141`, PR10 `30039925329`, PR11
