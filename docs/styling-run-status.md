@@ -22,6 +22,10 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   raised from 256 to 2,048 so one legal 8 KiB normalized icon path can always
   be retained without growing every `Widget`; per-node normalized data remains
   independently capped at 8 KiB by `weaver check`.
+- Assumption: Weaver's retained tree heap-owns the rare normalized string per
+  icon node. The 128-node table contains only a slice, not an inline 8 KiB
+  array; replacement, subtree removal, rejected hot swap, successful hot-swap
+  move, and process teardown all release their owned storage.
 - Assumption: Lucide named icons always use the upstream `0 0 24 24` view box,
   two-unit round stroke, and current text color. Raw `d` icons default to fill;
   a positive `stroke` prop selects round stroked rendering.
@@ -31,9 +35,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ### Path-icon completion evidence
 
-- Final post-CI-repair heads before this evidence follow-up: Weaver PR08
-  `b26fee23`, PR09 `983a10ea`, PR10 `cd0843b7`, PR11 `76a586c9`, PR12
-  `89b68e8c`, PR13 `249aab8a`; Native N5 `31d5710b`, N6 `4981f66f`,
+- Final post-repair heads before this evidence follow-up: Weaver PR08
+  `b26e362`, PR09 `3e85fc6`, PR10 `c1ecb1c`, PR11 `8b76dfa`, PR12
+  `9c27d23`, PR13 `60c6976`; Native N5 `31d5710b`, N6 `4981f66f`,
   N7 `de432244`, N8 `85f5dbe5`.
 - Native N5-N8 each PASS full stock `zig build test` and full
   `zig build test -Dwidget-profile=true` at the exact pushed head. The first
@@ -44,12 +48,16 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   `zig build test -Dweb-layer=exclude -Dtrace=off`, and `npm run
   audit:release`. Test counts are 45/47/48/51/53/53. The release-audit sweep
   also PASSes all 13 Weaver heads at their exact historical/restacked pins.
-- The first PR08 Apple-silicon session rollup exposed a real icon-free
-  regression: the icon onLoad hook reparsed/reprinted Clock even though it had
-  no icon, and provider ticks overflowed during the hot-swap smoke. PR08
-  `b26fee23` now returns the original source byte-for-byte before transformation
-  when a TSX module has no `<icon>`; the regression ratchet is in the Node
-  suite. Descendants were restacked again from that lowest fix.
+- The first PR08 Apple-silicon session rollup exposed a Clock provider stack
+  overflow. Returning icon-free source byte-for-byte at `b26fee23` was a valid
+  no-op ratchet but did not cure the repeated session failure. The true cause
+  was Weaver's retained `Node` carrying an inline 8 KiB `icon_path` array:
+  128 nodes inflated every `Tree` by roughly 1 MiB and exhausted the smaller
+  macOS callback stack. PR08 `7c8dd9f` moves rare strings to bounded heap
+  storage with complete ownership cleanup; `b26e362` adds a stack-wide node
+  size ratchet. A Windows Clock provider ran for 39 seconds and applied a
+  preserved-state hot swap with no exception before the complete local matrix
+  passed on every descendant.
 - Noro visual gate PASS, opened at original resolution:
   `E:\tmp\weaver-path-icons-20260723\noro-path-icons-visual-gate.png`.
   The exact upstream solid prev/pause/next shapes are centered at 28x28, the
@@ -79,12 +87,12 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
 | 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26fee23` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `983a10ea` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `cd0843b7` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `76a586c9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `89b68e8c` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `8a58cc0` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
+| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `8b76dfa` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `9c27d23` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), exact-path implementation `198a848` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
 
 ## Completed gates
 
@@ -154,9 +162,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 20. Root-adjacent `.ttf` and `.otf` are discovered as font assets. The bounded renderer requires `glyf`/`loca`/`hmtx` plus Unicode cmap format 4; OTF/CFF is rejected with an explicit TrueType-outline conversion instruction because accepting it would make reference and macOS rendering disagree.
 21. Exact `font-[file-stem]` always selects that face. A terminal `-Light/-Regular/-Medium/-Semibold/-Bold` (or underscore) additionally creates a family alias, and the closest registered weight wins. With one custom face every requested weight deliberately degrades to that face; built-in sans keeps Native's three real rungs and mono its single face.
 22. Font files and adjacent licenses reuse the existing ordinary-source `.weave` and `dist` asset paths; no opaque font sub-format or duplicate archive channel is introduced.
-23. The binding Lucide source is `lucide-static@1.25.0` (ISC; npm tarball SHA-1 `d44930d6e5815faace63d9fd9c46c0cadabaaae8`). Its 843668-byte font exceeds the 512 KiB face cap, so PR08 freezes an explicit alphabetized subset of 79 common widget/media/navigation/status names; the generated face is 26768 bytes and includes the upstream Lucide/Feather license.
-24. Because PR08 is not authorized to change Native and rides PR07's two-face registry, a widget containing `<icon>` reserves id 64 for `WeaverLucide` and may bundle one custom face at id 65. Widgets with no icon retain both custom-face slots.
-25. Icon names must be literal JSX attribute strings (including literal string expressions) so `weaver check` can prove membership and issue a deterministic nearest-name fix-it. Dynamic names are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
+23. The binding Lucide source is `lucide-static@1.26.0` (ISC; 1,749 names; npm tarball SHA-1 `cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d`; integrity `sha512-6yCpa2ONICjlE19BuneIi75ASd9cCZhqJlzhAlQBi+99m2aZd2cNzxFVbDgPu7JLBZR2uDYO/EpLYtnhGw5Niw==`). PR08 resolves names to SVG geometry at bundle time and embeds only paths used by the widget. The Lucide/Feather license remains; the TTF subset and codepoint map are deleted.
+24. Path icons reserve no font face. Native's two registered-face slots remain available to custom fonts. Normalized icon data uses its own 8 KiB per-node budget and the widget profile permits 2,048 aggregate path elements so one contract-valid icon can always be retained without growing every `Widget`.
+25. Icon names and custom path data must be literal JSX attribute strings (including literal string expressions) so `weaver check` can normalize, budget, prove membership, and issue deterministic full-catalog nearest-name fix-its. Dynamic values are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
 26. The Native render packet can carry one rounded clip per command. Nested clips that contain one another retain the tighter rounded mask; partially overlapping rounded clips preserve their exact rectangular intersection and drop only the unrepresentable corner arcs rather than inventing a lens representation.
 27. Under a non-uniform or rotated affine transform, circular clip radii scale by the smaller finite axis magnitude. This keeps the flattened command mask circular and bounded; an exact elliptical-corner representation would require a broader wire change outside N6.
 28. `<stack>` remains a layout-only overlay primitive, matching Native's stack kind: its own radius shapes `overflow-hidden`, while a visible backdrop/border is authored as the first full-size child `<panel>`. This preserves child-order painting and avoids silently changing stack identity into a panel.
@@ -211,7 +219,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `BLOCKED (unrelated Native fast gate)`: N4 fast gate reproduces the same five `examples-native` exhaustive-switch failures for the pre-existing `window_frame` event. The N4 changed canvas tests, validate, frontend, and mobile groups pass; macOS-only CEF link validation is skipped on Windows.
 - `UNVERIFIED (needs Mac)`: N5 AppKit v5 packet decoding, inverse-path inset clipping, and `NSShadow` text pixels. Evidence available now: packet/prose ratchets, exact platform-neutral tests, static validation, and both Windows full suites pass; Objective-C compilation and physical pixels await macOS CI/hardware.
 - `UNVERIFIED (needs Mac)`: PR07 registered-font selection through CoreText/AppKit. Evidence available now: SFNT validation, bounded registration, exact runtime resolution/projection tests, Native stock/profile suites, and the Windows live example pass; macOS compilation and physical glyph pixels await CI/hardware.
-- `UNVERIFIED (needs Mac)`: PR08 Lucide subset selection and physical glyph pixels through CoreText/AppKit. Evidence available now: exact name/codepoint lowering, copied-asset equality, bounded registration tests, Native stock/profile suites, and the Windows live example pass; macOS physical output awaits CI/hardware.
+- `UNVERIFIED (needs Mac)`: PR08 physical vector-path pixels through AppKit. Evidence available now: full-catalog bundle lowering, strict normalized-path parsing, exact reference pixels, Native stock/profile suites, and both Windows visual examples pass; macOS physical output awaits hardware.
 - `BLOCKED (unrelated Native fast gate)`: N5 fast gate against N4 passes zig-test (34s), validate, frontend examples, and mobile examples (44s), but the same five `examples-native` switches omit pre-existing `window_frame`. Apple-Silicon benchmarks and macOS CEF link are skipped on Windows.
 - `RESOLVED during N5`: the first final full-suite pass found the schema ratchet and macOS decoder prose still naming v4 after the v5 packet change; both were updated and pushed. One intervening Windows run also hit transient `error.Unexpected` while creating an iOS test asset directory; an immediate clean rerun passed in 25.2s.
 - `RESOLVED during PR03`: the first `weaver dev` attempt used a stale runtime after a parallel ReleaseFast build was canceled by the stale-CLI check failure, causing three `unsupported property` crash restarts. An explicit runtime rebuild followed by a fresh 15s smoke produced one startup and no exception/restart. Both outcomes are in PR21 evidence.
