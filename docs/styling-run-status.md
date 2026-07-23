@@ -74,7 +74,12 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Installed Noro idle gate PASS: after a 129-second settle, PID 32920 advanced
   `0.000 ms` TotalProcessorTime over `60.011 s` (62.5 ms before and after,
   two threads). The isolated installation was uninstalled and its host stopped.
-- CI rollups: pending after the final evidence push.
+- Final pre-ledger CI rollups PASS all four jobs (Windows gate, Intel
+  headless, Apple-silicon headless, Apple-silicon session): PR08 run
+  `30039910723`, PR09 `30039923141`, PR10 `30039925329`, PR11
+  `30039927921`, PR12 `30039931561`, PR13 `30040382089`. Native PR11-14
+  expose no configured checks; their exact stock/widget-profile suites pass
+  locally.
 
 ## Stack map
 
@@ -92,7 +97,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
 | 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `8b76dfa` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
 | 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `9c27d23` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), exact-path implementation `198a848` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), exact-path implementation `198a848` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; pre-ledger CI green |
 
 ## Completed gates
 
