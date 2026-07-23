@@ -64,6 +64,12 @@ npm test, typecheck, Windows-flag runtime tests, and release audit; the audit
 sweep passes all 13 Weaver heads. Installed Noro advanced `0.000 ms`
 TotalProcessorTime over `60.011 s` after a 129-second settle.
 
+The first PR08 Apple-silicon session run caught one icon-free regression:
+the onLoad hook reparsed/reprinted Clock even though the module contained no
+icon, and its provider tick overflowed during the hot-swap smoke. PR08 now
+returns icon-free TSX byte-for-byte before transformation, with a source
+ratchet in the Node suite; PR09-PR13 were restacked again from that fix.
+
 ## Independent-review repairs
 
 | Finding | Lowest layer | Final result |
