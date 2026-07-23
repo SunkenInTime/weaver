@@ -157,3 +157,9 @@ dependent Apple-silicon session without a styling-code or test change. Native
 PR7-14 have no configured GitHub checks; focused canvas plus stock and
 widget-profile suites pass locally at every exact pushed head as recorded in
 the run-status ledger. Physical macOS pixels remain `UNVERIFIED (needs Mac)`.
+
+Three-defect follow-up CI: every restacked Weaver PR19-PR30 passed its Windows
+gate, Intel headless, Apple-silicon headless, and Apple-silicon session jobs.
+Native N5-N8 remain without configured GitHub checks and pass the full local
+stock plus widget-profile suites; N5 also passes the exact reference-pixel
+proof and N7 passes the production Windows baseline-JPEG boundary test.

@@ -154,6 +154,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Idle / Weaver PR01: removed the repeating 100 ms dev reload timer. A kernel-blocked loopback listener publishes `.weaver-dev-port`; the event-driven CLI watcher opens it once per successful unchanged-config rebuild and Native `requestFrame` schedules exactly one hot swap. ReleaseFast PID 51452 with watcher PID 46400 consumed 15.625 ms over 60,006.731 ms, one Windows scheduler/accounting quantum.
 - Final local matrix: Weaver PR01-PR12 each pass `npm test`, `npm run typecheck`, runtime `zig build test -Dweb-layer=exclude -Dtrace=off`, and the exact-pin `npm run audit:release`. Native N5-N8 each pass full stock and `-Dwidget-profile=true`; N7's focused Windows JPEG decoder and N5's focused reference-renderer suite pass. The first resumed Native stock invocation failed only because POSIX `test` was absent from PowerShell `PATH`; with Git `usr/bin` restored, the unchanged stock/profile commands pass.
 - Live: cover art visible; overlay time remains right-aligned; headline visibly uses the square pixel face after the combined-metadata fix; no `ImageDecodeFailed`, crash, or restart line appeared.
+- Pushed CI rollup before the final docs-only commit: Weaver PR19-PR30 each passed all four checks (Windows gate, Intel headless, Apple-silicon headless, Apple-silicon session). Native PR7-PR14 expose no configured GitHub checks; their local matrix is the recorded evidence. Exact pushed heads: Weaver `5ca7197/59ab68b/4bdeaa1/954d86d/75a91fd/8d1d804/aaa1353/fa76fbc/8ccabdc/2950151/e368983/7b4cfe2`; Native `0e16af24/d6389750/d903766c/aa6eacd5/eb6416df/5cfe3e82/a9e576a3/b4329804`.
 
 ## UNVERIFIED / BLOCKED
 
@@ -209,4 +210,4 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## Next executable task
 
-Force-with-lease push both restacked draft stacks, update PR bodies, and wait for the new CI rollups.
+Review the two green draft stacks bottom-up, starting with Native N1 / Weaver PR01; no implementation or verification task remains.
