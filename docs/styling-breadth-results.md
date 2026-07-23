@@ -14,12 +14,55 @@ stacks. Weaver is based on `master`; Native is based on `weaver-main`.
 | 05 / N4 | [#23 text pack](https://github.com/SunkenInTime/weaver/pull/23) | [#10 text](https://github.com/SunkenInTime/native/pull/10) |
 | 06 / N5 | [#24 shadows](https://github.com/SunkenInTime/weaver/pull/24) | [#11 shadows and font seam](https://github.com/SunkenInTime/native/pull/11) |
 | 07 | [#25 bundled fonts](https://github.com/SunkenInTime/weaver/pull/25) | rides N5 |
-| 08 | [#26 Lucide icons](https://github.com/SunkenInTime/weaver/pull/26) | rides N5 |
+| 08 / N5 | [#26 path-based icons](https://github.com/SunkenInTime/weaver/pull/26) | [#11 retained path seam](https://github.com/SunkenInTime/native/pull/11) |
 | 09 / N6 | [#27 stack and overflow](https://github.com/SunkenInTime/weaver/pull/27) | [#12 stack and overflow](https://github.com/SunkenInTime/native/pull/12) |
 | 10 / N7 | [#28 image v2](https://github.com/SunkenInTime/weaver/pull/28) | [#13 image v2](https://github.com/SunkenInTime/native/pull/13) |
 | 11 / N8 | [#29 interaction](https://github.com/SunkenInTime/weaver/pull/29) | [#14 interaction](https://github.com/SunkenInTime/native/pull/14) |
 | 12 | [#30 retro player showcase](https://github.com/SunkenInTime/weaver/pull/30) | none |
 | 13 | [#31 Noro shell fidelity showcase](https://github.com/SunkenInTime/weaver/pull/31) | rides repaired N7/N8 |
+
+## Path-icon redesign
+
+PR08 now resolves literal `<icon name>` values against all 1,749 names in
+`lucide-static@1.26.0` and embeds only referenced geometry. Literal custom
+`d` accepts the SVG grammar at bundle time; `svg-pathdata@7.2.0` expands it to
+absolute M/L/C/Z, including Q-to-C and arc-to-C conversion, before Native sees
+it. Unknown full-catalog names get a nearest-name fix-it, and normalized path
+data has an independent 8 KiB per-node cap.
+
+Native N5 retains decoded path elements in the existing rare-command side
+channel, fits/centers a 24-unit view box into the icon box, and emits the
+existing Path display-list command. Named icons use a two-unit round stroke;
+custom icons fill unless `stroke` is positive. Both modes use the node's text
+color. D3D still rejects Path and uses its existing per-command CPU fallback.
+The font subset, codepoint map, reserved face id 64, and TTF asset are deleted,
+so both custom-font slots are available.
+
+The catalog pin is npm tarball SHA-1
+`cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d` with integrity
+`sha512-6yCpa2ONICjlE19BuneIi75ASd9cCZhqJlzhAlQBi+99m2aZd2cNzxFVbDgPu7JLBZR2uDYO/EpLYtnhGw5Niw==`.
+The Lucide/Feather license remains beside bundles that use named geometry.
+
+Noro uses the exact solid shapes from upstream `Player.ini`: previous bar plus
+triangle, play triangle, two pause rectangles, and next triangle plus bar.
+The accepted capture
+`E:\tmp\weaver-path-icons-20260723\noro-path-icons-visual-gate.png` was opened
+at original resolution and compared with the opened authoritative preview
+`E:\tmp\weaver-path-icons-20260723\noro-reference-preview.png`. PASS: solid
+icons are centered and match the reference geometry; the 8.33/37.5 corner
+radii, art, overlays, rim, pixel-font row, record dot, and subtle grille are
+unchanged.
+
+The accepted Styling Icons capture
+`E:\tmp\weaver-path-icons-20260723\styling-icons-visual-gate-final2.png` was
+opened at original resolution. PASS: full-catalog named icons, currentColor,
+custom fill/stroke, and 16/24/32/40 sizes are crisp. An earlier capture was
+rejected because an unrelated desktop widget overlapped its top-right anchor.
+
+All Native N5-N8 stock and widget-profile suites pass. Weaver PR08-PR13 pass
+npm test, typecheck, Windows-flag runtime tests, and release audit; the audit
+sweep passes all 13 Weaver heads. Installed Noro advanced `0.000 ms`
+TotalProcessorTime over `60.011 s` after a 129-second settle.
 
 ## Independent-review repairs
 
