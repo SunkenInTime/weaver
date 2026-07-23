@@ -183,3 +183,8 @@ adding Weaver-owned desktop-widget windowing, capacity, and presentation
 semantics. The general static-TLS problem discovered while profiling the fork
 was reported as [vercel-labs/native#114](https://github.com/vercel-labs/native/issues/114)
 and fixed upstream separately; the Weaver product surface remains in the fork.
+
+## License
+
+Weaver is licensed under the [Apache License 2.0](LICENSE).
+Third-party and vendored components remain subject to their respective licenses.
