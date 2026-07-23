@@ -37,19 +37,19 @@ export default widget({
       <row class="w-full mt-[4px] gap-[6px]">
         <button
           onPress={noop}
-          class="w-[100px] h-[100px] rounded-[8px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
+          class="w-[100px] h-[100px] rounded-[8.33px] rounded-bl-[37.5px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
         >
           <column class="size-full items-center justify-center"><icon name="skip-back" class="text-[28px] text-[#d0d0d0]" /></column>
         </button>
         <button
           onPress={noop}
-          class="w-[100px] h-[100px] rounded-[8px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
+          class="w-[100px] h-[100px] rounded-[8.33px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
         >
           <column class="size-full items-center justify-center"><icon name="pause" class="text-[28px] text-[#d0d0d0]" /></column>
         </button>
         <button
           onPress={noop}
-          class="w-[100px] h-[100px] rounded-[8px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
+          class="w-[100px] h-[100px] rounded-[8.33px] rounded-br-[37.5px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414]"
         >
           <column class="size-full items-center justify-center"><icon name="skip-forward" class="text-[28px] text-[#d0d0d0]" /></column>
         </button>
