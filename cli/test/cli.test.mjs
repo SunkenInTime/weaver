@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 
 const originBundle = await build({
   entryPoints: [fileURLToPath(new URL("../src/origin.ts", import.meta.url))],
@@ -23,6 +24,41 @@ const hostToolsBundle = await build({
   write: false,
 });
 const hostTools = await import(`data:text/javascript;base64,${Buffer.from(hostToolsBundle.outputFiles[0].contents).toString("base64")}`);
+const devReloadBundle = await build({
+  entryPoints: [fileURLToPath(new URL("../src/dev-reload.ts", import.meta.url))],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  write: false,
+});
+const devReload = await import(`data:text/javascript;base64,${Buffer.from(devReloadBundle.outputFiles[0].contents).toString("base64")}`);
+
+test("dev hot reload signals one loopback event instead of polling", async () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-dev-reload-"));
+  const dist = join(root, "dist");
+  mkdirSync(dist);
+  let notifications = 0;
+  const server = createServer((socket) => {
+    notifications += 1;
+    socket.end();
+  });
+  await new Promise((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolvePromise);
+  });
+  try {
+    const address = server.address();
+    assert.notEqual(typeof address, "string");
+    assert.ok(address);
+    writeFileSync(join(dist, ".weaver-dev-port"), `${address.port}\n`);
+    await devReload.signalDevReload(root, 1);
+    await new Promise((resolvePromise) => setImmediate(resolvePromise));
+    assert.equal(notifications, 1);
+  } finally {
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("CLI failures are emitted as one actionable block", () => {
   const result = spawnSync(process.execPath, ["cli/dist/index.js", "unknown", "widget"], { encoding: "utf8" });

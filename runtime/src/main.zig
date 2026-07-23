@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const geometry_mod = @import("geometry.zig");
+const dev_reload = @import("dev_reload.zig");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
 const provider_mod = @import("provider.zig");
@@ -35,7 +36,6 @@ pub const Model = struct {
     storage: ?*storage_mod.Store = null,
     origins: []const []const u8 = &.{},
     bundle_path: []const u8 = &.{},
-    dev: bool = false,
     dev_seen_mtime: i128 = 0,
     timer_fires: u64 = 0,
     armed_timers: [bridgeTimerCapacity()]ArmedTimer = [_]ArmedTimer{.{}} ** bridgeTimerCapacity(),
@@ -61,7 +61,6 @@ fn bridgeTimerCapacity() usize {
 const max_images: usize = 16;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
-const dev_reload_key: u64 = 0x7764_6576_726c;
 const geometry_save_key: u64 = 0x7767_656f_6d65;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 
@@ -70,6 +69,7 @@ pub const Msg = union(enum) {
     press: tree_mod.NodeId,
     slider: tree_mod.NodeId,
     canvas_frame: u64,
+    dev_reload,
     frame_moved: geometry_mod.Saved,
 };
 
@@ -83,6 +83,8 @@ var logged_present_path: bool = false;
 var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
 var requested_software_backend: bool = false;
 var diagnostic_runtime: ?*native_sdk.Runtime = null;
+var dev_reload_runtime = std.atomic.Value(usize).init(0);
+var dev_reload_pending = std.atomic.Value(bool).init(false);
 var backend_status_io: ?std.Io = null;
 var backend_status_path: ?[]const u8 = null;
 
@@ -92,12 +94,6 @@ fn initEffects(model: *Model, effects: *Effects) void {
             std.log.err("widget image {d} failed to decode/register: {s}", .{ image.id, @errorName(err) });
         };
     }
-    if (model.dev) effects.startTimer(.{
-        .key = dev_reload_key,
-        .interval_ms = 100,
-        .mode = .repeating,
-        .on_fire = Effects.timerMsg(.timer),
-    });
     syncTimers(model, effects);
 }
 
@@ -112,12 +108,6 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             }
             if (timer.key == geometry_save_key) {
                 persistGeometry(model);
-                return;
-            }
-            if (timer.key == dev_reload_key) {
-                reloadIfChanged(model, effects) catch |err| {
-                    std.log.err("dev hot swap failed; keeping previous bundle: {s}", .{@errorName(err)});
-                };
                 return;
             }
             if (timer.key == fetch_poll_key) {
@@ -195,6 +185,11 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 std.log.err("widget canvas frame callback failed: {s}", .{@errorName(err)});
             };
             syncTimers(model, effects);
+        },
+        .dev_reload => {
+            reloadIfChanged(model, effects) catch |err| {
+                std.log.err("dev hot swap failed; keeping previous bundle: {s}", .{@errorName(err)});
+            };
         },
     }
 }
@@ -391,6 +386,7 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
             }
         }
     }
+    if (dev_reload_pending.swap(false, .acq_rel)) return .dev_reload;
     const engine = model.engine orelse return null;
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
@@ -653,7 +649,6 @@ pub fn main(init: std.process.Init) !void {
     app_state.model.storage = &storage;
     app_state.model.origins = loaded.manifest.origins;
     app_state.model.bundle_path = bundle_path;
-    app_state.model.dev = dev;
     app_state.model.dev_seen_mtime = bundle_stat.mtime.nanoseconds;
     for (loaded.manifest.subscribe) |provider| {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
@@ -662,6 +657,14 @@ pub fn main(init: std.process.Init) !void {
     try loadLocalImages(init.io, allocator, directory, &app_state.model);
 
     requested_software_backend = renderer_backend == .software;
+    const dev_signal_path = try std.fs.path.join(allocator, &.{ directory, dev_reload.signal_file_name });
+    var dev_reload_server: dev_reload.Server = .{};
+    if (dev) try dev_reload_server.start(init.io, dev_signal_path, notifyDevReload);
+    defer if (dev) {
+        dev_reload_server.deinit();
+        dev_reload_runtime.store(0, .release);
+        dev_reload_pending.store(false, .release);
+    };
     var app = app_state.app();
     app.start_fn = startRendererDiagnostics;
     try runner.runWithOptions(app, .{
@@ -733,11 +736,23 @@ fn declaredGpuBackend(render_backend: []const u8, force_software: bool) native_s
 /// selection itself belongs to Native SDK and follows the declared backend.
 fn startRendererDiagnostics(_: *anyopaque, runtime: *native_sdk.Runtime) !void {
     diagnostic_runtime = runtime;
+    dev_reload_runtime.store(@intFromPtr(runtime), .release);
+    if (dev_reload_pending.load(.acquire)) try runtime.options.platform.services.requestFrame();
     if (!requested_software_backend) {
         std.log.info("widget renderer selected={s} presenter=host", .{if (@import("builtin").os.tag == .macos) "metal-composite" else "gpu"});
         return;
     }
     std.log.info("widget renderer selected=software presenter=pixels", .{});
+}
+
+fn notifyDevReload() void {
+    dev_reload_pending.store(true, .release);
+    const runtime_address = dev_reload_runtime.load(.acquire);
+    if (runtime_address == 0) return;
+    const runtime: *native_sdk.Runtime = @ptrFromInt(runtime_address);
+    runtime.options.platform.services.requestFrame() catch |err| {
+        std.log.err("dev hot-swap wake failed: {s}", .{@errorName(err)});
+    };
 }
 
 fn safeLogName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
@@ -758,6 +773,7 @@ fn safeLogName(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
 }
 
 test {
+    _ = @import("dev_reload.zig");
     _ = @import("tree.zig");
     _ = @import("geometry.zig");
     _ = @import("manifest.zig");

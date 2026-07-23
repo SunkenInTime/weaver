@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
+import { signalDevReload } from "./dev-reload.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
 import { extractWeave, isWeaveSourceEntryIncluded, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
@@ -368,6 +369,7 @@ async function devWidget(directory: string): Promise<void> {
         signalHost("--signal-reload");
         process.stdout.write("weaver dev restarted widget: window config changed\n");
       } else {
+        await signalDevReload(directory);
         process.stdout.write("weaver dev bundle ready for in-place hot swap\n");
       }
     } catch (error) {
