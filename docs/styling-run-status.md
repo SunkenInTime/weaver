@@ -4,7 +4,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## 2026-07-23 path-icon redesign
 
-- PR08 is being rewritten in place: `<icon>` is lowered at bundle time to
+- PR08 was rewritten in place: `<icon>` is lowered at bundle time to
   normalized absolute `M`/`L`/`C`/`Z` path data. The font subset, codepoint map,
   reserved face id 64, and icon-font projection are removed.
 - Native N5 retains bounded icon-path metadata and projects it through the
@@ -29,6 +29,39 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   from upstream `NoroPlayer/Player.ini`; this belongs to PR13 and must preserve
   the radii introduced by `4241b12`.
 
+### Path-icon completion evidence
+
+- Final implementation heads before this evidence commit: Weaver PR08
+  `56b163df`, PR09 `34197d01`, PR10 `2c3efbae`, PR11 `5f7fb1ba`, PR12
+  `4b81d8a5`, PR13 `d01b7117`; Native N5 `31d5710b`, N6 `4981f66f`,
+  N7 `de432244`, N8 `85f5dbe5`.
+- Native N5-N8 each PASS full stock `zig build test` and full
+  `zig build test -Dwidget-profile=true` at the exact pushed head. The first
+  N5 stock attempt was environment-invalid because Git's `test` helper was
+  absent from `PATH`; restoring the documented Git `usr\bin` path made both
+  N5 suites pass.
+- Weaver PR08-PR13 each PASS `npm test`, `npm run typecheck`, runtime
+  `zig build test -Dweb-layer=exclude -Dtrace=off`, and `npm run
+  audit:release`. Test counts are 44/46/47/50/52/52. The release-audit sweep
+  also PASSes all 13 Weaver heads at their exact historical/restacked pins.
+- Noro visual gate PASS, opened at original resolution:
+  `E:\tmp\weaver-path-icons-20260723\noro-path-icons-visual-gate.png`.
+  The exact upstream solid prev/pause/next shapes are centered at 28x28, the
+  button corner radii remain 8.33/37.5, cover/overlays/rim/record dot/grille
+  remain correct, and the Cozette row reads `00:06 / LET IT GO / 03:58 AM`.
+  The authoritative reference was fetched and opened at
+  `E:\tmp\weaver-path-icons-20260723\noro-reference-preview.png`.
+- Styling Icons visual gate PASS, opened at original resolution:
+  `E:\tmp\weaver-path-icons-20260723\styling-icons-visual-gate-final2.png`.
+  Assorted full-catalog names, currentColor, custom fill/stroke, and
+  16/24/32/40 geometry render crisply. The first capture was rejected because
+  an unrelated desktop widget overlapped the top-right anchor; only the
+  run-owned HWND was moved and redrawn for the accepted capture.
+- Installed Noro idle gate PASS: after a 129-second settle, PID 32920 advanced
+  `0.000 ms` TotalProcessorTime over `60.011 s` (62.5 ms before and after,
+  two threads). The isolated installation was uninstalled and its host stopped.
+- CI rollups: pending after the final evidence push.
+
 ## Stack map
 
 | Layer | Weaver | Native SDK fork | State |
@@ -40,12 +73,12 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
 | 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `619b0ec` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `92f101c` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `157c57b9` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `42682f0` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `64b89cf4` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `fc7353a` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `98c943e3` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `c065458` | rides N8 `98c943e3` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `bb65795` plus final evidence/CI ledger | rides N8 `98c943e3` | complete, pushed, draft PR open; final CI green |
+| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `56b163df` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `34197d01` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `2c3efbae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `5f7fb1ba` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `4b81d8a5` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), implementation `d01b7117` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; CI rollup pending |
 
 ## Completed gates
 
