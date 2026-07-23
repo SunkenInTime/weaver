@@ -63,6 +63,9 @@ All Native N5-N8 stock and widget-profile suites pass. Weaver PR08-PR13 pass
 npm test, typecheck, Windows-flag runtime tests, and release audit; the audit
 sweep passes all 13 Weaver heads. Installed Noro advanced `0.000 ms`
 TotalProcessorTime over `60.011 s` after a 129-second settle.
+After the retained-path storage repair, a fresh final installed run settled
+for 141 seconds and advanced `15.625 ms` over `60.003 s`, exactly one Windows
+accounting quantum and below the `<=30 ms` acceptance bound.
 
 The first PR08 Apple-silicon session run caught a Clock provider stack
 overflow. Returning icon-free TSX byte-for-byte was retained as a useful
