@@ -241,17 +241,22 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     defer if (snapshot) |bytes| std.heap.page_allocator.free(bytes);
 
     var candidate_tree: tree_mod.Tree = .{};
+    var candidate_tree_moved = false;
+    defer if (!candidate_tree_moved) candidate_tree.deinit();
     var preserved = snapshot != null;
     const candidate = evaluateCandidate(model, &candidate_tree, source, snapshot) catch |err| switch (err) {
         error.HotSwapMismatch => block: {
             preserved = false;
+            candidate_tree.deinit();
             candidate_tree = .{};
             break :block try evaluateCandidate(model, &candidate_tree, source, null);
         },
         else => return err,
     };
     candidate_tree.generation = model.tree.generation +% 1;
+    model.tree.deinit();
     model.tree = candidate_tree;
+    candidate_tree_moved = true;
     candidate.setTree(&model.tree);
     model.engine = candidate;
     old_engine.destroy(std.heap.page_allocator);
@@ -774,6 +779,7 @@ pub fn main(init: std.process.Init) !void {
         .on_window_frame = onWindowFrame,
     });
     defer app_state.destroy();
+    defer app_state.model.tree.deinit();
     app_state.model.geometry = &geometry_store;
     app_state.model.fonts = loaded.manifest.fonts;
     if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
@@ -1002,7 +1008,8 @@ test "attached effects combine builder metadata with box and text shadows" {
 test "path icon projection parses normalized geometry and preserves viewBox stroke and color" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{};
+    var retained_tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
+    defer retained_tree.deinit();
     const icon_node = try retained_tree.createNode(.icon);
     try retained_tree.setIconPath(icon_node, "M 1 2 L 3 4 C 5 6 7 8 9 10 Z");
     try retained_tree.setIconViewBox(icon_node, "-2 -3 30 18");

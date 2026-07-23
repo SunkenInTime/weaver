@@ -113,8 +113,9 @@ pub const Node = struct {
     max: f32 = 1,
     source: [max_source_bytes]u8 = @splat(0),
     source_len: usize = 0,
-    icon_path: [max_icon_path_bytes]u8 = @splat(0),
-    icon_path_len: usize = 0,
+    /// Rare, independently-budgeted icon geometry. Keeping this heap-owned
+    /// avoids adding 8 KiB to every one of the 128 retained nodes.
+    icon_path: []u8 = &.{},
     icon_view_box: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 24, 24),
     icon_stroke: f32 = 0,
     canvas_slot: u8 = 0,
@@ -128,7 +129,7 @@ pub const Node = struct {
     }
 
     pub fn iconPathSlice(self: *const Node) []const u8 {
-        return self.icon_path[0..self.icon_path_len];
+        return self.icon_path;
     }
 
     pub fn fontFamilySlice(self: *const Node) []const u8 {
@@ -137,6 +138,7 @@ pub const Node = struct {
 };
 
 pub const Error = error{
+    OutOfMemory,
     InvalidNode,
     NodeLimit,
     ChildLimit,
@@ -167,12 +169,21 @@ pub const CanvasState = struct {
 /// `generation` advances only for an effective mutation, which gives the app
 /// loop one cheap batch boundary for future no-op timer callbacks.
 pub const Tree = struct {
+    allocator: std.mem.Allocator = std.heap.page_allocator,
     nodes: [max_nodes]Node = [_]Node{.{}} ** max_nodes,
     canvases: [max_canvases]CanvasState = [_]CanvasState{.{}} ** max_canvases,
     root: ?NodeId = null,
     generation: u64 = 0,
     batch_depth: u8 = 0,
     batch_changed: bool = false,
+
+    pub fn deinit(self: *Tree) void {
+        const allocator = self.allocator;
+        for (&self.nodes) |*entry| {
+            if (entry.icon_path.len > 0) allocator.free(entry.icon_path);
+            entry.icon_path = &.{};
+        }
+    }
 
     pub fn beginBatch(self: *Tree) void {
         self.batch_depth +|= 1;
@@ -461,8 +472,9 @@ pub const Tree = struct {
         if (value.len > max_icon_path_bytes) return error.IconPathTooLong;
         const target = try self.node(id);
         if (std.mem.eql(u8, target.iconPathSlice(), value)) return;
-        @memcpy(target.icon_path[0..value.len], value);
-        target.icon_path_len = value.len;
+        const replacement = try self.allocator.dupe(u8, value);
+        if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
+        target.icon_path = replacement;
         self.changed();
     }
 
@@ -653,6 +665,7 @@ pub const Tree = struct {
         @memcpy(children[0..count], target.children[0..count]);
         for (children[0..count]) |child_id| self.removeSubtree(child_id);
         if (target.canvas_slot > 0) self.canvases[target.canvas_slot - 1] = .{};
+        if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
         target.* = .{};
     }
 
@@ -779,7 +792,8 @@ test "tree stores styling breadth layout wire properties" {
 }
 
 test "icon path has an independent 8192-byte budget and parsed viewBox" {
-    var tree: Tree = .{};
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
     const id = try tree.createNode(.icon);
     const at_limit = [_]u8{'M'} ** max_icon_path_bytes;
     try tree.setIconPath(id, &at_limit);
@@ -789,6 +803,19 @@ test "icon path has an independent 8192-byte budget and parsed viewBox" {
     try tree.setIconViewBox(id, "-2.5 1 32 16");
     try std.testing.expectEqual(native_sdk.geometry.RectF.init(-2.5, 1, 32, 16), (try tree.nodeConst(id)).icon_view_box);
     try std.testing.expectError(error.InvalidProperty, tree.setIconViewBox(id, "0 0 24 0"));
+}
+
+test "rare icon paths do not grow every retained node" {
+    try std.testing.expect(@sizeOf(Node) < 1024);
+
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const first = try tree.createNode(.icon);
+    const second = try tree.createNode(.icon);
+    try tree.setIconPath(first, "M 0 0 L 24 24");
+    try tree.setIconPath(second, "M 24 0 L 0 24");
+    try tree.removeNode(first);
+    try std.testing.expectEqualStrings("M 24 0 L 0 24", (try tree.nodeConst(second)).iconPathSlice());
 }
 
 test "canvas wire decodes packed colors and polyline points" {
