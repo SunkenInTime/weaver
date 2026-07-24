@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
@@ -33,7 +34,7 @@ const devReloadBundle = await build({
 });
 const devReload = await import(`data:text/javascript;base64,${Buffer.from(devReloadBundle.outputFiles[0].contents).toString("base64")}`);
 
-test("dev hot reload signals one loopback event instead of polling", async () => {
+test("dev hot reload signals one loopback event instead of polling", { timeout: 5000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-dev-reload-"));
   const dist = join(root, "dist");
   mkdirSync(dist);
@@ -51,8 +52,9 @@ test("dev hot reload signals one loopback event instead of polling", async () =>
     assert.notEqual(typeof address, "string");
     assert.ok(address);
     writeFileSync(join(dist, ".weaver-dev-port"), `${address.port}\n`);
+    const notification = once(server, "connection");
     await devReload.signalDevReload(root, 1);
-    await new Promise((resolvePromise) => setImmediate(resolvePromise));
+    await notification;
     assert.equal(notifications, 1);
   } finally {
     await new Promise((resolvePromise) => server.close(resolvePromise));

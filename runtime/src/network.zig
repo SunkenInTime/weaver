@@ -291,7 +291,12 @@ fn waitForTestPort(path: []const u8) !u16 {
             continue;
         };
         defer std.testing.allocator.free(bytes);
-        return std.fmt.parseInt(u16, std.mem.trim(u8, bytes, " \r\n\t"), 10);
+        const value = std.mem.trim(u8, bytes, " \r\n\t");
+        if (value.len == 0) {
+            try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+            continue;
+        }
+        return std.fmt.parseInt(u16, value, 10);
     }
     return error.TestUnexpectedResult;
 }
