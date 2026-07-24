@@ -202,10 +202,10 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
   const outputDirectory = join(directory, "dist");
   mkdirSync(outputDirectory, { recursive: true });
   copyWidgetAssets(directory, outputDirectory);
+  const bundle = await compileWidgetBundle(project, join(outputDirectory, "bundle.js"));
   if (project.usesIcons) {
     copyFileSync(iconLicenseSource, join(outputDirectory, iconLicenseFile));
   }
-  const bundle = await compileWidgetBundle(project, join(outputDirectory, "bundle.js"));
   writeAtomic(join(outputDirectory, "bundle.js"), bundle);
   const manifest: RuntimeManifest = {
     name: project.config.name,
@@ -235,7 +235,10 @@ async function compileWidgetBundle(project: SourceProject, outfile: string): Pro
     jsxImportSource: "@weaver/sdk",
     legalComments: "none",
     minify: true,
-    plugins: [iconLoweringPlugin(project.directory), weaverResolutionPlugin(project.directory)],
+    plugins: [
+      iconLoweringPlugin(project.directory, () => { project.usesIcons = true; }),
+      weaverResolutionPlugin(project.directory),
+    ],
     logLevel: "silent",
     write: false,
   });
@@ -360,7 +363,7 @@ function weaverResolutionPlugin(sourceRoot: string): import("esbuild").Plugin {
   };
 }
 
-function iconLoweringPlugin(sourceRoot: string): import("esbuild").Plugin {
+function iconLoweringPlugin(sourceRoot: string, onIconSource: () => void): import("esbuild").Plugin {
   const canonicalSourceRoot = realpathSync(sourceRoot);
   return {
     name: "weaver-icon-lowering",
@@ -369,6 +372,8 @@ function iconLoweringPlugin(sourceRoot: string): import("esbuild").Plugin {
         if (!pathsEqual(args.path, canonicalSourceRoot) && !pathInside(canonicalSourceRoot, args.path)) return null;
         const source = readFileSync(args.path, "utf8");
         try {
+          const sourceFile = ts.createSourceFile(args.path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+          if (sourceUsesIcon(sourceFile)) onIconSource();
           return { contents: lowerIconSource(args.path, source), loader: "tsx" };
         } catch (error) {
           return { errors: [{ text: error instanceof Error ? error.message : String(error), location: { file: args.path } }] };
@@ -860,13 +865,14 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  const usesIcons = sourceUsesIcon(sourceFile);
+  const sourceFiles = loadDirectLocalImports(directory, sourceFile);
+  const usesIcons = sourceFiles.some(sourceUsesIcon);
   return {
     directory,
     sourcePath,
     source,
     sourceFile,
-    sourceFiles: loadDirectLocalImports(directory, sourceFile),
+    sourceFiles,
     config,
     fonts: discoverWidgetFonts(directory),
     usesIcons,

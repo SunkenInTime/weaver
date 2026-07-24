@@ -264,6 +264,16 @@ export default widget({ name: "Icon Test", size: [160, 80] }, () => <row><icon n
     assert.doesNotMatch(bundleSource, /[mhaqv]1 1/);
     assert.doesNotMatch(bundleSource, /zodiac-aquarius/);
 
+    rmSync(join(widget, "dist"), { recursive: true, force: true });
+    writeFileSync(join(widget, "controls.tsx"), 'export const Controls = () => <icon name="play" />;\n');
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+import { Controls } from "./controls";
+export default widget({ name: "Imported Icon Test", size: [160, 80] }, () => <Controls />);
+`);
+    const importedBundle = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
+    assert.equal(importedBundle.status, 0, importedBundle.stderr);
+    assert.deepEqual(readFileSync(join(widget, "dist", "Lucide-LICENSE.txt")), readFileSync(join(process.cwd(), "sdk/assets/LUCIDE-LICENSE.txt")));
+
     writeFileSync(join(widget, "widget.tsx"), validSource.replace('name="badge-question-mark"', 'name="badge-question-mrak"'));
     const unknown = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
     assert.equal(unknown.status, 1);
