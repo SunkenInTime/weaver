@@ -228,6 +228,11 @@ test("styling 05 accepts every text-pack utility family", () => {
   }
   assert.deepEqual(compileClass("leading-tight text-sm"), { lineHeight: 1.25, fontScale: 1 });
   assert.deepEqual(compileClass("text-sm leading-tight"), { fontScale: 1, lineHeight: 1.25 });
+  assert.deepEqual(
+    compileClass("text-sm text-[20px]"),
+    { fontScale: 20 / 14, lineHeight: 1 },
+    "arbitrary font-size retains text-sm's authored 20px line-height",
+  );
 });
 
 test("styling 05 rejects malformed text-pack utilities", () => {
