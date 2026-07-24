@@ -229,3 +229,36 @@ test("styling 05 rejects malformed text-pack utilities", () => {
   assert.throws(() => compileClass(`line-clamp-${"9".repeat(400)}`), /non-finite or absurd numeric value/);
 });
 
+test("styling 06 accepts every shadow utility family", () => {
+  const cases = [
+    ["shadow-sm", { shadow: "0 1 2 0 #0000000D", shadowInset: false }],
+    ["shadow", { shadow: "0 1 3 0 #0000001A", shadowInset: false }],
+    ["shadow-md", { shadow: "0 4 6 -1 #0000001A", shadowInset: false }],
+    ["shadow-lg", { shadow: "0 10 15 -3 #0000001A", shadowInset: false }],
+    ["shadow-xl", { shadow: "0 20 25 -5 #0000001A", shadowInset: false }],
+    ["shadow-inner", { shadow: "0 2 4 0 #0000000F", shadowInset: true }],
+    ["shadow-[2px_-3px_8px_-1px_#12345678]", { shadow: "2 -3 8 -1 #12345678", shadowInset: false }],
+    ["shadow-none", { shadow: "", shadowInset: false }],
+    ["text-shadow-sm", { textShadow: "0 1 1 #00000026" }],
+    ["text-shadow", { textShadow: "0 1 2 #00000026" }],
+    ["text-shadow-md", { textShadow: "0 2 4 #00000026" }],
+    ["text-shadow-lg", { textShadow: "0 4 8 #00000026" }],
+    ["text-shadow-none", { textShadow: "" }],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+  assert.deepEqual(compileClass("shadow-red-500/40 shadow-md"), {
+    shadow: "0 4 6 -1 #FB2C3666", shadowInset: false,
+  });
+  assert.deepEqual(compileClass("shadow-md shadow-[#123]/50"), {
+    shadow: "0 4 6 -1 #11223380", shadowInset: false,
+  });
+});
+
+test("styling 06 rejects malformed shadow utilities", () => {
+  for (const utility of [
+    "shadow-2xl", "shadow-[0_2px_4px]", "shadow-[0_2px_-4px_0_#000]",
+    "shadow-[0_2rem_4px_0_#000]", "shadow-[0_2px_4px_0_#12]", "text-shadow-xl",
+  ]) assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
+  assert.throws(() => compileClass("shadow-red-500/101"), /Color alpha must be between 0 and 100/);
+});
+

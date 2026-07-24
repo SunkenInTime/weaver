@@ -410,7 +410,31 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
 
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
     return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
-        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0;
+        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null;
+}
+
+fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi.Node) WidgetUi.Node {
+    const count = @as(usize, @intFromBool(retained.shadow != null)) +
+        @as(usize, @intFromBool(retained.text_shadow != null));
+    if (count == 0) return source;
+    const existing = source.widget.immediate_commands;
+    const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
+    @memcpy(combined[0..existing.len], existing);
+    var cursor: usize = existing.len;
+    if (retained.shadow) |shadow| {
+        combined[cursor] = .{ .box_shadow = .{
+            .offset = shadow.offset,
+            .blur = shadow.blur,
+            .spread = shadow.spread,
+            .color = shadow.color,
+            .inset = retained.shadow_inset,
+        } };
+        cursor += 1;
+    }
+    if (retained.text_shadow) |shadow| combined[cursor] = .{ .text_shadow = shadow };
+    var result = source;
+    result.widget.immediate_commands = combined;
+    return result;
 }
 
 fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
@@ -501,7 +525,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
                 .medium => .medium,
                 .semibold, .bold => .bold,
             };
-            return ui.text(options, retained.textSlice());
+            return attachEffects(ui, retained, ui.text(options, retained.textSlice()));
         }
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
@@ -512,13 +536,13 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             },
             .scale = retained.font_scale,
         }};
-        return ui.paragraph(options, &span);
+        return attachEffects(ui, retained, ui.paragraph(options, &span));
     }
     const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch return ui.panel(.{}, .{});
     for (retained.children[0..retained.child_count], 0..) |child_id, index| {
         children[index] = buildNode(ui, tree, child_id, false);
     }
-    return switch (retained.kind) {
+    const result = switch (retained.kind) {
         // SDK layout-only rows/columns do not paint their own style. A
         // styled column is contractually a column-layout box, which is the
         // builder's panel primitive; unstyled columns keep the lean node.
@@ -558,6 +582,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
+    return attachEffects(ui, retained, result);
 }
 
 fn nativeCornerRadius(retained: f32) f32 {
@@ -867,4 +892,41 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
+}
+
+test "attached effects combine builder metadata with box and text shadows" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const text_node = try retained_tree.createNode(.text);
+    try retained_tree.setText(text_node, "styled");
+    try retained_tree.setNumberProp(text_node, "fontScale", 2);
+    try retained_tree.setTruncate(text_node, true);
+    try retained_tree.setShadow(text_node, .{
+        .offset = .{ .dx = 0, .dy = 1 },
+        .blur = 4,
+        .spread = 0,
+        .color = native_sdk.canvas.Color.rgb8(0, 0, 0),
+    });
+    try retained_tree.setTextShadow(text_node, .{
+        .offset = .{ .dx = 1, .dy = 2 },
+        .blur = 3,
+        .color = native_sdk.canvas.Color.rgb8(10, 20, 30),
+    });
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, text_node, true));
+    try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .box_shadow => |shadow| try std.testing.expectEqual(@as(f32, 4), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[2]) {
+        .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
 }
