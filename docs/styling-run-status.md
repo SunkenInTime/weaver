@@ -1,6 +1,6 @@
 # Styling breadth run status
 
-Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
+Updated: 2026-07-24 (Windows 11, interaction-state extension)
 
 ## 2026-07-23 path-icon redesign
 
@@ -100,9 +100,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `8b76dfa` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `85f5dbe5` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `9c27d23` | rides N8 `85f5dbe5` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), exact-path implementation `198a848` plus this evidence ledger | rides N8 `85f5dbe5` | complete, pushed, draft PR open; pre-ledger CI green |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `2f416b9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `c61d3518` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `a4041cd` | rides N8 `c61d3518` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), pressed-state implementation `012b3dc` plus this evidence ledger | rides N8 `c61d3518` | complete, pushed, draft PR open; code-head CI pending at ledger authoring |
 
 ## Completed gates
 
@@ -383,3 +383,61 @@ PR01; no implementation or verification task remains.
 - Native N5-N8 commits and Weaver gitlinks remain unchanged:
   `3a16880f/bdac8c22/63554853/111bb748`. No production assertion, test, or CI
   step was removed or weakened.
+
+## Interaction-state shadow and descendant styling extension (2026-07-24)
+
+- Native N8 `c61d3518` adds `inherit` / `none` / value shadow overrides to
+  hover/pressed styles. State resolution uses the node itself when it claims
+  press, otherwise the nearest press-claiming layout ancestor. Descendant
+  invalidation walks run only when hover/pressed IDs change, so the state
+  machinery adds no idle polling or timer.
+- Native regressions cover pressed shadow precedence, explicit shadow removal,
+  descendant foreground resolution, descendant state-shadow invalidation, and
+  the full larger halo on both press and release. Focused widget-profile canvas
+  PASS; full stock PASS in 25.5s; full widget profile PASS in 71.2s. Git's
+  `usr\bin` was added to `PATH` for the repository's existing `test -f`
+  assertions; both WebView2 DLLs were present before the corrected rerun.
+- Weaver PR11 `2f416b9` compiles named, arbitrary, inset, color-composed, and
+  `shadow-none` hover/pressed shadows, projects their wire properties, and
+  rejects an orphan descendant variant with the
+  `NearestPressableAncestor` fix-it. The contract and conjure skill document
+  the implicit nearest-button/slider rule and require no `group` class.
+- Assumption: `weaver check` requires the pressable ancestor to be statically
+  provable in the same JSX tree. A reusable component that authors descendant
+  state utilities must also contain its button/slider owner, or the stateful
+  child must be inlined at the owner.
+- Assumption: the two fixed Weaver interaction records may grow from 16 KiB
+  to a ratcheted 26 KiB total at the 128-node limit (104 bytes each) to retain
+  state shadow geometry. This is bounded Weaver-tree storage; Native keeps
+  rare style commands in its existing side channel and does not grow the
+  common `Widget` arena.
+- Weaver exact-head gates PASS: PR11 Node 52/52 in 31.4s, typecheck, runtime
+  Windows-flag Zig in 8.9s, release audit; PR12 Node 54/54 in 33.7s,
+  typecheck 2.1s, runtime Zig 0.5s, release audit 0.4s; PR13 Node 54/54 in
+  34.8s, typecheck 2.1s, runtime Zig 7.6s, release audit, and Noro check.
+  Release audit PASSes all 13 heads at exact branch-local Native pins.
+- Noro PR13 `012b3dc` preserves the exact custom icon paths, `0 0 28 28`
+  view boxes, and `8.33px` / `37.5px` corner geometry. All three buttons now
+  swap to fill `#141414`, inset shadow `0 2px 4px #0000004d`, and descendant
+  icon color `#b6b6b6` while pressed.
+- Pressed visual gate PASS. A real Win32 left-button hold targeted the no-op
+  previous button so the icon path remained identical. Both captures were
+  reopened at original resolution:
+  `E:\tmp\weaver-pressed-state-20260724\noro-pressed-held.png` and
+  `E:\tmp\weaver-pressed-state-20260724\noro-released.png`. During hold the
+  fill is darker, the normal inset highlight is replaced by the dark inset,
+  and the icon dims; release fully restores all three. Numeric means:
+  fill `25.49` held vs `31.19` released; icon `164.91` held vs `187.10`
+  released.
+- Installed idle gate PASS. The updated Noro installation ran without a dev
+  watcher or provider subscription. After more than two minutes settle, PID
+  36800 advanced `0.000ms` TotalProcessorTime over `60.042s`.
+- Assumption: Weaver's host uses machine-global lifecycle objects, so the
+  existing clone-owned Noro installation was uninstalled to run the dev gate,
+  then restored from the updated PR13 source for installed-mode idle
+  verification. The unrelated source-missing Pomodoro registry entry was not
+  modified.
+- CI code-head runs: PR29 `30088527353`, PR30 `30088529927`, PR31
+  `30088531190`. They were pending when this ledger entry was authored; final
+  rollups are recorded in the PR bodies and compact run report so a
+  documentation-only evidence commit does not recurse indefinitely.
