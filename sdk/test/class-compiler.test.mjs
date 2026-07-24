@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { compileClass } from "../src/class-compiler.ts";
 import { tailwindColors } from "../src/tailwind-colors.js";
@@ -157,7 +158,14 @@ test("styling 03 rejects malformed radii and borders", () => {
 });
 
 test("styling 04 table pins Tailwind v4.3.3 sRGB8 spot values", () => {
-  assert.equal(Object.keys(tailwindColors).length, 289);
+  const families = ["red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate", "gray", "zinc", "neutral", "stone", "mauve", "olive", "mist", "taupe"];
+  const shades = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"];
+  const expectedKeys = [...families.flatMap((family) => shades.map((shade) => `${family}-${shade}`)), "white", "black", "transparent"].sort();
+  assert.deepEqual(Object.keys(tailwindColors).sort(), expectedKeys);
+  assert.equal(
+    createHash("sha256").update(JSON.stringify(tailwindColors)).digest("hex"),
+    "33fed15753dbaa945464a7346d1c9a54d61c6cf1b98387d1e6c82f6c3344b2b5",
+  );
   assert.equal(tailwindColors["red-500"], "#FB2C36FF");
   assert.equal(tailwindColors["amber-400"], "#FFB900FF");
   assert.equal(tailwindColors["emerald-600"], "#009966FF");

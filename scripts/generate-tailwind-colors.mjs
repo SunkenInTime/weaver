@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -8,13 +9,29 @@ if (!themePath) {
   process.exit(2);
 }
 
-const theme = readFileSync(resolve(themePath), "utf8");
+const themeBytes = readFileSync(resolve(themePath));
+const themeHash = createHash("sha256").update(themeBytes).digest("hex");
+const expectedThemeHash = "443d7af364200f8ec8352dc78e39485a118a1840d498c97967bf0ae402b39167";
+if (themeHash !== expectedThemeHash) {
+  throw new Error(`expected the pinned tailwindcss@4.3.3 theme.css SHA-256 ${expectedThemeHash}, found ${themeHash}`);
+}
+const theme = themeBytes.toString("utf8");
 const colors = [];
 const pattern = /^\s*--color-([a-z]+-\d+):\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+|none)\);$/gm;
 for (const match of theme.matchAll(pattern)) {
   colors.push([match[1], oklchToHex(Number(match[2]) / 100, Number(match[3]), match[4] === "none" ? 0 : Number(match[4]))]);
 }
-if (colors.length !== 286) throw new Error(`expected 286 Tailwind palette entries, found ${colors.length}`);
+const colorFamilies = ["red", "orange", "amber", "yellow", "lime", "green", "emerald", "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "fuchsia", "pink", "rose", "slate", "gray", "zinc", "neutral", "stone", "mauve", "olive", "mist", "taupe"];
+const colorShades = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"];
+const expectedNames = colorFamilies.flatMap((family) => colorShades.map((shade) => `${family}-${shade}`)).sort();
+const actualNames = colors.map(([name]) => name).sort();
+if (actualNames.length !== expectedNames.length || actualNames.some((name, index) => name !== expectedNames[index])) {
+  const actual = new Set(actualNames);
+  const expected = new Set(expectedNames);
+  const missing = expectedNames.filter((name) => !actual.has(name));
+  const unexpected = actualNames.filter((name) => !expected.has(name));
+  throw new Error(`Tailwind palette key mismatch; missing [${missing.join(", ")}], unexpected [${unexpected.join(", ")}]`);
+}
 
 const lines = [
   "// Generated from tailwindcss@4.3.3 theme.css by scripts/generate-tailwind-colors.mjs.",
