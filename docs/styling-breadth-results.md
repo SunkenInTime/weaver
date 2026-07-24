@@ -288,3 +288,10 @@ bbox, and enforces a <=1px center delta on both axes. Full local Native
 N5-N8 stock/widget-profile gates and exact-head Weaver PR08-PR13
 Node/typecheck/runtime/release-audit gates pass; the all-13-head release audit
 passes at the restacked gitlinks.
+
+The final CI restack also hardens two readiness races exposed by the rollup:
+the macOS HTTPS fixture now atomically publishes its port file and tolerates
+the observed empty pre-write state, while the dev-reload test awaits the
+server's actual connection event instead of assuming one event-loop turn.
+Both changes entered at PR01 and were propagated through PR13 without changing
+production rendering or test expectations.
