@@ -87,7 +87,7 @@ test("widget renders one native generation and providers use native timers", asy
         sdk.h("text", null, "overlay")),
       sdk.h("image", { src: "./cover.png", fit: "cover", tile: true, class: "w-6 h-4 rounded-tl-lg rounded-br-2xl" }),
       sdk.h("button", {
-        class: "bg-zinc-900 hover:bg-zinc-800 hover:text-white hover:opacity-90 hover:border-zinc-600 pressed:bg-black pressed:text-red-500 pressed:opacity-70 pressed:border-white",
+        class: "bg-zinc-900 hover:bg-zinc-800 hover:text-white hover:opacity-90 hover:border-zinc-600 hover:shadow-md pressed:bg-black pressed:text-red-500 pressed:opacity-70 pressed:border-white pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner",
         onPress: (event) => { presses += 1; pressEvent = event; },
         onDoublePress: (event) => { doublePressEvent = event; },
         onRightPress: (event) => { rightPressEvent = event; },
@@ -160,7 +160,9 @@ test("widget renders one native generation and providers use native timers", asy
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   for (const [key, value] of [
     ["hoverBackground", "#27272AFF"], ["hoverTextColor", "#FFFFFFFF"], ["hoverOpacity", 0.9], ["hoverBorderColor", "#52525CFF"],
+    ["hoverShadow", "0 4 6 -1 #0000001A"],
     ["pressedBackground", "#000000FF"], ["pressedTextColor", "#FB2C36FF"], ["pressedOpacity", 0.7], ["pressedBorderColor", "#FFFFFFFF"],
+    ["pressedShadow", "0 2 4 0 #0000004D"], ["pressedShadowInset", true],
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === buttonId && operation[2] === key && operation[3] === value), `${key} interaction wire prop`);
   }

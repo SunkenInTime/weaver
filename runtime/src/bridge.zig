@@ -285,15 +285,24 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setInteractionColor(id, key.bytes, color) catch return fail(js, "setProp failed");
         }
-    } else if (std.mem.eql(u8, key.bytes, "shadow") or std.mem.eql(u8, key.bytes, "textShadow")) {
+    } else if (std.mem.eql(u8, key.bytes, "shadow") or std.mem.eql(u8, key.bytes, "textShadow") or
+        std.mem.eql(u8, key.bytes, "hoverShadow") or std.mem.eql(u8, key.bytes, "pressedShadow"))
+    {
         const value = stringArg(js, argv[2]) catch return fail(js, "shadow must be a packed string");
         defer c.JS_FreeCString(js, value.raw);
         if (std.mem.eql(u8, key.bytes, "shadow")) {
             const shadow = if (value.bytes.len == 0) null else parseBoxShadow(value.bytes) orelse return fail(js, "shadow must be 'x y blur spread #RRGGBBAA'");
             state(js).tree.setShadow(id, shadow) catch return fail(js, "setProp failed");
-        } else {
+        } else if (std.mem.eql(u8, key.bytes, "textShadow")) {
             const shadow = if (value.bytes.len == 0) null else parseTextShadow(value.bytes) orelse return fail(js, "textShadow must be 'x y blur #RRGGBBAA'");
             state(js).tree.setTextShadow(id, shadow) catch return fail(js, "setProp failed");
+        } else if (value.bytes.len == 0) {
+            state(js).tree.setInteractionShadow(id, key.bytes, null, false) catch return fail(js, "setProp failed");
+        } else if (std.mem.eql(u8, value.bytes, "none")) {
+            state(js).tree.setInteractionShadow(id, key.bytes, null, true) catch return fail(js, "setProp failed");
+        } else {
+            const shadow = parseBoxShadow(value.bytes) orelse return fail(js, "state shadow must be 'x y blur spread #RRGGBBAA' or none");
+            state(js).tree.setInteractionShadow(id, key.bytes, shadow, true) catch return fail(js, "setProp failed");
         }
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
@@ -336,7 +345,7 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "overflowHidden") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset") or std.mem.eql(u8, key.bytes, "imageTile")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "overflowHidden") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset") or std.mem.eql(u8, key.bytes, "hoverShadowInset") or std.mem.eql(u8, key.bytes, "pressedShadowInset") or std.mem.eql(u8, key.bytes, "imageTile")) {
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
@@ -349,6 +358,8 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
             state(js).tree.setTabularNums(id, value != 0) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "imageTile")) {
             state(js).tree.setImageTile(id, value != 0) catch return fail(js, "setProp failed");
+        } else if (std.mem.eql(u8, key.bytes, "hoverShadowInset") or std.mem.eql(u8, key.bytes, "pressedShadowInset")) {
+            state(js).tree.setInteractionShadowInset(id, key.bytes, value != 0) catch return fail(js, "setProp failed");
         } else {
             state(js).tree.setShadowInset(id, value != 0) catch return fail(js, "setProp failed");
         }

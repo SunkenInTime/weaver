@@ -52,9 +52,12 @@ pub const InteractionStyle = struct {
     text_color: ?native_sdk.canvas.Color = null,
     opacity: f32 = -1,
     border_color: ?native_sdk.canvas.Color = null,
+    shadow: ?BoxShadow = null,
+    shadow_set: bool = false,
+    shadow_inset: bool = false,
 
     pub fn isEmpty(self: InteractionStyle) bool {
-        return self.background == null and self.text_color == null and self.opacity < 0 and self.border_color == null;
+        return self.background == null and self.text_color == null and self.opacity < 0 and self.border_color == null and !self.shadow_set;
     }
 };
 
@@ -436,6 +439,33 @@ pub const Tree = struct {
         self.changed();
     }
 
+    pub fn setInteractionShadow(self: *Tree, id: NodeId, key: []const u8, value: ?BoxShadow, is_set: bool) Error!void {
+        const target = try self.node(id);
+        const style: *InteractionStyle = if (std.mem.eql(u8, key, "hoverShadow"))
+            &target.hover_style
+        else if (std.mem.eql(u8, key, "pressedShadow"))
+            &target.pressed_style
+        else
+            return error.InvalidProperty;
+        if (style.shadow_set == is_set and std.meta.eql(style.shadow, value)) return;
+        style.shadow = value;
+        style.shadow_set = is_set;
+        self.changed();
+    }
+
+    pub fn setInteractionShadowInset(self: *Tree, id: NodeId, key: []const u8, value: bool) Error!void {
+        const target = try self.node(id);
+        const style: *InteractionStyle = if (std.mem.eql(u8, key, "hoverShadowInset"))
+            &target.hover_style
+        else if (std.mem.eql(u8, key, "pressedShadowInset"))
+            &target.pressed_style
+        else
+            return error.InvalidProperty;
+        if (style.shadow_inset == value) return;
+        style.shadow_inset = value;
+        self.changed();
+    }
+
     pub fn setTextShadow(self: *Tree, id: NodeId, value: ?native_sdk.canvas.TextShadow) Error!void {
         const target = try self.node(id);
         if (std.meta.eql(target.text_shadow, value)) return;
@@ -805,8 +835,8 @@ test "tree owns a bounded hierarchy" {
 }
 
 test "interaction style storage stays fixed and bounded" {
-    try std.testing.expectEqual(@as(usize, 64), @sizeOf(InteractionStyle));
-    try std.testing.expectEqual(@as(usize, 16 * 1024), @sizeOf(InteractionStyle) * 2 * max_nodes);
+    try std.testing.expectEqual(@as(usize, 104), @sizeOf(InteractionStyle));
+    try std.testing.expectEqual(@as(usize, 26 * 1024), @sizeOf(InteractionStyle) * 2 * max_nodes);
 }
 
 test "tree stores styling breadth layout wire properties" {
@@ -847,6 +877,9 @@ test "tree stores styling breadth layout wire properties" {
     const shadow_color = native_sdk.canvas.Color.rgba8(1, 2, 3, 64);
     try tree.setShadow(id, .{ .offset = .{ .dx = 2, .dy = 3 }, .blur = 8, .spread = -1, .color = shadow_color });
     try tree.setShadowInset(id, true);
+    try tree.setInteractionShadow(id, "hoverShadow", .{ .offset = .{ .dy = 2 }, .blur = 4, .color = shadow_color }, true);
+    try tree.setInteractionShadowInset(id, "hoverShadowInset", true);
+    try tree.setInteractionShadow(id, "pressedShadow", null, true);
     try tree.setTextShadow(id, .{ .offset = .{ .dx = 1, .dy = 2 }, .blur = 4, .color = shadow_color });
     try tree.setOverflowHidden(id, true);
     const node = try tree.nodeConst(id);
@@ -882,6 +915,11 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, 2), node.shadow.?.offset.dx);
     try std.testing.expectEqual(@as(f32, -1), node.shadow.?.spread);
     try std.testing.expect(node.shadow_inset);
+    try std.testing.expect(node.hover_style.shadow_set);
+    try std.testing.expectEqual(@as(f32, 4), node.hover_style.shadow.?.blur);
+    try std.testing.expect(node.hover_style.shadow_inset);
+    try std.testing.expect(node.pressed_style.shadow_set);
+    try std.testing.expect(node.pressed_style.shadow == null);
     try std.testing.expectEqual(@as(f32, 4), node.text_shadow.?.blur);
     try std.testing.expect(node.overflow_hidden);
     try tree.setNumberProp(id, "paddingTop", -1);

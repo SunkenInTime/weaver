@@ -469,6 +469,18 @@ fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.W
         .foreground = style.text_color,
         .opacity = if (style.opacity >= 0) style.opacity else null,
         .border = style.border_color,
+        .shadow = if (!style.shadow_set)
+            .inherit
+        else if (style.shadow) |shadow|
+            .{ .value = .{
+                .offset = shadow.offset,
+                .blur = shadow.blur,
+                .spread = shadow.spread,
+                .color = shadow.color,
+                .inset = style.shadow_inset,
+            } }
+        else
+            .none,
     };
 }
 
@@ -1149,6 +1161,12 @@ test "attached shadows preserve hover and pressed metadata" {
     const panel = try retained_tree.createNode(.panel);
     try retained_tree.setNumberProp(panel, "hoverOpacity", 0.8);
     try retained_tree.setNumberProp(panel, "pressedOpacity", 0.6);
+    try retained_tree.setInteractionShadow(panel, "pressedShadow", .{
+        .offset = .{ .dy = 2 },
+        .blur = 4,
+        .color = native_sdk.canvas.Color.rgba8(0, 0, 0, 77),
+    }, true);
+    try retained_tree.setInteractionShadowInset(panel, "pressedShadowInset", true);
     try retained_tree.setShadow(panel, .{
         .offset = .{ .dx = 0, .dy = 2 },
         .blur = 4,
@@ -1164,7 +1182,16 @@ test "attached shadows preserve hover and pressed metadata" {
         else => return error.TestExpectedEqual,
     }
     switch (built.root.immediate_commands[1]) {
-        .pressed_style => |style| try std.testing.expectEqual(@as(?f32, 0.6), style.opacity),
+        .pressed_style => |style| {
+            try std.testing.expectEqual(@as(?f32, 0.6), style.opacity);
+            switch (style.shadow) {
+                .value => |shadow| {
+                    try std.testing.expectEqual(@as(f32, 4), shadow.blur);
+                    try std.testing.expect(shadow.inset);
+                },
+                else => return error.TestExpectedEqual,
+            }
+        },
         else => return error.TestExpectedEqual,
     }
     switch (built.root.immediate_commands[2]) {

@@ -19,12 +19,12 @@ export default widget({
         <text class="text-sm text-slate-400">Visual swaps stay native; events report local and normalized coordinates</text>
       </column>
       <button
-        class="w-full p-4 rounded-xl border border-indigo-500 bg-indigo-700 text-white hover:bg-indigo-600 hover:border-indigo-300 hover:opacity-90 pressed:bg-indigo-950 pressed:text-indigo-200 pressed:border-white pressed:opacity-70"
+        class="w-full p-4 rounded-xl border border-indigo-500 bg-indigo-700 text-white shadow-sm hover:bg-indigo-600 hover:border-indigo-300 hover:opacity-90 hover:shadow-md pressed:bg-indigo-950 pressed:border-white pressed:opacity-70 pressed:shadow-[0_2px_4px_0_#00000066] pressed:shadow-inner"
         onPress={(event) => setLast(describe("press", event))}
         onDoublePress={(event) => setLast(describe("double", event))}
         onRightPress={(event) => setLast(describe("right", event))}
       >
-        <text class="text-base font-semibold text-center">Interactive surface</text>
+        <text class="text-base font-semibold text-center pressed:text-indigo-200">Interactive surface</text>
       </button>
       <text class="text-sm font-mono text-slate-300">{last}</text>
       <column class="gap-2">
