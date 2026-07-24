@@ -37,7 +37,8 @@ A fallback where packet presentation was expected is itself a finding.
 | `examples/styling-shadows` | N5 | Outset + inset shadows, text shadows; NSShadow text pixels; hot-swap `shadow-lg` → none leaves no stale halo. |
 | `examples/styling-icons` | 08 | Assorted Lucide names at several sizes, crisp AppKit path rendering, stroke caps/joins round. |
 | `examples/styling-images` | N7 | cover/contain/tile, rounded image masks; tiling anchored top-left at native size. |
-| `examples/retro-player-shell` | 12 | Composite regression; text pack: `tabular-nums` digits truly monospaced (CoreText `tnum` feature — line the clock digits up over a minute), `tracking-*` letter spacing visibly applied, `line-clamp` two-line ellipsis. |
+| `examples/retro-player-shell` | 12 | Static composite regression: registered face, tracking, shadows, cover clip, tile, path icons, and controls. Keep this fixture timer/provider-free so its idle behavior stays meaningful. |
+| `examples/styling-text` | N4, 12 | Purpose-built text pack: live one-second `tabular-nums` counter keeps every digit column fixed under CoreText; adjacent constrained copy occupies two lines and ends in an ellipsis. |
 
 ## 2. Interaction checks (N8 / PR 11)
 

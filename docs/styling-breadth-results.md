@@ -170,9 +170,9 @@ Final acceptance anchor (`examples/retro-player-shell`):
 
 Both are physical Windows software/pixels native-window captures made with
 Win32 `PrintWindow` and visually inspected. The computer-control plugin's
-native pipe was unavailable on this host. macOS physical pixels remain
-`UNVERIFIED (needs Mac)`; headless CI is compile/test evidence, not a physical
-pixel claim.
+native pipe was unavailable on this host. This Windows run left macOS pixels
+unverified; the attended Mac section below supersedes that boundary without
+retroactively treating headless CI as physical evidence.
 
 Independent-review re-verification: PASS. The overlay row spans the cover and
 places `03:18 / 05:42` at the far right. The earlier capture-only font claim
@@ -227,7 +227,8 @@ HTTPS setup read an empty temporary port file; a failed-job rerun on the same
 dependent Apple-silicon session without a styling-code or test change. Native
 PR7-14 have no configured GitHub checks; focused canvas plus stock and
 widget-profile suites pass locally at every exact pushed head as recorded in
-the run-status ledger. Physical macOS pixels remain `UNVERIFIED (needs Mac)`.
+the run-status ledger. The attended Mac section below records the later
+physical closure and its remaining failures.
 
 Three-defect follow-up CI: every restacked Weaver PR19-PR30 passed its Windows
 gate, Intel headless, Apple-silicon headless, and Apple-silicon session jobs.
@@ -295,3 +296,51 @@ the observed empty pre-write state, while the dev-reload test awaits the
 server's actual connection event instead of assuming one event-loop turn.
 Both changes entered at PR01 and were propagated through PR13 without changing
 production rendering or test expectations.
+
+## macOS physical verification — 2026-07-24
+
+This attended run used the top styling branch at `ac0496d` with Native SDK
+`111bb748` on a MacBook Air with Apple M2 (8 cores, 8 GB), macOS 26.5.1
+(`25F80`), 2x integrated Retina display, Zig 0.16.0, and Node 23.11.0.
+Every fixture below logged
+`widget renderer selected=metal-composite presenter=host`,
+`widget host surface backend=metal`, and `widget presenter path=packet`.
+No CPU-pixel fallback was accepted as evidence.
+
+The virgin gates passed before pixel judgment: `npm test` (53/53),
+`npm run typecheck`, runtime `zig build test`, and host `zig build test`.
+After repairing the four findings, the full Native SDK suite, Weaver's 53/53
+tests and typecheck, runtime tests, host tests, ReleaseFast runtime/host builds,
+and `weaver check` for every changed fixture passed again.
+
+| Fixture | Result | Physical evidence |
+|---|---|---|
+| `examples/noro-shell` | **PASS** | [Static capture](./mac-styling-2026-07-24/noro-shell.png) and [held pressed state](./mac-styling-2026-07-24/noro-shell-pressed.png). The 36px/4px screen corners, 14px rim, cover clip, Cozette glyphs, grille/grain tiles, inset controls, and 8.33px/37.5px nested button arcs are present. In the 680x712 Retina capture, bright-path centers are `(127.5,579.5)`, `(339.5,579.5)`, and `(551.5,579.5)` against button centers `(128,580)`, `(340,580)`, and `(552,580)`: every axis is exactly 0.5 physical pixel off-center. Holding the middle button applied its pressed fill, release restored it and toggled pause to play, and the window frame stayed `(913,103,340x356)`. A whole-surface drag moved the frame by exactly `(80,50)` points to `(993,153)` and the reverse drag restored it. |
+| `examples/styling-spacing` | **PASS (repaired)** | [Original failure](./mac-styling-2026-07-24/styling-spacing-fail.png) and [fixed rerun](./mac-styling-2026-07-24/styling-spacing-fixed.png). The row now measures the centered text column's cross extent from its assigned width, so `Directional padding` and the two-line clamped `02:47...` block occupy distinct vertical slots while the upper percentage widths, margins, radii, and aspect boxes remain unchanged. |
+| `examples/styling-shadows` | **PASS (repaired)** | [Static shadow capture](./mac-styling-2026-07-24/styling-shadows.png), [original failed hot swap](./mac-styling-2026-07-24/styling-shadows-hot-swap-unchanged.png), [fixed pre-edit frame](./mac-styling-2026-07-24/styling-shadows-fixed-hot-reload-before.png), and [fixed live no-shadow frame](./mac-styling-2026-07-24/styling-shadows-fixed-hot-reload-after.png). The repaired loop-thread frame-request hook logged `dev hot swap applied (preserved root hook state)` immediately after the unchanged-config rebuild; removing the blue shadow changed the live pixels without restart, and restoring the source hot-swapped the shadow back. Fresh-run box/text-shadow controls remain the numeric static-pixel evidence. |
+| `examples/styling-icons` | **PASS** | [Capture](./mac-styling-2026-07-24/styling-icons.png). Named Lucide paths and custom fill/stroke paths render crisply at the authored sizes and colors; round stroke caps and joins are physically present. |
+| `examples/styling-images` | **PASS** | [Capture](./mac-styling-2026-07-24/styling-images.png). Cover, contain, native-size top-left tiling, and asymmetric rounded masks are all physically present without bleed. |
+| `examples/retro-player-shell` | **PASS** | [Capture](./mac-styling-2026-07-24/retro-player-shell.png). The intentionally static composite passes: GeistPixel/CoreText glyphs, tracking, shadows, cover clip, elapsed text, tiled grille, path icons, and controls match the Windows acceptance capture. It remains timer/provider-free so the showcase and idle-zero evidence stay honest. |
+| `examples/styling-text` | **PASS (new coverage)** | [Earlier live value](./mac-styling-2026-07-24/styling-text-fixed-10.png) and [later live value](./mac-styling-2026-07-24/styling-text-fixed-13.png). The one-second counter supplies executable changing `tabular-nums` coverage: the right-aligned digit columns remain fixed under CoreText while the value changes. The adjacent constrained paragraph occupies two distinct lines and ends in a real clamp ellipsis. |
+| `examples/styling-interaction` | **PASS (repaired)** | The original [right-click](./mac-styling-2026-07-24/styling-interaction-right-click-fail.png) and [control-click](./mac-styling-2026-07-24/styling-interaction-control-click-fail.png) failures are closed by the [fixed right-click](./mac-styling-2026-07-24/styling-interaction-right-click-fixed.png) and [fixed control-click](./mac-styling-2026-07-24/styling-interaction-control-click-fixed.png) reruns: both update the authored `right:` event with distinct physical coordinates and no Copy menu. An explicit ancestor secondary handler now outranks a descendant text default; ordinary selected text without such a handler retains Copy. The prior hover/leave, held press/restoration, counted double-click (`press=1 · double=1`), slider endpoints/midpoint, and whole-surface drag evidence remains passing. |
+
+### Installed idle and cost evidence
+
+`weaver install examples/noro-shell` started PID 80502 with zero provider
+subscribers on the packet path. After a 120-second settle, `ps -o cputime`
+remained `0:00.16` from `2026-07-24T10:44:18Z` through
+`2026-07-24T10:45:18Z`: zero measurable CPU-time delta over the required
+60-second window.
+
+`weaver status --json` reported 56.3602 MB, six threads, 0% CPU, and GPU
+backend. `/usr/bin/footprint` reported 56 MB physical and 62 MB peak, while
+Activity Monitor showed 56.4 MB for the same PID
+([capture](./mac-styling-2026-07-24/activity-monitor-memory.png)). The three
+sources agree within display rounding. The macOS physical-footprint number is
+numerically 3.18x the documented 17.7 MB Windows private-memory result, but the
+OS metrics are not definitions of the same accounting category and must not be
+treated as an apples-to-apples regression ratio.
+
+The run-owned installation was uninstalled, `weaverd` was stopped, Activity
+Monitor was closed, all temporary source instrumentation was reverted, and no
+Weaver widget, host, watcher, or esbuild process remained.
