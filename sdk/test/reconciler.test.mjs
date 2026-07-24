@@ -73,6 +73,12 @@ test("widget renders one native generation and providers use native timers", asy
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
       sdk.h("text", null, media.title),
+      sdk.h("icon", {
+        iconPath: "M 5 5 L 19 12 L 5 19 Z",
+        iconViewBox: "0 0 24 24",
+        iconStroke: 2,
+        class: "text-red-500 w-6",
+      }),
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
@@ -118,6 +124,17 @@ test("widget renders one native generation and providers use native timers", asy
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === styledTextId && operation[2] === key && operation[3] === value), `${key} text wire prop`);
   }
+  const iconId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "icon")[2];
+  for (const [key, value] of [
+    ["iconPath", "M 5 5 L 19 12 L 5 19 Z"],
+    ["iconViewBox", "0 0 24 24"],
+    ["iconStroke", 2],
+    ["textColor", "#FB2C36FF"],
+    ["width", 24],
+    ["height", 24],
+  ]) {
+    assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === iconId && operation[2] === key && operation[3] === value), `${key} icon wire prop`);
+  }
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   eventCallback(buttonId, "press", null);
@@ -155,6 +172,13 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(submit[2][2], 1);
   assert.ok(operations.some((operation) => operation[0] === "onCanvasFrame" && operation[1] === canvasNode));
   assert.throws(() => retainedCanvasContext.clear(), /only be called inside onFrame/);
+});
+
+test("styling 08 runtime accepts only bundle-lowered path icons and rejects children before native mutation", () => {
+  const operationCount = operations.length;
+  assert.throws(() => sdk.h("icon", { name: "play" }), /must be lowered to path data/);
+  assert.throws(() => sdk.h("icon", { iconPath: "M 0 0", iconViewBox: "0 0 24 24", iconStroke: 0 }, "child"), /does not accept children/);
+  assert.equal(operations.length, operationCount);
 });
 
 function isolatedNative() {

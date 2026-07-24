@@ -5,6 +5,7 @@ pub const max_nodes: usize = 128;
 pub const max_children: usize = 24;
 pub const max_text_bytes: usize = 192;
 pub const max_source_bytes: usize = 260;
+pub const max_icon_path_bytes: usize = 8 * 1024;
 pub const max_font_family_bytes: usize = 63;
 pub const max_canvases: usize = 8;
 pub const max_canvas_commands: usize = 256;
@@ -17,6 +18,7 @@ pub const Kind = enum {
     column,
     row,
     text,
+    icon,
     panel,
     button,
     slider,
@@ -111,6 +113,11 @@ pub const Node = struct {
     max: f32 = 1,
     source: [max_source_bytes]u8 = @splat(0),
     source_len: usize = 0,
+    /// Rare, independently-budgeted icon geometry. Keeping this heap-owned
+    /// avoids adding 8 KiB to every one of the 128 retained nodes.
+    icon_path: []u8 = &.{},
+    icon_view_box: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 24, 24),
+    icon_stroke: f32 = 0,
     canvas_slot: u8 = 0,
 
     pub fn textSlice(self: *const Node) []const u8 {
@@ -121,16 +128,22 @@ pub const Node = struct {
         return self.source[0..self.source_len];
     }
 
+    pub fn iconPathSlice(self: *const Node) []const u8 {
+        return self.icon_path;
+    }
+
     pub fn fontFamilySlice(self: *const Node) []const u8 {
         return self.font_family[0..self.font_family_len];
     }
 };
 
 pub const Error = error{
+    OutOfMemory,
     InvalidNode,
     NodeLimit,
     ChildLimit,
     TextTooLong,
+    IconPathTooLong,
     Cycle,
     InvalidProperty,
     CanvasLimit,
@@ -156,12 +169,21 @@ pub const CanvasState = struct {
 /// `generation` advances only for an effective mutation, which gives the app
 /// loop one cheap batch boundary for future no-op timer callbacks.
 pub const Tree = struct {
+    allocator: std.mem.Allocator = std.heap.page_allocator,
     nodes: [max_nodes]Node = [_]Node{.{}} ** max_nodes,
     canvases: [max_canvases]CanvasState = [_]CanvasState{.{}} ** max_canvases,
     root: ?NodeId = null,
     generation: u64 = 0,
     batch_depth: u8 = 0,
     batch_changed: bool = false,
+
+    pub fn deinit(self: *Tree) void {
+        const allocator = self.allocator;
+        for (&self.nodes) |*entry| {
+            if (entry.icon_path.len > 0) allocator.free(entry.icon_path);
+            entry.icon_path = &.{};
+        }
+    }
 
     pub fn beginBatch(self: *Tree) void {
         self.batch_depth +|= 1;
@@ -286,6 +308,8 @@ pub const Tree = struct {
             &target.height_percent
         else if (std.mem.eql(u8, key, "aspectRatio"))
             &target.aspect_ratio
+        else if (std.mem.eql(u8, key, "iconStroke"))
+            &target.icon_stroke
         else
             return error.InvalidProperty;
         const normalized = if (std.mem.eql(u8, key, "opacity"))
@@ -441,6 +465,32 @@ pub const Tree = struct {
         if (std.mem.eql(u8, target.sourceSlice(), value)) return;
         @memcpy(target.source[0..value.len], value);
         target.source_len = value.len;
+        self.changed();
+    }
+
+    pub fn setIconPath(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_icon_path_bytes) return error.IconPathTooLong;
+        const target = try self.node(id);
+        if (std.mem.eql(u8, target.iconPathSlice(), value)) return;
+        const replacement = try self.allocator.dupe(u8, value);
+        if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
+        target.icon_path = replacement;
+        self.changed();
+    }
+
+    pub fn setIconViewBox(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        var values: [4]f32 = undefined;
+        var tokens = std.mem.tokenizeAny(u8, value, " ,\t\r\n");
+        for (&values) |*slot| {
+            const token = tokens.next() orelse return error.InvalidProperty;
+            slot.* = std.fmt.parseFloat(f32, token) catch return error.InvalidProperty;
+            if (!std.math.isFinite(slot.*)) return error.InvalidProperty;
+        }
+        if (tokens.next() != null or values[2] <= 0 or values[3] <= 0) return error.InvalidProperty;
+        const next = native_sdk.geometry.RectF.init(values[0], values[1], values[2], values[3]);
+        const target = try self.node(id);
+        if (std.meta.eql(target.icon_view_box, next)) return;
+        target.icon_view_box = next;
         self.changed();
     }
 
@@ -615,6 +665,7 @@ pub const Tree = struct {
         @memcpy(children[0..count], target.children[0..count]);
         for (children[0..count]) |child_id| self.removeSubtree(child_id);
         if (target.canvas_slot > 0) self.canvases[target.canvas_slot - 1] = .{};
+        if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
         target.* = .{};
     }
 
@@ -738,6 +789,35 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, 4), node.text_shadow.?.blur);
     try tree.setNumberProp(id, "paddingTop", -1);
     try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
+}
+
+test "icon path has an independent 8192-byte budget and parsed viewBox" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const id = try tree.createNode(.icon);
+    const at_limit = [_]u8{'M'} ** max_icon_path_bytes;
+    try tree.setIconPath(id, &at_limit);
+    try std.testing.expectEqual(max_icon_path_bytes, (try tree.nodeConst(id)).iconPathSlice().len);
+    const over_limit = [_]u8{'M'} ** (max_icon_path_bytes + 1);
+    try std.testing.expectError(error.IconPathTooLong, tree.setIconPath(id, &over_limit));
+    try tree.setIconViewBox(id, "-2.5 1 32 16");
+    try std.testing.expectEqual(native_sdk.geometry.RectF.init(-2.5, 1, 32, 16), (try tree.nodeConst(id)).icon_view_box);
+    try std.testing.expectError(error.InvalidProperty, tree.setIconViewBox(id, "0 0 24 0"));
+}
+
+test "rare icon paths do not grow every retained node" {
+    // Later styling layers may add compact common fields, but restoring the
+    // 8 KiB inline path buffer must always trip this bound.
+    try std.testing.expect(@sizeOf(Node) < max_icon_path_bytes / 2);
+
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const first = try tree.createNode(.icon);
+    const second = try tree.createNode(.icon);
+    try tree.setIconPath(first, "M 0 0 L 24 24");
+    try tree.setIconPath(second, "M 24 0 L 0 24");
+    try tree.removeNode(first);
+    try std.testing.expectEqualStrings("M 24 0 L 0 24", (try tree.nodeConst(second)).iconPathSlice());
 }
 
 test "canvas wire decodes packed colors and polyline points" {

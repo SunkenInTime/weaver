@@ -33,6 +33,10 @@ const devReloadBundle = await build({
   write: false,
 });
 const devReload = await import(`data:text/javascript;base64,${Buffer.from(devReloadBundle.outputFiles[0].contents).toString("base64")}`);
+test("icon lowering leaves icon-free widget sources byte-exact", () => {
+  const transformSource = readFileSync(fileURLToPath(new URL("../src/icon-transform.ts", import.meta.url)), "utf8");
+  assert.match(transformSource, /if \(!sourceContainsIcon\(sourceFile\)\) return source;/);
+});
 
 test("dev hot reload signals one loopback event instead of polling", { timeout: 5000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-dev-reload-"));
@@ -221,6 +225,77 @@ export default widget({ name: "Font Test", size: [160, 80] }, () => <text class=
     const broken = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
     assert.equal(broken.status, 1);
     assert.match(broken.stderr, /Broken\.ttf: not a parseable TrueType face/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("styling 08 resolves full Lucide and custom SVG paths without reserving fonts", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-icon-bundle-"));
+  try {
+    const widget = join(root, "widget");
+    mkdirSync(widget, { recursive: true });
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["widget.tsx"],
+    }));
+    const validSource = `import { widget } from "@weaver/sdk";
+export default widget({ name: "Icon Test", size: [160, 80] }, () => <row><icon name="badge-question-mark" class="text-red-500 w-6" /><icon d="m1 1 h10 v10 q2 2 4 0 a3 3 0 0 1 3 3 z" viewBox="0 0 20 20" stroke={1.5} /><text class="font-[Geist]">Label</text></row>);
+`;
+    writeFileSync(join(widget, "widget.tsx"), validSource);
+    writeFileSync(join(widget, "Geist-Regular.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const check = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(check.status, 0, check.stderr);
+    const bundle = spawnSync(process.execPath, ["cli/dist/index.js", "bundle", widget], { encoding: "utf8" });
+    assert.equal(bundle.status, 0, bundle.stderr);
+    const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
+    assert.deepEqual(manifest.fonts, [
+      { id: 64, name: "Geist-Regular.ttf", stem: "Geist-Regular", family: "Geist", weight: "regular", file: "Geist-Regular.ttf" },
+    ]);
+    assert.deepEqual(readFileSync(join(widget, "dist", "Lucide-LICENSE.txt")), readFileSync(join(process.cwd(), "sdk/assets/LUCIDE-LICENSE.txt")));
+    assert.equal(existsSync(join(widget, "dist", "WeaverLucide.ttf")), false);
+    const bundleSource = readFileSync(join(widget, "dist", "bundle.js"), "utf8");
+    assert.match(bundleSource, /iconPath/);
+    assert.match(bundleSource, /M 3\.85 8\.62/);
+    assert.doesNotMatch(bundleSource, /[mhaqv]1 1/);
+    assert.doesNotMatch(bundleSource, /zodiac-aquarius/);
+
+    writeFileSync(join(widget, "widget.tsx"), validSource.replace('name="badge-question-mark"', 'name="badge-question-mrak"'));
+    const unknown = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /Unknown Lucide icon "badge-question-mrak"\. Did you mean "badge-question-mark"\?/);
+
+    writeFileSync(join(widget, "widget.tsx"), validSource);
+    writeFileSync(join(widget, "Geist-Bold.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const twoFonts = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(twoFonts.status, 0, twoFonts.stderr);
+    writeFileSync(join(widget, "Third.ttf"), readFileSync(join(process.cwd(), "runtime/native-sdk/src/primitives/canvas/fonts/Geist-Regular.ttf")));
+    const overBudget = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(overBudget.status, 1);
+    assert.match(overBudget.stderr, /Registered fonts exceed the widget-profile limit of 2 faces/);
+
+    rmSync(join(widget, "Third.ttf"));
+    writeFileSync(join(widget, "widget.tsx"), validSource.replace('<icon name="badge-question-mark"', '<icon name="badge-question-mark" d="M0 0"'));
+    const mutuallyExclusive = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(mutuallyExclusive.status, 1);
+    assert.match(mutuallyExclusive.stderr, /requires exactly one of name or d/);
+
+    writeFileSync(join(widget, "widget.tsx"), validSource.replace('<icon name="badge-question-mark" class="text-red-500 w-6" />', "<icon />"));
+    const neither = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(neither.status, 1);
+    assert.match(neither.stderr, /requires exactly one of name or d/);
+
+    const oversizedPath = `M0 0 ${"l1 0 ".repeat(2000)}`;
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "Icon Test", size: [160, 80] }, () => <icon d="${oversizedPath}" />);
+`);
+    const oversized = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(oversized.status, 1);
+    assert.match(oversized.stderr, /Normalized icon path exceeds the 8192-byte per-node limit/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

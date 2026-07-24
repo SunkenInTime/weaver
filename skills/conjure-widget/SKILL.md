@@ -46,9 +46,13 @@ Config fields:
 }
 ```
 
-Render only `<column>`, `<row>`, `<panel>`, and `<text>` in M1. Text children
-must be strings or numbers. Types declare `<image>`, `<button>`, and `<slider>`,
-but they arrive in M2; `<canvas>` arrives in M3.
+Render with `<column>`, `<row>`, `<panel>`, `<text>`, and path-backed
+`<icon>`. Text children must be strings or numbers. Icons take no children.
+Use a literal full-catalog Lucide name (`<icon name="play" />`) or literal
+custom SVG path data (`<icon d="M 9 5 L 21 12 L 9 19 Z" />`); custom paths
+may add `viewBox` and positive numeric `stroke`. Size icons geometrically with
+`w-*`/`h-*` and color them with `text-*`. Types declare `<image>`, `<button>`,
+and `<slider>`, but they arrive in M2; `<canvas>` arrives in M3.
 
 ## Class utilities
 

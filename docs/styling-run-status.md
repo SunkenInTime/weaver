@@ -1,6 +1,33 @@
 # Styling breadth run status
 
-Updated: 2026-07-21 (Windows 11, unattended run)
+Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
+
+## 2026-07-23 path-icon redesign
+
+- PR08 is being rewritten in place: `<icon>` is lowered at bundle time to
+  normalized absolute `M`/`L`/`C`/`Z` path data. The font subset, codepoint map,
+  reserved face id 64, and icon-font projection are removed.
+- Native N5 retains bounded icon-path metadata and projects it through the
+  existing display-list path command. D3D keeps its existing per-command CPU
+  fallback for paths.
+- Assumption: the binding full catalog is `lucide-static@1.26.0` (1,749 names),
+  npm tarball SHA-1 `cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d`, integrity
+  `sha512-6yCpa2ONICjlE19BuneIi75ASd9cCZhqJlzhAlQBi+99m2aZd2cNzxFVbDgPu7JLBZR2uDYO/EpLYtnhGw5Niw==`.
+  Only resolved icon paths are embedded in a widget bundle; the catalog itself
+  remains a pinned CLI build dependency.
+- Assumption: `svg-pathdata@7.2.0` is the binding bundle-time normalizer. It
+  requires Node 20.11.1 or newer, which is compatible with Weaver's existing
+  Node 22 development baseline.
+- Assumption: the Native widget profile's aggregate path-element allowance is
+  raised from 256 to 2,048 so one legal 8 KiB normalized icon path can always
+  be retained without growing every `Widget`; per-node normalized data remains
+  independently capped at 8 KiB by `weaver check`.
+- Assumption: Lucide named icons always use the upstream `0 0 24 24` view box,
+  two-unit round stroke, and current text color. Raw `d` icons default to fill;
+  a positive `stroke` prop selects round stroked rendering.
+- Assumption: Noro's solid controls will use the exact 24-unit Rainmeter paths
+  from upstream `NoroPlayer/Player.ini`; this belongs to PR13 and must preserve
+  the radii introduced by `4241b12`.
 
 ## Stack map
 
@@ -13,7 +40,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 | 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23), implementation `f9693ae` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `32735626d8ba369e53bedd22a1e3dab46b2c08aa` | complete, pushed, draft PRs open |
 | 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24), implementation `5fff1ee` plus final test follow-up `9237c18` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` (PR06 pins the shadow-complete `f8455262`; the later commit is the brief-authorized PR07 font seam) | complete, pushed, draft PRs open |
 | 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25), Native pin `8121bf6`, implementation `a18f4ac` plus extension edge-case `da5130d` | per-text selection follow-up in [N5](https://github.com/SunkenInTime/native/pull/11) at `b487d48b` | complete, pushed, draft PR open |
-| 08 | `styling/08-icons` | none expected | pending |
+| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26), implementation `6392b29` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
 | 09 / N6 | `styling/09-stack-overflow` | `styling/N6-stack-overflow` | pending |
 | 10 / N7 | `styling/10-image-v2` | `styling/N7-image-v2` | pending |
 | 11 / N8 | `styling/11-interaction` | `styling/N8-interaction` | pending |
@@ -37,6 +64,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Native N5 PR07 font follow-up `b487d48b`: focused canvas suite PASS in 43.2s with exact plain/paragraph registered-id projection; validate + stock suite PASS together in 89.6s; final widget-profile suite PASS in 94.2s. The face id rides the pre-existing bounded immediate-command slice, preserving the Widget size bound.
 - Weaver 06: `npm test` PASS 34/34; `npm run typecheck` PASS; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 7.8s; CLI build and `weaver check examples/styling-shadows` PASS; ReleaseFast runtime build PASS in 117.9s. Isolated dev smoke reached status `running` at 27s uptime with one startup, software/pixels presentation, and no exception/crash/restart line; isolated host/watchers and the temporary registry were removed.
 - Weaver 07: `npm test` PASS 37/37 in 17.9s; `npm run typecheck` and `npm run build` PASS; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 7.0s; CLI check/bundle PASS; ReleaseFast runtime build PASS in 72.6s. Pack/inspect produced artifact `f710de0373fe830e7fab90c774f9d472c98013a38d69b86e7aa2818d88f50dae` with 3 readable files/100119 bytes; isolated install preserved the 94800-byte font and 4475-byte OFL in source and `dist`. Dev stayed `running` at 37s uptime with one dev startup and no font/exception/crash/restart line; isolated host/watchers, install, archive, and temporary data were removed.
+- Weaver 08: `npm test` PASS 39/39 in 21.1s; `npm run typecheck` PASS in 2.4s; SDK package dry-run includes the font/license/map; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 0.6s cached; ReleaseFast runtime build PASS in 68.2s; CLI check/bundle PASS. Pack/inspect produced artifact `da9c8fe7c3fdbe415ab7107d936cbf84a5673e3c195d996b36a4caac11a74bd9`; isolated install reconstructed the 26768-byte font and 3208-byte license in `dist`. Dev stayed `running` at 34s uptime with one dev startup and no font/exception/crash/restart line; temporary installation, host/watchers, archive, and data were removed.
 
 ## Assumptions
 
@@ -62,6 +90,9 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 20. Root-adjacent `.ttf` and `.otf` are discovered as font assets. The bounded renderer requires `glyf`/`loca`/`hmtx` plus Unicode cmap format 4; OTF/CFF is rejected with an explicit TrueType-outline conversion instruction because accepting it would make reference and macOS rendering disagree.
 21. Exact `font-[file-stem]` always selects that face. A terminal `-Light/-Regular/-Medium/-Semibold/-Bold` (or underscore) additionally creates a family alias, and the closest registered weight wins. With one custom face every requested weight deliberately degrades to that face; built-in sans keeps Native's three real rungs and mono its single face.
 22. Font files and adjacent licenses reuse the existing ordinary-source `.weave` and `dist` asset paths; no opaque font sub-format or duplicate archive channel is introduced.
+23. The binding Lucide source is `lucide-static@1.25.0` (ISC; npm tarball SHA-1 `d44930d6e5815faace63d9fd9c46c0cadabaaae8`). Its 843668-byte font exceeds the 512 KiB face cap, so PR08 freezes an explicit alphabetized subset of 79 common widget/media/navigation/status names; the generated face is 26768 bytes and includes the upstream Lucide/Feather license.
+24. Because PR08 is not authorized to change Native and rides PR07's two-face registry, a widget containing `<icon>` reserves id 64 for `WeaverLucide` and may bundle one custom face at id 65. Widgets with no icon retain both custom-face slots.
+25. Icon names must be literal JSX attribute strings (including literal string expressions) so `weaver check` can prove membership and issue a deterministic nearest-name fix-it. Dynamic names are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
 
 ## UNVERIFIED / BLOCKED
 
@@ -74,6 +105,7 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - `BLOCKED (unrelated Native fast gate)`: N4 fast gate reproduces the same five `examples-native` exhaustive-switch failures for the pre-existing `window_frame` event. The N4 changed canvas tests, validate, frontend, and mobile groups pass; macOS-only CEF link validation is skipped on Windows.
 - `UNVERIFIED (needs Mac)`: N5 AppKit v5 packet decoding, inverse-path inset clipping, and `NSShadow` text pixels. Evidence available now: packet/prose ratchets, exact platform-neutral tests, static validation, and both Windows full suites pass; Objective-C compilation and physical pixels await macOS CI/hardware.
 - `UNVERIFIED (needs Mac)`: PR07 registered-font selection through CoreText/AppKit. Evidence available now: SFNT validation, bounded registration, exact runtime resolution/projection tests, Native stock/profile suites, and the Windows live example pass; macOS compilation and physical glyph pixels await CI/hardware.
+- `UNVERIFIED (needs Mac)`: PR08 Lucide subset selection and physical glyph pixels through CoreText/AppKit. Evidence available now: exact name/codepoint lowering, copied-asset equality, bounded registration tests, Native stock/profile suites, and the Windows live example pass; macOS physical output awaits CI/hardware.
 - `BLOCKED (unrelated Native fast gate)`: N5 fast gate against N4 passes zig-test (34s), validate, frontend examples, and mobile examples (44s), but the same five `examples-native` switches omit pre-existing `window_frame`. Apple-Silicon benchmarks and macOS CEF link are skipped on Windows.
 - `RESOLVED during N5`: the first final full-suite pass found the schema ratchet and macOS decoder prose still naming v4 after the v5 packet change; both were updated and pushed. One intervening Windows run also hit transient `error.Unexpected` while creating an iOS test asset directory; an immediate clean rerun passed in 25.2s.
 - `RESOLVED during PR03`: the first `weaver dev` attempt used a stale runtime after a parallel ReleaseFast build was canceled by the stale-CLI check failure, causing three `unsupported property` crash restarts. An explicit runtime rebuild followed by a fresh 15s smoke produced one startup and no exception/restart. Both outcomes are in PR21 evidence.
@@ -86,7 +118,8 @@ Updated: 2026-07-21 (Windows 11, unattended run)
 - Isolated PR 01 dev data under `%TEMP%\weaver-styling-run-pr01` was removed after shutdown.
 - PR06 isolated data under `.dev-smoke-pr06` was removed after `weaver down`; all clone-owned dev watchers and their esbuild helpers were stopped. The cleanup also removed one stale PR05 spacing watcher discovered during the audit.
 - PR07 isolated install/dev data under `.dev-smoke-pr07` and its temporary `.weave` archive were removed after uninstall and `weaver down`; the final process audit found no clone-owned runtime, host, watcher, or esbuild process.
+- PR08 isolated install/dev data under `.dev-smoke-pr08` and its temporary `.weave` archive were removed after uninstall and `weaver down`; the final process audit found no clone-owned runtime, host, watcher, or esbuild process.
 
 ## Next executable task
 
-Branch `styling/08-icons` from `styling/07-fonts`, implement the bounded compiler icon set and example, then run the PR08 Weaver gates and open its draft against PR07.
+Branch Native `styling/N6-stack-overflow` from N5, implement bounded stack/overflow clipping and pass Native gates; then pin it on Weaver `styling/09-stack-overflow` branched from PR08 and implement the compiler/reconciler/example layer.
