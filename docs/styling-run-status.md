@@ -1,6 +1,6 @@
 # Styling breadth run status
 
-Updated: 2026-07-24 (Windows 11, interaction-state extension)
+Updated: 2026-07-24 (macOS 26.5.1, attended physical styling verification)
 
 ## 2026-07-23 path-icon redesign
 
@@ -216,36 +216,38 @@ Updated: 2026-07-24 (Windows 11, interaction-state extension)
 
 ## UNVERIFIED / BLOCKED
 
-- Independent-review final state: no confirmed finding remains unfixed or blocked. Physical macOS pixels remain `UNVERIFIED (needs Mac)`; the Intel and Apple-silicon headless jobs compile and exercise the macOS paths but are not physical-pixel evidence. Native PR7-14 remain `UNVERIFIED (no configured GitHub checks)` despite the complete local focused/stock/widget-profile matrix passing at every exact pushed head.
+- Attended macOS closure ran on 2026-07-24. The packet presenter was observed for every fixture. The four physical findings from the first pass were repaired and rerun on hardware: N1 wrapped/clamped layout, static-widget dev hot-swap wake, ancestor right/control-click precedence, and executable dynamic `tnum`/two-line clamp coverage all now pass. Native PR7-14 remain `UNVERIFIED (no configured GitHub checks)` despite the complete local focused/stock/widget-profile matrix passing at every exact pushed head.
 
 - `UNVERIFIED (historical diagnostic)`: the original JPEG failure did not log a WIC HRESULT and did not reproduce in twelve isolated launches of the same pre-fix binary, so the exact failing WIC stage cannot be recovered. Evidence: one retained runtime log has `ImageDecodeFailed`; source history shows neither the WIC decoder nor image budget changed in the review wave; the production retry and real-JPEG boundary test cover the only observed failure surface.
 
-- `UNVERIFIED (needs Mac)`: N1 shared-layout behavior on the macOS reference and Metal presentation paths. Evidence available now: platform-neutral Native Zig suites pass on Windows; await PR CI for compile gates and Mac hardware for physical pixels.
+- `VERIFIED after repair (Mac, 2026-07-24)`: N1 shared-layout behavior on the Metal packet path. `styling-spacing` now derives a centered row child's height from the wrapped/clamped text at its assigned width; the lower title and two-line text no longer overlap. Evidence: `docs/mac-styling-2026-07-24/styling-spacing-fixed.png`; the retained failing capture documents the before state.
 - `BLOCKED (unrelated Native fast gate)`: `scripts/gate.sh fast origin/weaver-main` fails `examples-native` because five existing example switches omit the already-present `runtime.api.Event.window_frame` member. Evidence: `capabilities`, `native-panels`, `command-app`, `native-shell`, and `gpu-components` compile errors; changed canvas suite and the required stock/profile suites pass.
 - The same unrelated `examples-native` failure reproduced for N2 against N1; all other affected fast-gate groups passed.
 - The same unrelated `examples-native` failure reproduced for N3 against N2; zig-test, validate, frontend examples, and mobile examples passed.
-- `UNVERIFIED (needs Mac)`: N3 asymmetric surface pixels. Evidence available now: Native exact display-list radius/stroke assertions and all Windows stock/profile suites pass; physical macOS output remains unobserved.
-- `UNVERIFIED (needs Mac)`: N4 CoreText kern and monospaced-number feature application, plus physical clamp/alignment pixels. Evidence available now: Objective-C packet wiring, platform-neutral exact tests, static validation, and both full Windows suites pass; macOS compilation/physical output awaits CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N3 asymmetric surface pixels. Noro's 36px/4px screen corners, 51px shell corners, and 8.33px/37.5px button corners are physically present without bleed on the Metal packet path.
+- `VERIFIED after repair (Mac, 2026-07-24)`: N4 physical clamp/alignment closure. The repaired spacing fixture reserves distinct clamped lines, and new `examples/styling-text` changes a tabular clock every second beside a constrained two-line ellipsis. The showcase stays intentionally static for idle-zero validity.
 - `BLOCKED (unrelated Native fast gate)`: N4 fast gate reproduces the same five `examples-native` exhaustive-switch failures for the pre-existing `window_frame` event. The N4 changed canvas tests, validate, frontend, and mobile groups pass; macOS-only CEF link validation is skipped on Windows.
-- `UNVERIFIED (needs Mac)`: N5 AppKit v5 packet decoding, inverse-path inset clipping, and `NSShadow` text pixels. Evidence available now: packet/prose ratchets, exact platform-neutral tests, static validation, and both Windows full suites pass; Objective-C compilation and physical pixels await macOS CI/hardware.
-- `UNVERIFIED (needs Mac)`: PR07 registered-font selection through CoreText/AppKit. Evidence available now: SFNT validation, bounded registration, exact runtime resolution/projection tests, Native stock/profile suites, and the Windows live example pass; macOS compilation and physical glyph pixels await CI/hardware.
-- `UNVERIFIED (needs Mac)`: PR08 physical vector-path pixels through AppKit. Evidence available now: full-catalog bundle lowering, strict normalized-path parsing, exact reference pixels, Native stock/profile suites, and both Windows visual examples pass; macOS physical output awaits hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N5 AppKit shadow/inset/text pixels through the current v7 packet decoder. Fresh-run outset, inset, arbitrary, and text shadows are physically present. Removing the blue panel's box shadow changes 1,356 pixels within its bounds; removing the title text shadow changes 5,339 pixels within `(38,40)..(351,78)`. The separate dev hot-swap wake failure remains open below.
+- `VERIFIED (Mac, 2026-07-24)`: PR07 registered-font selection through CoreText/AppKit. Noro renders Cozette and the retro composite renders GeistPixel-Square with the expected physical glyph shapes.
+- `VERIFIED (Mac, 2026-07-24)`: PR08 physical vector-path pixels through AppKit. Styling Icons is crisp at its authored sizes, and Noro's measured bright-path centers are exactly 0.5 physical pixel from each button center.
 - `BLOCKED (unrelated Native fast gate)`: N5 fast gate against N4 passes zig-test (34s), validate, frontend examples, and mobile examples (44s), but the same five `examples-native` switches omit pre-existing `window_frame`. Apple-Silicon benchmarks and macOS CEF link are skipped on Windows.
 - `RESOLVED during N5`: the first final full-suite pass found the schema ratchet and macOS decoder prose still naming v4 after the v5 packet change; both were updated and pushed. One intervening Windows run also hit transient `error.Unexpected` while creating an iOS test asset directory; an immediate clean rerun passed in 25.2s.
 - `RESOLVED during PR03`: the first `weaver dev` attempt used a stale runtime after a parallel ReleaseFast build was canceled by the stale-CLI check failure, causing three `unsupported property` crash restarts. An explicit runtime rebuild followed by a fresh 15s smoke produced one startup and no exception/restart. Both outcomes are in PR21 evidence.
-- `UNVERIFIED (needs Mac)`: N6 AppKit wire-v6 decoding and physical asymmetric rounded stack pixels. Evidence available now: version/prose ratchets, direct and raster-cache host paths, exact reference pixels, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N6 asymmetric rounded-stack pixels through the current v7 AppKit packet decoder. Noro's screen clip and the retro cover stack retain their asymmetric physical masks without bleed.
 - `BLOCKED (unrelated Native fast gate)`: N6 fast gate passes zig-test (29s), validate (1s), frontend examples (6s), and mobile examples (36s), but `examples-native` fails after 121s in the same five pre-existing exhaustive switches that omit `Event.window_frame`; N6 changes neither those examples nor `src/runtime/api.zig`. Total gate time: 193.3s.
-- `UNVERIFIED (needs Mac)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Evidence available now: exact reference pixels, retained projection assertions, AppKit decoder/source wiring, all Windows gates, a stable Windows software live run, and green PR27 Intel/Apple-silicon headless plus Apple-silicon session CI; physical output still requires Mac hardware.
-- `UNVERIFIED (needs Mac)`: N7 wire-v7 image tiling and physical rounded image pixels. Evidence available now: exact reference tiling, UI/draw propagation, packet/version tests, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Noro and the retro composite pass on the packet path.
+- `VERIFIED (Mac, 2026-07-24)`: N7 wire-v7 image tiling and rounded image pixels. Styling Images, Noro, and the retro grille physically show cover/contain/top-left native-size tiling and rounded masks.
 - `BLOCKED (unrelated Native fast gate)`: N7 fast gate passes zig-test (31s), validate (<1s), frontend examples (5s), and mobile examples (38s), but the same five `examples-native` switches omit `Event.window_frame`; `examples-native` failed after 99s and total gate time was 173.7s.
 - `RESOLVED (stack release audit)`: PR27's first post-push CI run failed its Windows gate and both macOS headless jobs only at `npm run audit:release`: actual Native pin `9411bc45`, stale expected pin `91949e15`. No test or CI step was removed or weakened. The stack was rebased bottom-up so PR01–PR10 each require their own exact gitlink, and the ten-branch local audit sweep passed; GitHub reruns were triggered by the force-with-lease pushes.
-- `UNVERIFIED (needs Mac)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence available now: exact reference tiling, retained/wire projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; physical output still requires Mac hardware.
+- `VERIFIED (Mac, 2026-07-24)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence: `docs/mac-styling-2026-07-24/styling-images.png`.
 - `BLOCKED (unrelated Native fast gate)`: N8 fast gate against N7 passes zig-test (28s), validate (1s), frontend examples (8s), and mobile examples (53s), but `examples-native` fails after 155s in the same five unchanged exhaustive switches that omit pre-existing `Event.window_frame`; total gate time 245.1s. N8 changes neither those examples nor the runtime Event tag set.
-- `UNVERIFIED (needs Mac)`: Weaver 11 / Native N8 physical hover/pressed pixels and macOS right-click delivery. Evidence available now: exact Native state/event tests, stock/profile suites, exact Weaver wire/projection tests, a stable Windows software live run, and green PR29 Intel/Apple-silicon headless plus Apple-silicon session CI; physical macOS pixels still await hardware.
+- `VERIFIED after repair (Mac, 2026-07-24)`: Weaver 11 / Native N8. Hover/leave, held press/restoration, slider pressed state, slider endpoints/drag, whole-surface drag, and double-click pass physically. Right-click and control-click now both deliver `onRightPress` through the ancestor button with no Copy menu; the two accepted captures carry distinct `right:` coordinates.
 - `RESOLVED during PR11`: the first live smoke used the prior runtime executable and produced three `unsupported property` crash-restarts. An explicit ReleaseFast runtime executable rebuild followed by a fresh isolated run reached 67s uptime with one startup and zero exception/crash/restart lines; the failed attempt was not accepted as evidence.
 - `RESOLVED during PR12`: the initial 2.4 MiB generated grille caused three `StreamTooLong` crash-restarts. A metadata-stripped image-generator revision fit the source stream but exposed `ImageTooLarge`; normalizing both local images to 256×256 meets the widget-profile decoded-image budget. The final fresh run has one startup, software/pixels presentation, 75s observed uptime, and zero error/restart lines.
 - `RESOLVED during PR12`: the first physical showcase frame omitted all stack children because border/shadow had been authored on the layout-only `<stack>`. The shipped example moves those channels to the first image child; the final capture visibly contains the cover, overlay labels, elapsed text, progress, grille, and controls.
-- `UNVERIFIED (needs Mac)`: PR12 physical CoreText font/icon pixels, AppKit image/clip/tile output, and native state visuals. Evidence available now: final Windows physical capture, exact contract/compiler ratchet, prior Native platform-neutral suites, and stable software live run; macOS hardware remains unavailable.
+- `VERIFIED (Mac, 2026-07-24)`: PR12 static physical CoreText font/icon pixels, AppKit image/clip/tile output, and state visuals are present in the retro, icons, images, Noro, and interaction captures. Dynamic `tnum` and line-clamp coverage now lives in the purpose-built `styling-text` fixture rather than weakening the showcase's static idle contract.
+- `VERIFIED after repair (Mac, 2026-07-24)`: an unchanged-config `weaver dev` rebuild now wakes a static macOS widget at the loop-thread frame boundary. Live shadow removal logged `dev hot swap applied (preserved root hook state)`, changed the pixels without restart, and a source restore hot-swapped the shadow back.
+- `VERIFIED (Mac, 2026-07-24)`: installed Noro remained at `0:00.16` process CPU across the full 60-second acceptance window after a 120-second settle. Weaver reported 56.3602 MB; Activity Monitor showed 56.4 MB and `/usr/bin/footprint` showed 56 MB physical / 62 MB peak for the same PID. The run-owned install and daemon were removed afterward.
 - `RESOLVED`: Apple-silicon headless first failed PR03–PR11 at the unchanged hostile-markdown arena bound (observed 1,536,552–1,603,480 bytes versus 1,520,896). N3 keeps lossless f32 corner overrides but right-sizes capped Markdown node buffers from safe line-count upper bounds; N4 restores its common `Widget` to the 728-byte N3 shape by retaining text metadata in the existing rare-command slice. Neither the hostile bound nor a test/CI step changed. Every final Windows focused/stock/profile/runtime gate passes, and Apple-silicon headless CI passes on every final Weaver head PR21–PR30.
 - `RESOLVED (unrelated transient CI)`: PR21 Intel headless initially failed twice in the unchanged `network.test.macOS HTTPS transport preserves policy, bounds, timeout, trust, and cancellation` setup path because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. The third attempt passed the complete Intel job without a styling-code or test change; PR21's Apple-silicon headless and session jobs also pass.
 - `RESOLVED (unrelated transient CI)`: PR28 Intel headless initially failed the same unchanged loopback HTTPS setup because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. A failed-job rerun on the identical `a0d567b` head passed the previously failing network step, every downstream Native profile step, and the dependent Apple-silicon session; no code or test changed.
@@ -300,7 +302,11 @@ Updated: 2026-07-24 (Windows 11, interaction-state extension)
 
 ## Cleanup state
 
-- Work is confined to `E:\Projects\weaver-styling-run` and its submodule.
+- Windows implementation work is confined to
+  `E:\Projects\weaver-styling-run` and its submodule. The attended Mac repair
+  updates Weaver runtime wiring, Native SDK layout/input/frame-boundary code,
+  adds `examples/styling-text`, and records the two ledgers plus accepted PNG
+  evidence under `docs/mac-styling-2026-07-24/`.
 - No default branch was changed or merged; no frozen `weaver-fork*` branch was extended.
 - No Weaver dev process is currently running.
 - Isolated PR 01 dev data under `%TEMP%\weaver-styling-run-pr01` was removed after shutdown.
@@ -313,11 +319,17 @@ Updated: 2026-07-24 (Windows 11, interaction-state extension)
 - PR12 baseline/showcase hosts, dev watchers, isolated data roots, diagnostic captures, logs, and the detached master worktree were removed after shutdown. A broad process audit found no clone-owned runtime, host, watcher, or esbuild process; only the running Codex task process matched the clone path in its command text.
 - The resumed PR12 live root `%TEMP%\weaver-styling-resume-pr12` was removed after `weaver down`; host PID 7728, widget PID 48016, and watcher PID 44008 were all absent.
 - The three-defect live verifier stopped run-owned widget PID 51452 and watcher PID 46400 and removed the transient `.weaver-dev-port`. Its isolated ReleaseFast binary, log, and PID-targeted capture remain under `E:\tmp\weaver-three-defects-final` as evidence. The pre-existing user host/widget/watcher processes were not touched.
+- The Mac verifier uninstalled its run-owned Noro installation, stopped
+  `weaverd`, closed Activity Monitor, reverted all temporary source
+  instrumentation, and found no remaining Weaver widget, host, watcher, or
+  esbuild process.
 
 ## Next executable task
 
-Review the two green draft stacks bottom-up, starting with Native N1 / Weaver
-PR01; no implementation or verification task remains.
+Review and commit the repaired Native SDK layer, advance Weaver's exact Native
+gitlink/audit pin to that commit, then rerun `npm run audit:release` and the
+draft-stack CI matrix before merging. The local full Native/Weaver/runtime/host
+gates and all formerly failing physical Mac rows already pass.
 
 ## Path-icon centering follow-up (2026-07-23)
 
