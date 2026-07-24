@@ -1,10 +1,10 @@
 # Styling breadth run status
 
-Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
+Updated: 2026-07-24 (macOS 26.5.1, attended physical styling verification)
 
 ## 2026-07-23 path-icon redesign
 
-- PR08 is being rewritten in place: `<icon>` is lowered at bundle time to
+- PR08 was rewritten in place: `<icon>` is lowered at bundle time to
   normalized absolute `M`/`L`/`C`/`Z` path data. The font subset, codepoint map,
   reserved face id 64, and icon-font projection are removed.
 - Native N5 retains bounded icon-path metadata and projects it through the
@@ -22,6 +22,10 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   raised from 256 to 2,048 so one legal 8 KiB normalized icon path can always
   be retained without growing every `Widget`; per-node normalized data remains
   independently capped at 8 KiB by `weaver check`.
+- Assumption: Weaver's retained tree heap-owns the rare normalized string per
+  icon node. The 128-node table contains only a slice, not an inline 8 KiB
+  array; replacement, subtree removal, rejected hot swap, successful hot-swap
+  move, and process teardown all release their owned storage.
 - Assumption: Lucide named icons always use the upstream `0 0 24 24` view box,
   two-unit round stroke, and current text color. Raw `d` icons default to fill;
   a positive `stroke` prop selects round stroked rendering.
@@ -29,22 +33,76 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
   from upstream `NoroPlayer/Player.ini`; this belongs to PR13 and must preserve
   the radii introduced by `4241b12`.
 
+### Path-icon completion evidence
+
+- Final post-repair heads before this evidence follow-up: Weaver PR08
+  `b26e362`, PR09 `3e85fc6`, PR10 `c1ecb1c`, PR11 `8b76dfa`, PR12
+  `9c27d23`, PR13 `60c6976`; Native N5 `31d5710b`, N6 `4981f66f`,
+  N7 `de432244`, N8 `85f5dbe5`.
+- Native N5-N8 each PASS full stock `zig build test` and full
+  `zig build test -Dwidget-profile=true` at the exact pushed head. The first
+  N5 stock attempt was environment-invalid because Git's `test` helper was
+  absent from `PATH`; restoring the documented Git `usr\bin` path made both
+  N5 suites pass.
+- Weaver PR08-PR13 each PASS `npm test`, `npm run typecheck`, runtime
+  `zig build test -Dweb-layer=exclude -Dtrace=off`, and `npm run
+  audit:release`. Test counts are 45/47/48/51/53/53. The release-audit sweep
+  also PASSes all 13 Weaver heads at their exact historical/restacked pins.
+- The first PR08 Apple-silicon session rollup exposed a Clock provider stack
+  overflow. Returning icon-free source byte-for-byte at `b26fee23` was a valid
+  no-op ratchet but did not cure the repeated session failure. The true cause
+  was Weaver's retained `Node` carrying an inline 8 KiB `icon_path` array:
+  128 nodes inflated every `Tree` by roughly 1 MiB and exhausted the smaller
+  macOS callback stack. PR08 `7c8dd9f` moves rare strings to bounded heap
+  storage with complete ownership cleanup; `b26e362` adds a stack-wide node
+  size ratchet. A Windows Clock provider ran for 39 seconds and applied a
+  preserved-state hot swap with no exception before the complete local matrix
+  passed on every descendant.
+- Noro visual gate PASS, opened at original resolution:
+  `E:\tmp\weaver-path-icons-20260723\noro-path-icons-visual-gate.png`.
+  The exact upstream solid prev/pause/next shapes are centered at 28x28, the
+  button corner radii remain 8.33/37.5, cover/overlays/rim/record dot/grille
+  remain correct, and the Cozette row reads `00:06 / LET IT GO / 03:58 AM`.
+  The authoritative reference was fetched and opened at
+  `E:\tmp\weaver-path-icons-20260723\noro-reference-preview.png`.
+- Styling Icons visual gate PASS, opened at original resolution:
+  `E:\tmp\weaver-path-icons-20260723\styling-icons-visual-gate-final2.png`.
+  Assorted full-catalog names, currentColor, custom fill/stroke, and
+  16/24/32/40 geometry render crisply. The first capture was rejected because
+  an unrelated desktop widget overlapped the top-right anchor; only the
+  run-owned HWND was moved and redrawn for the accepted capture.
+- Installed Noro idle gate PASS: after a 129-second settle, PID 32920 advanced
+  `0.000 ms` TotalProcessorTime over `60.011 s` (62.5 ms before and after,
+  two threads). The isolated installation was uninstalled and its host stopped.
+- Final post-storage-repair installed rerun PASS: after a 141-second settle,
+  PID 5408 advanced `15.625 ms` over `60.003 s` (125.000 ms to 140.625 ms,
+  five threads), exactly one Windows accounting quantum and below the
+  `<=30 ms` acceptance bound. The isolated installation was uninstalled and
+  its host stopped.
+- Final pre-ledger CI rollups PASS all four jobs (Windows gate, Intel
+  headless, Apple-silicon headless, Apple-silicon session): PR08 run
+  `30039910723`, PR09 `30039923141`, PR10 `30039925329`, PR11
+  `30039927921`, PR12 `30039931561`, PR13 `30040382089`. Native PR11-14
+  expose no configured checks; their exact stock/widget-profile suites pass
+  locally.
+
 ## Stack map
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `af4dbf0` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
-| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `2a78bbc` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
-| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `0a8dd30` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
-| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `661f4bd` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
-| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `636c1fc` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `f6a9f2a` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `e1218fab` | complete, pushed, draft PRs open |
-| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `fb58e77` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `619b0ec` | rides N5 `e1218fab` | complete, pushed, draft PR open |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `92f101c` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `157c57b9` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `a0d567b` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `c40a351f` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `86d12e3` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `8d2b1cf4` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30), review/capture head `128983d` plus this final CI-ledger update | rides N8 `8d2b1cf4` | complete, pushed, draft PR open |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `5ca71974` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `59ab68b1` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
+| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `4bdeaa17` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `954d86dc` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `75a91fd2` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
+| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `8d1d8042` | pre-path N5 pin `eb6416df` | complete, pushed, draft PR open |
+| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `aaa1353a` | rides pre-path N5 `eb6416df` | complete, pushed, draft PR open |
+| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `2f416b9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14): interaction commit `c61d3518`, branch head `56152f29` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `a4041cd` | pins N8 interaction commit `c61d3518` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31) at `1602e3c`, including pressed-state implementation `012b3dc` | pins N8 head `56152f29` | complete, pushed, draft PR open; code/evidence head CI green |
 
 ## Completed gates
 
@@ -114,9 +172,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 20. Root-adjacent `.ttf` and `.otf` are discovered as font assets. The bounded renderer requires `glyf`/`loca`/`hmtx` plus Unicode cmap format 4; OTF/CFF is rejected with an explicit TrueType-outline conversion instruction because accepting it would make reference and macOS rendering disagree.
 21. Exact `font-[file-stem]` always selects that face. A terminal `-Light/-Regular/-Medium/-Semibold/-Bold` (or underscore) additionally creates a family alias, and the closest registered weight wins. With one custom face every requested weight deliberately degrades to that face; built-in sans keeps Native's three real rungs and mono its single face.
 22. Font files and adjacent licenses reuse the existing ordinary-source `.weave` and `dist` asset paths; no opaque font sub-format or duplicate archive channel is introduced.
-23. The binding Lucide source is `lucide-static@1.25.0` (ISC; npm tarball SHA-1 `d44930d6e5815faace63d9fd9c46c0cadabaaae8`). Its 843668-byte font exceeds the 512 KiB face cap, so PR08 freezes an explicit alphabetized subset of 79 common widget/media/navigation/status names; the generated face is 26768 bytes and includes the upstream Lucide/Feather license.
-24. Because PR08 is not authorized to change Native and rides PR07's two-face registry, a widget containing `<icon>` reserves id 64 for `WeaverLucide` and may bundle one custom face at id 65. Widgets with no icon retain both custom-face slots.
-25. Icon names must be literal JSX attribute strings (including literal string expressions) so `weaver check` can prove membership and issue a deterministic nearest-name fix-it. Dynamic names are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
+23. The binding Lucide source is `lucide-static@1.26.0` (ISC; 1,749 names; npm tarball SHA-1 `cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d`; integrity `sha512-6yCpa2ONICjlE19BuneIi75ASd9cCZhqJlzhAlQBi+99m2aZd2cNzxFVbDgPu7JLBZR2uDYO/EpLYtnhGw5Niw==`). PR08 resolves names to SVG geometry at bundle time and embeds only paths used by the widget. The Lucide/Feather license remains; the TTF subset and codepoint map are deleted.
+24. Path icons reserve no font face. Native's two registered-face slots remain available to custom fonts. Normalized icon data uses its own 8 KiB per-node budget and the widget profile permits 2,048 aggregate path elements so one contract-valid icon can always be retained without growing every `Widget`.
+25. Icon names and custom path data must be literal JSX attribute strings (including literal string expressions) so `weaver check` can normalize, budget, prove membership, and issue deterministic full-catalog nearest-name fix-its. Dynamic values are rejected even when their TypeScript type is narrowed; components can instead choose among statically authored icon nodes.
 26. The Native render packet can carry one rounded clip per command. Nested clips that contain one another retain the tighter rounded mask; partially overlapping rounded clips preserve their exact rectangular intersection and drop only the unrepresentable corner arcs rather than inventing a lens representation.
 27. Under a non-uniform or rotated affine transform, circular clip radii scale by the smaller finite axis magnitude. This keeps the flattened command mask circular and bounded; an exact elliptical-corner representation would require a broader wire change outside N6.
 28. `<stack>` remains a layout-only overlay primitive, matching Native's stack kind: its own radius shapes `overflow-hidden`, while a visible backdrop/border is authored as the first full-size child `<panel>`. This preserves child-order painting and avoids silently changing stack identity into a panel.
@@ -158,43 +216,97 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 ## UNVERIFIED / BLOCKED
 
-- Independent-review final state: no confirmed finding remains unfixed or blocked. Physical macOS pixels remain `UNVERIFIED (needs Mac)`; the Intel and Apple-silicon headless jobs compile and exercise the macOS paths but are not physical-pixel evidence. Native PR7-14 remain `UNVERIFIED (no configured GitHub checks)` despite the complete local focused/stock/widget-profile matrix passing at every exact pushed head.
+- Attended macOS closure ran on 2026-07-24. The packet presenter was observed for every fixture. The four physical findings from the first pass were repaired and rerun on hardware: N1 wrapped/clamped layout, static-widget dev hot-swap wake, ancestor right/control-click precedence, and executable dynamic `tnum`/two-line clamp coverage all now pass. Native PR7-14 remain `UNVERIFIED (no configured GitHub checks)` despite the complete local focused/stock/widget-profile matrix passing at every exact pushed head.
 
 - `UNVERIFIED (historical diagnostic)`: the original JPEG failure did not log a WIC HRESULT and did not reproduce in twelve isolated launches of the same pre-fix binary, so the exact failing WIC stage cannot be recovered. Evidence: one retained runtime log has `ImageDecodeFailed`; source history shows neither the WIC decoder nor image budget changed in the review wave; the production retry and real-JPEG boundary test cover the only observed failure surface.
 
-- `UNVERIFIED (needs Mac)`: N1 shared-layout behavior on the macOS reference and Metal presentation paths. Evidence available now: platform-neutral Native Zig suites pass on Windows; await PR CI for compile gates and Mac hardware for physical pixels.
+- `VERIFIED after repair (Mac, 2026-07-24)`: N1 shared-layout behavior on the Metal packet path. `styling-spacing` now derives a centered row child's height from the wrapped/clamped text at its assigned width; the lower title and two-line text no longer overlap. Evidence: `docs/mac-styling-2026-07-24/styling-spacing-fixed.png`; the retained failing capture documents the before state.
 - `BLOCKED (unrelated Native fast gate)`: `scripts/gate.sh fast origin/weaver-main` fails `examples-native` because five existing example switches omit the already-present `runtime.api.Event.window_frame` member. Evidence: `capabilities`, `native-panels`, `command-app`, `native-shell`, and `gpu-components` compile errors; changed canvas suite and the required stock/profile suites pass.
 - The same unrelated `examples-native` failure reproduced for N2 against N1; all other affected fast-gate groups passed.
 - The same unrelated `examples-native` failure reproduced for N3 against N2; zig-test, validate, frontend examples, and mobile examples passed.
-- `UNVERIFIED (needs Mac)`: N3 asymmetric surface pixels. Evidence available now: Native exact display-list radius/stroke assertions and all Windows stock/profile suites pass; physical macOS output remains unobserved.
-- `UNVERIFIED (needs Mac)`: N4 CoreText kern and monospaced-number feature application, plus physical clamp/alignment pixels. Evidence available now: Objective-C packet wiring, platform-neutral exact tests, static validation, and both full Windows suites pass; macOS compilation/physical output awaits CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N3 asymmetric surface pixels. Noro's 36px/4px screen corners, 51px shell corners, and 8.33px/37.5px button corners are physically present without bleed on the Metal packet path.
+- `VERIFIED after repair (Mac, 2026-07-24)`: N4 physical clamp/alignment closure. The repaired spacing fixture reserves distinct clamped lines, and new `examples/styling-text` changes a tabular clock every second beside a constrained two-line ellipsis. The showcase stays intentionally static for idle-zero validity.
 - `BLOCKED (unrelated Native fast gate)`: N4 fast gate reproduces the same five `examples-native` exhaustive-switch failures for the pre-existing `window_frame` event. The N4 changed canvas tests, validate, frontend, and mobile groups pass; macOS-only CEF link validation is skipped on Windows.
-- `UNVERIFIED (needs Mac)`: N5 AppKit v5 packet decoding, inverse-path inset clipping, and `NSShadow` text pixels. Evidence available now: packet/prose ratchets, exact platform-neutral tests, static validation, and both Windows full suites pass; Objective-C compilation and physical pixels await macOS CI/hardware.
-- `UNVERIFIED (needs Mac)`: PR07 registered-font selection through CoreText/AppKit. Evidence available now: SFNT validation, bounded registration, exact runtime resolution/projection tests, Native stock/profile suites, and the Windows live example pass; macOS compilation and physical glyph pixels await CI/hardware.
-- `UNVERIFIED (needs Mac)`: PR08 Lucide subset selection and physical glyph pixels through CoreText/AppKit. Evidence available now: exact name/codepoint lowering, copied-asset equality, bounded registration tests, Native stock/profile suites, and the Windows live example pass; macOS physical output awaits CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N5 AppKit shadow/inset/text pixels through the current v7 packet decoder. Fresh-run outset, inset, arbitrary, and text shadows are physically present. Removing the blue panel's box shadow changes 1,356 pixels within its bounds; removing the title text shadow changes 5,339 pixels within `(38,40)..(351,78)`. The separate dev hot-swap wake failure remains open below.
+- `VERIFIED (Mac, 2026-07-24)`: PR07 registered-font selection through CoreText/AppKit. Noro renders Cozette and the retro composite renders GeistPixel-Square with the expected physical glyph shapes.
+- `VERIFIED (Mac, 2026-07-24)`: PR08 physical vector-path pixels through AppKit. Styling Icons is crisp at its authored sizes, and Noro's measured bright-path centers are exactly 0.5 physical pixel from each button center.
 - `BLOCKED (unrelated Native fast gate)`: N5 fast gate against N4 passes zig-test (34s), validate, frontend examples, and mobile examples (44s), but the same five `examples-native` switches omit pre-existing `window_frame`. Apple-Silicon benchmarks and macOS CEF link are skipped on Windows.
 - `RESOLVED during N5`: the first final full-suite pass found the schema ratchet and macOS decoder prose still naming v4 after the v5 packet change; both were updated and pushed. One intervening Windows run also hit transient `error.Unexpected` while creating an iOS test asset directory; an immediate clean rerun passed in 25.2s.
 - `RESOLVED during PR03`: the first `weaver dev` attempt used a stale runtime after a parallel ReleaseFast build was canceled by the stale-CLI check failure, causing three `unsupported property` crash restarts. An explicit runtime rebuild followed by a fresh 15s smoke produced one startup and no exception/restart. Both outcomes are in PR21 evidence.
-- `UNVERIFIED (needs Mac)`: N6 AppKit wire-v6 decoding and physical asymmetric rounded stack pixels. Evidence available now: version/prose ratchets, direct and raster-cache host paths, exact reference pixels, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: N6 asymmetric rounded-stack pixels through the current v7 AppKit packet decoder. Noro's screen clip and the retro cover stack retain their asymmetric physical masks without bleed.
 - `BLOCKED (unrelated Native fast gate)`: N6 fast gate passes zig-test (29s), validate (1s), frontend examples (6s), and mobile examples (36s), but `examples-native` fails after 121s in the same five pre-existing exhaustive switches that omit `Event.window_frame`; N6 changes neither those examples nor `src/runtime/api.zig`. Total gate time: 193.3s.
-- `UNVERIFIED (needs Mac)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Evidence available now: exact reference pixels, retained projection assertions, AppKit decoder/source wiring, all Windows gates, a stable Windows software live run, and green PR27 Intel/Apple-silicon headless plus Apple-silicon session CI; physical output still requires Mac hardware.
-- `UNVERIFIED (needs Mac)`: N7 wire-v7 image tiling and physical rounded image pixels. Evidence available now: exact reference tiling, UI/draw propagation, packet/version tests, static validation, and both Windows full suites pass; Objective-C compilation and physical output await macOS CI/hardware.
+- `VERIFIED (Mac, 2026-07-24)`: Weaver 09 / Native N6 physical asymmetric rounded clipping. Noro and the retro composite pass on the packet path.
+- `VERIFIED (Mac, 2026-07-24)`: N7 wire-v7 image tiling and rounded image pixels. Styling Images, Noro, and the retro grille physically show cover/contain/top-left native-size tiling and rounded masks.
 - `BLOCKED (unrelated Native fast gate)`: N7 fast gate passes zig-test (31s), validate (<1s), frontend examples (5s), and mobile examples (38s), but the same five `examples-native` switches omit `Event.window_frame`; `examples-native` failed after 99s and total gate time was 173.7s.
 - `RESOLVED (stack release audit)`: PR27's first post-push CI run failed its Windows gate and both macOS headless jobs only at `npm run audit:release`: actual Native pin `9411bc45`, stale expected pin `91949e15`. No test or CI step was removed or weakened. The stack was rebased bottom-up so PR01–PR10 each require their own exact gitlink, and the ten-branch local audit sweep passed; GitHub reruns were triggered by the force-with-lease pushes.
-- `UNVERIFIED (needs Mac)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence available now: exact reference tiling, retained/wire projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; physical output still requires Mac hardware.
+- `VERIFIED (Mac, 2026-07-24)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence: `docs/mac-styling-2026-07-24/styling-images.png`.
 - `BLOCKED (unrelated Native fast gate)`: N8 fast gate against N7 passes zig-test (28s), validate (1s), frontend examples (8s), and mobile examples (53s), but `examples-native` fails after 155s in the same five unchanged exhaustive switches that omit pre-existing `Event.window_frame`; total gate time 245.1s. N8 changes neither those examples nor the runtime Event tag set.
-- `UNVERIFIED (needs Mac)`: Weaver 11 / Native N8 physical hover/pressed pixels and macOS right-click delivery. Evidence available now: exact Native state/event tests, stock/profile suites, exact Weaver wire/projection tests, a stable Windows software live run, and green PR29 Intel/Apple-silicon headless plus Apple-silicon session CI; physical macOS pixels still await hardware.
+- `VERIFIED after repair (Mac, 2026-07-24)`: Weaver 11 / Native N8. Hover/leave, held press/restoration, slider pressed state, slider endpoints/drag, whole-surface drag, and double-click pass physically. Right-click and control-click now both deliver `onRightPress` through the ancestor button with no Copy menu; the two accepted captures carry distinct `right:` coordinates.
 - `RESOLVED during PR11`: the first live smoke used the prior runtime executable and produced three `unsupported property` crash-restarts. An explicit ReleaseFast runtime executable rebuild followed by a fresh isolated run reached 67s uptime with one startup and zero exception/crash/restart lines; the failed attempt was not accepted as evidence.
 - `RESOLVED during PR12`: the initial 2.4 MiB generated grille caused three `StreamTooLong` crash-restarts. A metadata-stripped image-generator revision fit the source stream but exposed `ImageTooLarge`; normalizing both local images to 256×256 meets the widget-profile decoded-image budget. The final fresh run has one startup, software/pixels presentation, 75s observed uptime, and zero error/restart lines.
 - `RESOLVED during PR12`: the first physical showcase frame omitted all stack children because border/shadow had been authored on the layout-only `<stack>`. The shipped example moves those channels to the first image child; the final capture visibly contains the cover, overlay labels, elapsed text, progress, grille, and controls.
-- `UNVERIFIED (needs Mac)`: PR12 physical CoreText font/icon pixels, AppKit image/clip/tile output, and native state visuals. Evidence available now: final Windows physical capture, exact contract/compiler ratchet, prior Native platform-neutral suites, and stable software live run; macOS hardware remains unavailable.
+- `VERIFIED (Mac, 2026-07-24)`: PR12 static physical CoreText font/icon pixels, AppKit image/clip/tile output, and state visuals are present in the retro, icons, images, Noro, and interaction captures. Dynamic `tnum` and line-clamp coverage now lives in the purpose-built `styling-text` fixture rather than weakening the showcase's static idle contract.
+- `VERIFIED after repair (Mac, 2026-07-24)`: an unchanged-config `weaver dev` rebuild now wakes a static macOS widget at the loop-thread frame boundary. Live shadow removal logged `dev hot swap applied (preserved root hook state)`, changed the pixels without restart, and a source restore hot-swapped the shadow back.
+- `VERIFIED (Mac, 2026-07-24)`: installed Noro remained at `0:00.16` process CPU across the full 60-second acceptance window after a 120-second settle. Weaver reported 56.3602 MB; Activity Monitor showed 56.4 MB and `/usr/bin/footprint` showed 56 MB physical / 62 MB peak for the same PID. The run-owned install and daemon were removed afterward.
 - `RESOLVED`: Apple-silicon headless first failed PR03–PR11 at the unchanged hostile-markdown arena bound (observed 1,536,552–1,603,480 bytes versus 1,520,896). N3 keeps lossless f32 corner overrides but right-sizes capped Markdown node buffers from safe line-count upper bounds; N4 restores its common `Widget` to the 728-byte N3 shape by retaining text metadata in the existing rare-command slice. Neither the hostile bound nor a test/CI step changed. Every final Windows focused/stock/profile/runtime gate passes, and Apple-silicon headless CI passes on every final Weaver head PR21–PR30.
 - `RESOLVED (unrelated transient CI)`: PR21 Intel headless initially failed twice in the unchanged `network.test.macOS HTTPS transport preserves policy, bounds, timeout, trust, and cancellation` setup path because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. The third attempt passed the complete Intel job without a styling-code or test change; PR21's Apple-silicon headless and session jobs also pass.
 - `RESOLVED (unrelated transient CI)`: PR28 Intel headless initially failed the same unchanged loopback HTTPS setup because `waitForTestPort` read an empty temporary port file and `parseInt` returned `error.InvalidCharacter`. A failed-job rerun on the identical `a0d567b` head passed the previously failing network step, every downstream Native profile step, and the dependent Apple-silicon session; no code or test changed.
 
+## Noro fidelity follow-up
+
+- Native N7 root cause: `src/primitives/canvas/render.zig:460-489` replaced the
+  active rounded radius whenever a nested image emitter pushed its own
+  equal-bounds square clip. The screen stack and cover therefore shared the
+  correct offset rectangle, but the child erased the ancestor's rounded mask.
+  The equal-rectangle branch at lines 471-477 now intersects radii
+  corner-by-corner with `maxRadii`; the exact padded fixed-height cover test is
+  at `src/primitives/canvas/widget_builtin_tests.zig:364`.
+- Native N7 idle repair: the Win32 host unconditionally armed a repeating
+  16ms top-level `WM_TIMER` after window creation. That obsolete pump was the
+  only continuing main-thread wake; the explicit `kRequestFrameMessage` and
+  one-shot GPU emission scheduler already provide demand-driven delivery.
+  `src/platform/windows/root.zig:1535` now ratchets that the repeating timer is
+  absent while both demand paths remain.
+- Native N7 gates at `64b89cf4`: stock `zig build test` PASS and
+  `zig build test -Dwidget-profile=true` PASS. Native N8 at `98c943e3`:
+  stock and widget-profile suites PASS.
+- Weaver restack gates: PR10 `42682f0` PASS 47/47 Node tests, typecheck,
+  runtime Zig tests, and release audit; PR11 `fc7353a` PASS 50/50 plus the
+  same gates; PR12 `c065458` PASS 52/52 plus the same gates; PR13
+  `bb65795` PASS 52/52, typecheck, CLI build, example TypeScript, check,
+  bundle, exact-pin release audit, and runtime Zig tests.
+- Release audit PASS across all 13 Weaver heads at exact pins:
+  `0e16af24`, `d6389750`, `d903766c`, `d903766c`, `aa6eacd5`,
+  `eb6416df`, `eb6416df`, `eb6416df`, `5cfe3e82`, `64b89cf4`,
+  `98c943e3`, `98c943e3`, `98c943e3`.
+- Mandatory physical capture:
+  `E:\tmp\weaver-noro-pr13\noro-shell-visual-gate-final.png`, reopened with
+  the image viewer at original resolution. PASS: art fills the rounded screen
+  with no top/right bleed; 14px dark rim visible on all sides; overlay reads
+  `00:06 / LET IT GO / 03:58 AM` in Cozette pixel glyphs; record dot is
+  top-right inside the screen; 5% grille is subtle; all three Lucide icons are
+  centered.
+- Installed-mode idle acceptance after a two-minute settle: 0.000ms process
+  CPU over 59.943s; confirmation 0.000ms over 60.002s. Dev registration was
+  absent. The run-owned installation and PID 22008 were removed afterward.
+- Final affected Weaver CI: PR28 run `29983968548`, PR29 run `29983969846`,
+  PR30 run `29983972078`, and PR31 run `29984071014` all PASS the Windows
+  gate, Intel headless, Apple-silicon headless, and Apple-silicon session
+  jobs. Native PR13/PR14 have no configured checks; their full local stock and
+  widget-profile suites pass at the exact pushed heads.
+- Assumption: the pre-existing untracked `examples/noro-shell.weave` is a
+  generated isolation archive, not review source (no other `.weave` archive is
+  tracked). It was preserved as
+  `E:\tmp\weaver-noro-pr13\noro-shell-start.weave`; the authored source,
+  font, and assets are committed in PR31.
+
 ## Cleanup state
 
-- Work is confined to `E:\Projects\weaver-styling-run` and its submodule.
+- Windows implementation work is confined to
+  `E:\Projects\weaver-styling-run` and its submodule. The attended Mac repair
+  updates Weaver runtime wiring, Native SDK layout/input/frame-boundary code,
+  adds `examples/styling-text`, and records the two ledgers plus accepted PNG
+  evidence under `docs/mac-styling-2026-07-24/`.
 - No default branch was changed or merged; no frozen `weaver-fork*` branch was extended.
 - No Weaver dev process is currently running.
 - Isolated PR 01 dev data under `%TEMP%\weaver-styling-run-pr01` was removed after shutdown.
@@ -207,7 +319,139 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - PR12 baseline/showcase hosts, dev watchers, isolated data roots, diagnostic captures, logs, and the detached master worktree were removed after shutdown. A broad process audit found no clone-owned runtime, host, watcher, or esbuild process; only the running Codex task process matched the clone path in its command text.
 - The resumed PR12 live root `%TEMP%\weaver-styling-resume-pr12` was removed after `weaver down`; host PID 7728, widget PID 48016, and watcher PID 44008 were all absent.
 - The three-defect live verifier stopped run-owned widget PID 51452 and watcher PID 46400 and removed the transient `.weaver-dev-port`. Its isolated ReleaseFast binary, log, and PID-targeted capture remain under `E:\tmp\weaver-three-defects-final` as evidence. The pre-existing user host/widget/watcher processes were not touched.
+- The Mac verifier uninstalled its run-owned Noro installation, stopped
+  `weaverd`, closed Activity Monitor, reverted all temporary source
+  instrumentation, and found no remaining Weaver widget, host, watcher, or
+  esbuild process.
 
 ## Next executable task
 
-Review the two green draft stacks bottom-up, starting with Native N1 / Weaver PR01; no implementation or verification task remains.
+Review and commit the repaired Native SDK layer, advance Weaver's exact Native
+gitlink/audit pin to that commit, then rerun `npm run audit:release` and the
+draft-stack CI matrix before merging. The local full Native/Weaver/runtime/host
+gates and all formerly failing physical Mac rows already pass.
+
+## Path-icon centering follow-up (2026-07-23)
+
+- Root cause: the Native stack child frame is geometrically centered at
+  `runtime/native-sdk/src/primitives/canvas/widget_layout.zig:1704-1744`.
+  A same-frame pixel scan disproved the inferred 6-8px layout-box offset. The
+  remaining Noro bias came from `examples/noro-shell/widget.tsx:44,51-52,58`:
+  the exact Rainmeter geometry is centered at `(14,14)` in a 28px meter, but
+  the omitted raw-icon viewBox selected the contract default `0 0 24 24`,
+  centered at `(12,12)`. PR13 now declares `viewBox="0 0 28 28"` without
+  changing any path command or commit `4241b12` corner radius.
+- Assumption/evidence rule: button centers are the checked-in
+  `Variables.inc` geometry `(64,290)`, `(170,290)`, `(276,290)` in the
+  340x356 widget capture. Bright icon pixels are those with RGB channels each
+  at least 160; this excludes the dark button chrome and includes antialiased
+  icon coverage consistently before and after.
+- Before (`E:\tmp\weaver-icon-centering-before-window.png`): prev
+  `(65.5,291.5)`, pause `(171.5,292.0)`, next `(277.5,291.5)`, respectively
+  `(+1.5,+1.5)`, `(+1.5,+2.0)`, `(+1.5,+1.5)` from the authored button
+  centers. After: all three are `(-0.5,-0.5)`.
+- Native N5 adds a reference-renderer regression at
+  `src/primitives/canvas/widget_builtin_tests.zig:808`: a 100x100 centered
+  pressable panel with a 28px path icon scans the rendered alpha bbox and
+  asserts both center axes are within 1px. N5 `3a16880f` passes focused canvas
+  (36.4s), stock (94.3s), and widget-profile (58.7s); N6 `bdac8c22`
+  stock/profile pass (89.6/66.4s), N7 `63554853` (94.3/66.4s), and N8
+  `111bb748` (80.5/87.4s).
+- Final Weaver exact-head gates all pass: PR08 `2908b6b5` (45 Node tests,
+  typecheck, runtime Zig, release audit), PR09 `f1fb2de5`, PR10 `56173ca5`,
+  PR11 `b4da16a6`, PR12 `2ebbe42e`, and PR13 `3740b951` pass the same four
+  gates; PR13 additionally passes `weaver check examples/noro-shell`.
+  `audit:release` passes all 13 Weaver heads at exact pins
+  `0e16af24/d6389750/d903766c/d903766c/aa6eacd5/eb6416df/eb6416df/3a16880f/bdac8c22/63554853/111bb748/111bb748/111bb748`.
+- Mandatory minimized-desktop visual gate:
+  `E:\tmp\weaver-icon-centering-final-visual-gate.png`, reopened with the
+  image viewer at original resolution. Numeric scan PASS: prev bbox
+  `57,283..70,296`, center `(63.5,289.5)`; pause
+  `163,282..176,297`, center `(169.5,289.5)`; next
+  `269,283..282,296`, center `(275.5,289.5)`. Every axis is 0.5px from its
+  authored button center. Solid geometry, exact paths, and all three corner
+  shapes remain visually intact.
+- GitHub rollups: pending the force-with-lease restack at the time this
+  evidence commit was authored; final check URLs/results are recorded in the
+  PR bodies and run report after polling.
+
+## CI readiness hardening after centering restack (2026-07-24)
+
+- Assumption/action: two independently reproduced Intel failures on PR08 and
+  PR12 were treated as a real flaky gate rather than hidden by repeated
+  reruns. Both read the macOS HTTPS fixture's port file after creation but
+  before its contents were written. PR01 now publishes that fixture file by
+  atomic replace, and its reader waits through an observed empty file. The
+  earlier PR13 Apple failure likewise replaced a single `setImmediate`
+  scheduling guess with an awaited server `connection` event while retaining
+  the exact one-notification assertion and a 5s test timeout.
+- Weaver PR01-PR13 were restacked from the hardened PR01 base. Exact code
+  heads are `513608a8/1161ff90/7cea4e77/303d8c40/b79a0074/03ce828f/83b9892e/`
+  `a08aebf5/d2a80577/884e65cf/4a967c8c/237ff406/9f9c9a1b`.
+  Every exact head passes `npm test`, `npm run typecheck`,
+  `zig build test -Dweb-layer=exclude -Dtrace=off --build-file runtime/build.zig`,
+  and `npm run audit:release`; PR13 also passes
+  `weaver check examples/noro-shell`.
+- Native N5-N8 commits and Weaver gitlinks remain unchanged:
+  `3a16880f/bdac8c22/63554853/111bb748`. No production assertion, test, or CI
+  step was removed or weakened.
+
+## Interaction-state shadow and descendant styling extension (2026-07-24)
+
+- Native N8 `c61d3518` adds `inherit` / `none` / value shadow overrides to
+  hover/pressed styles. State resolution uses the node itself when it claims
+  press, otherwise the nearest press-claiming layout ancestor. Descendant
+  invalidation walks run only when hover/pressed IDs change, so the state
+  machinery adds no idle polling or timer.
+- Native regressions cover pressed shadow precedence, explicit shadow removal,
+  descendant foreground resolution, descendant state-shadow invalidation, and
+  the full larger halo on both press and release. Focused widget-profile canvas
+  PASS; full stock PASS in 25.5s; full widget profile PASS in 71.2s. Git's
+  `usr\bin` was added to `PATH` for the repository's existing `test -f`
+  assertions; both WebView2 DLLs were present before the corrected rerun.
+  After the attended macOS repair advanced N8 to `56152f29`, the complete
+  Windows stock/profile suites passed again in 94.3s/88.4s.
+- Weaver PR11 `2f416b9` compiles named, arbitrary, inset, color-composed, and
+  `shadow-none` hover/pressed shadows, projects their wire properties, and
+  rejects an orphan descendant variant with the
+  `NearestPressableAncestor` fix-it. The contract and conjure skill document
+  the implicit nearest-button/slider rule and require no `group` class.
+- Assumption: `weaver check` requires the pressable ancestor to be statically
+  provable in the same JSX tree. A reusable component that authors descendant
+  state utilities must also contain its button/slider owner, or the stateful
+  child must be inlined at the owner.
+- Assumption: the two fixed Weaver interaction records may grow from 16 KiB
+  to a ratcheted 26 KiB total at the 128-node limit (104 bytes each) to retain
+  state shadow geometry. This is bounded Weaver-tree storage; Native keeps
+  rare style commands in its existing side channel and does not grow the
+  common `Widget` arena.
+- Weaver exact-head gates PASS: PR11 Node 52/52 in 31.4s, typecheck, runtime
+  Windows-flag Zig in 8.9s, release audit; PR12 Node 54/54 in 33.7s,
+  typecheck 2.1s, runtime Zig 0.5s, release audit 0.4s; PR13 Node 54/54 in
+  34.8s, typecheck 2.1s, runtime Zig 7.6s, release audit, and Noro check.
+  Release audit PASSes all 13 heads at exact branch-local Native pins.
+- Noro PR13 `012b3dc` preserves the exact custom icon paths, `0 0 28 28`
+  view boxes, and `8.33px` / `37.5px` corner geometry. All three buttons now
+  swap to fill `#141414`, inset shadow `0 2px 4px #0000004d`, and descendant
+  icon color `#b6b6b6` while pressed.
+- Pressed visual gate PASS. A real Win32 left-button hold targeted the no-op
+  previous button so the icon path remained identical. Both captures were
+  reopened at original resolution:
+  `E:\tmp\weaver-pressed-state-20260724\noro-pressed-held.png` and
+  `E:\tmp\weaver-pressed-state-20260724\noro-released.png`. During hold the
+  fill is darker, the normal inset highlight is replaced by the dark inset,
+  and the icon dims; release fully restores all three. Numeric means:
+  fill `25.49` held vs `31.19` released; icon `164.91` held vs `187.10`
+  released.
+- Installed idle gate PASS. The updated Noro installation ran without a dev
+  watcher or provider subscription. After more than two minutes settle, PID
+  36800 advanced `0.000ms` TotalProcessorTime over `60.042s`.
+- Assumption: Weaver's host uses machine-global lifecycle objects, so the
+  existing clone-owned Noro installation was uninstalled to run the dev gate,
+  then restored from the updated PR13 source for installed-mode idle
+  verification. The unrelated source-missing Pomodoro registry entry was not
+  modified.
+- CI PASS across Windows gate, Intel headless, Apple-silicon headless, and
+  Apple-silicon session: PR29 `30088527353`, PR30 `30088529927`, and final
+  PR31 code/evidence head `30090373720`. Native PR14 has no configured checks;
+  its exact final head passes both required local full suites.

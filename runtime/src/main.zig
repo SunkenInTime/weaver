@@ -434,7 +434,6 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
             }
         }
     }
-    if (dev_reload_pending.swap(false, .acq_rel)) return .dev_reload;
     const engine = model.engine orelse return null;
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
@@ -449,6 +448,19 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         std.log.info("widget present: {d} rendered frames in {d} ms", .{ rendered_presents, elapsed_ns / std.time.ns_per_ms });
     }
     return Msg{ .canvas_frame = frame.timestamp_ns };
+}
+
+/// The dev bundle listener runs off-thread. It only publishes the atomic
+/// pending bit and requests a platform frame; this loop-thread hook turns
+/// that frame boundary into the ordinary update/rebuild path. Static widgets
+/// therefore hot-swap without borrowing a GPU completion from animation,
+/// input, or resize.
+fn onFrameRequested(_: *const Model) ?Msg {
+    return takePendingDevReload();
+}
+
+fn takePendingDevReload() ?Msg {
+    return if (dev_reload_pending.swap(false, .acq_rel)) .dev_reload else null;
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
@@ -849,6 +861,7 @@ pub fn main(init: std.process.Init) !void {
         .view = view,
         .sync = syncNativeState,
         .on_frame = onFrame,
+        .on_frame_requested = onFrameRequested,
         .on_window_frame = onWindowFrame,
     });
     defer app_state.destroy();
@@ -1016,6 +1029,14 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "dev reload frame hook consumes one pending wake" {
+    dev_reload_pending.store(false, .release);
+    try std.testing.expect(takePendingDevReload() == null);
+    dev_reload_pending.store(true, .release);
+    try std.testing.expectEqual(Msg.dev_reload, takePendingDevReload().?);
+    try std.testing.expect(takePendingDevReload() == null);
 }
 
 test "corner radius projection preserves authored values and maps retained unset in-band" {
