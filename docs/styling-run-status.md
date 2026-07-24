@@ -37,6 +37,19 @@ this sweep is the separately requested deterministic press-cycle test.
   platform/runtime path dispatches zero typed press events on down and exactly
   one on up (`3f6a68b6`); no production double-fire existed, so no dispatch
   behavior was changed. Weaver pins that proof in `d9f4c43`.
+- Final local gate sweep: PR20-PR31 all PASS `npm run build`, `npm test`,
+  `npm run typecheck`, runtime `zig build test -Dweb-layer=exclude
+  -Dtrace=off`, and `npm run audit:release` at heads `dfe14372`,
+  `059d2132`, `0f1a5ba0`, `7e3145a3`, `b14422d3`, `05400e19`,
+  `712c6192`, `24ec9369`, `81f79251`, `d4fecf24`, `4910c998`, and
+  `a3f0ce49`. Unchanged PR19 `513608a8` also PASSes `audit:release`.
+- Native N8 `3f6a68b6`: focused `zig build test-canvas
+  -Dwidget-profile=true` PASS (839 passed, 2 skipped); full stock `zig build
+  test` PASS; full profile `zig build test -Dwidget-profile=true` PASS. The
+  first stock launch was environment-invalid (`test: FileNotFound`) because
+  Git's `usr\bin` was absent from `PATH`; both recorded full results are from
+  the clean rerun with the repository-documented Git tool path restored.
+- CI rollups and Greptile replies: pending push.
 
 ## 2026-07-23 path-icon redesign
 
@@ -126,19 +139,19 @@ this sweep is the separately requested deterministic press-cycle test.
 
 | Layer | Weaver | Native SDK fork | State |
 |---|---|---|---|
-| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `5ca71974` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, draft PRs open |
-| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `59ab68b1` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete, pushed, draft PRs open |
-| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `4bdeaa17` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete, pushed, draft PRs open |
-| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `954d86dc` | none; retains N3 `d903766c` | complete, pushed, draft PR open |
-| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `75a91fd2` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete, pushed, draft PRs open |
-| 06 / N5 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `8d1d8042` | pre-path N5 pin `eb6416df` | complete, pushed, draft PR open |
-| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `aaa1353a` | rides pre-path N5 `eb6416df` | complete, pushed, draft PR open |
-| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
-| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
-| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `2f416b9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14): interaction commit `c61d3518`, branch head `56152f29` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `a4041cd` | pins N8 interaction commit `c61d3518` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31) at `1602e3c`, including pressed-state implementation `012b3dc` | pins N8 head `56152f29` | complete, pushed, draft PR open; code/evidence head CI green |
+| 01 / N1 | [`styling/01-spacing-sizing`](https://github.com/SunkenInTime/weaver/pull/19) at `513608a8` | [`styling/N1-layout-spacing`](https://github.com/SunkenInTime/native/pull/7) at `0e16af24` | complete, pushed, ready for review |
+| 02 / N2 | [`styling/02-flex-completeness`](https://github.com/SunkenInTime/weaver/pull/20) at `dfe14372` | [`styling/N2-flex`](https://github.com/SunkenInTime/native/pull/8) at `d6389750` | complete locally; push/CI pending |
+| 03 / N3 | [`styling/03-radii-borders`](https://github.com/SunkenInTime/weaver/pull/21) at `059d2132` | [`styling/N3-radii-borders`](https://github.com/SunkenInTime/native/pull/9) at `d903766c` | complete locally; push/CI pending |
+| 04 | [`styling/04-palette`](https://github.com/SunkenInTime/weaver/pull/22) at `0f1a5ba0` | retains N3 `d903766c` | complete locally; push/CI pending |
+| 05 / N4 | [`styling/05-text-pack`](https://github.com/SunkenInTime/weaver/pull/23) at `7e3145a3` | [`styling/N4-text`](https://github.com/SunkenInTime/native/pull/10) at `aa6eacd5` | complete locally; push/CI pending |
+| 06 | [`styling/06-shadows`](https://github.com/SunkenInTime/weaver/pull/24) at `b14422d3` | pre-path N5 pin `eb6416df` | complete locally; push/CI pending |
+| 07 | [`styling/07-fonts`](https://github.com/SunkenInTime/weaver/pull/25) at `05400e19` | pre-path N5 pin `eb6416df` | complete locally; push/CI pending |
+| 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `712c6192` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `3a16880f` | complete locally; push/CI pending |
+| 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `24ec9369` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `bdac8c22` | complete locally; push/CI pending |
+| 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `81f79251` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `63554853` | complete locally; push/CI pending |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `d4fecf24` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `3f6a68b6` | complete locally; push/CI pending |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `4910c998` | pins N8 `3f6a68b6` | complete locally; push/CI pending |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31) at `a3f0ce49` | pins N8 `3f6a68b6` | complete locally; push/CI pending |
 
 ## Completed gates
 
