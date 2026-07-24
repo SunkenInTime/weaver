@@ -69,7 +69,7 @@ test("widget renders one native generation and providers use native timers", asy
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
     return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square justify-evenly grow-2 shrink-0 self-end flex-wrap shadow-inner shadow-red-500/40" },
       sdk.h("panel", { class: "w-0" }),
-      sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold text-shadow-md" }, time.ss),
+      sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold font-mono text-shadow-md" }, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
       sdk.h("text", null, media.title),
@@ -112,7 +112,7 @@ test("widget renders one native generation and providers use native timers", asy
   assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[2] === "width" && operation[3] === 0), "explicit w-0 wire prop");
   const styledTextId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "text")[2];
   for (const [key, value] of [
-    ["fontScale", 13 / 14], ["fontWeight", "bold"], ["textAlign", "center"],
+    ["fontScale", 13 / 14], ["fontWeight", "bold"], ["fontFamily", "mono"], ["textAlign", "center"],
     ["lineHeight", 1.25], ["letterSpacing", -0.5], ["lineClamp", 2], ["tabularNums", true],
     ["textShadow", "0 2 4 #00000026"],
   ]) {

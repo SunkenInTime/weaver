@@ -33,6 +33,18 @@ interface SourceProject {
   source: string;
   sourceFile: ts.SourceFile;
   config: WidgetConfigData;
+  fonts: RuntimeFont[];
+}
+
+type FontWeightName = "light" | "regular" | "medium" | "semibold" | "bold";
+
+interface RuntimeFont {
+  id: number;
+  name: string;
+  stem: string;
+  family: string;
+  weight: FontWeightName;
+  file: string;
 }
 
 interface WidgetConfigData {
@@ -60,7 +72,12 @@ interface RuntimeManifest {
   origins: string[];
   subscribe: ("time" | "cpu" | "memory" | "audio" | "media")[];
   renderBackend: "gpu" | "software";
+  fonts: RuntimeFont[];
 }
+
+const MAX_WIDGET_FONTS = 2;
+const MAX_WIDGET_FONT_BYTES = 512 * 1024;
+const FIRST_REGISTERED_FONT_ID = 64;
 
 interface BundleResult { project: SourceProject; manifest: RuntimeManifest }
 
@@ -191,6 +208,7 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
     renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
+    fonts: project.fonts,
   };
   writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return { project, manifest };
@@ -803,7 +821,7 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  return { directory, sourcePath, source, sourceFile, config };
+  return { directory, sourcePath, source, sourceFile, config, fonts: discoverWidgetFonts(directory) };
 }
 
 function extractConfig(sourceFile: ts.SourceFile, errors: string[]): WidgetConfigData | null {
@@ -989,7 +1007,13 @@ function validateSource(project: SourceProject): string[] {
         const classText = jsxStringValue(classAttribute.initializer);
         if (classText === null) errors.push(locationMessage(project.sourceFile, classAttribute, "class must be a literal string so weaver check can validate every utility"));
         else {
-          try { compileClass(classText); }
+          try {
+            const compiled = compileClass(classText);
+            if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
+              const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
+              errors.push(locationMessage(project.sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
+            }
+          }
           catch (error) { errors.push(locationMessage(project.sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
         }
       }
@@ -1021,6 +1045,89 @@ function validateSource(project: SourceProject): string[] {
   }
   validateLoweredTreeBudgets(project, errors);
   return errors;
+}
+
+function discoverWidgetFonts(directory: string): RuntimeFont[] {
+  const candidates = readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && [".ttf", ".otf"].includes(extname(entry.name).toLowerCase()))
+    .sort((left, right) => left.name.localeCompare(right.name, "en"));
+  const errors: string[] = [];
+  if (candidates.length > MAX_WIDGET_FONTS) {
+    errors.push(`Bundled fonts exceed the widget-profile limit of ${MAX_WIDGET_FONTS} faces: ${candidates.map((entry) => entry.name).join(", ")}`);
+  }
+  const fonts: RuntimeFont[] = [];
+  for (const [index, entry] of candidates.entries()) {
+    const path = join(directory, entry.name);
+    const stem = basename(entry.name, extname(entry.name));
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(stem)) {
+      errors.push(`${entry.name}: font file stems must be 1-63 letters, digits, underscores, or hyphens so font-[${stem || "name"}] is a valid class`);
+      continue;
+    }
+    const bytes = readFileSync(path);
+    if (bytes.length > MAX_WIDGET_FONT_BYTES) {
+      errors.push(`${entry.name}: font is ${bytes.length} bytes; the widget-profile per-face limit is ${MAX_WIDGET_FONT_BYTES} bytes (512 KiB)`);
+      continue;
+    }
+    const parseError = validateTrueTypeFace(bytes, extname(entry.name).toLowerCase());
+    if (parseError) {
+      errors.push(`${entry.name}: ${parseError}`);
+      continue;
+    }
+    const variant = /^(.*?)[_-](light|regular|medium|semibold|bold)$/i.exec(stem);
+    const family = variant?.[1] || stem;
+    const weight = (variant?.[2]?.toLowerCase() ?? "regular") as FontWeightName;
+    fonts.push({ id: FIRST_REGISTERED_FONT_ID + index, name: entry.name, stem, family, weight, file: entry.name });
+  }
+  const duplicateStem = fonts.find((font, index) => fonts.findIndex((candidate) => candidate.stem.toLowerCase() === font.stem.toLowerCase()) !== index);
+  if (duplicateStem) errors.push(`${duplicateStem.name}: bundled font stems must be unique ignoring case`);
+  for (const family of new Set(fonts.map((font) => font.family.toLowerCase()))) {
+    const members = fonts.filter((font) => font.family.toLowerCase() === family);
+    const duplicateWeight = members.find((font, index) => members.findIndex((candidate) => candidate.weight === font.weight) !== index);
+    if (duplicateWeight) errors.push(`${duplicateWeight.name}: family "${duplicateWeight.family}" has more than one ${duplicateWeight.weight} face`);
+  }
+  if (errors.length > 0) throw new WeaverFailure(errors);
+  return fonts;
+}
+
+function validateTrueTypeFace(bytes: Buffer, extension: string): string | null {
+  if (bytes.length < 12) return "not a parseable TrueType face (truncated SFNT header)";
+  const tableCount = bytes.readUInt16BE(4);
+  if (tableCount === 0 || 12 + tableCount * 16 > bytes.length) return "not a parseable TrueType face (truncated table directory)";
+  const tables = new Map<string, { offset: number; length: number }>();
+  for (let index = 0; index < tableCount; index += 1) {
+    const record = 12 + index * 16;
+    const tag = bytes.toString("ascii", record, record + 4);
+    const offset = bytes.readUInt32BE(record + 8);
+    const length = bytes.readUInt32BE(record + 12);
+    if (offset > bytes.length || length > bytes.length - offset) return `not a parseable TrueType face (table ${JSON.stringify(tag)} extends past end of file)`;
+    tables.set(tag, { offset, length });
+  }
+  const required = ["head", "maxp", "cmap", "loca", "glyf", "hmtx", "hhea"];
+  const missing = required.filter((tag) => !tables.has(tag));
+  if (missing.length > 0) {
+    if (extension === ".otf" && tables.has("CFF ")) return "OTF/CFF outlines are unsupported by the bounded renderer; convert this face to TrueType glyf outlines";
+    return `not a parseable TrueType glyf face (missing ${missing.join(", ")})`;
+  }
+  const head = tables.get("head")!;
+  const maxp = tables.get("maxp")!;
+  const hhea = tables.get("hhea")!;
+  const cmap = tables.get("cmap")!;
+  if (head.length < 52 || maxp.length < 6 || hhea.length < 36 || cmap.length < 4) return "not a parseable TrueType face (required metrics table is truncated)";
+  if (bytes.readUInt16BE(head.offset + 18) === 0 || bytes.readUInt16BE(hhea.offset + 34) === 0) return "not a parseable TrueType face (invalid zero metrics)";
+  const subtableCount = bytes.readUInt16BE(cmap.offset + 2);
+  if (cmap.length < 4 + subtableCount * 8) return "not a parseable TrueType face (truncated cmap directory)";
+  let hasUnicodeFormat4 = false;
+  for (let index = 0; index < subtableCount; index += 1) {
+    const record = cmap.offset + 4 + index * 8;
+    const platform = bytes.readUInt16BE(record);
+    const encoding = bytes.readUInt16BE(record + 2);
+    const relative = bytes.readUInt32BE(record + 4);
+    if (relative > cmap.length - 2) continue;
+    const format = bytes.readUInt16BE(cmap.offset + relative);
+    if ((platform === 0 || (platform === 3 && (encoding === 1 || encoding === 10))) && format === 4) hasUnicodeFormat4 = true;
+  }
+  if (!hasUnicodeFormat4) return "not a parseable TrueType face (no Unicode cmap format 4 subtable)";
+  return null;
 }
 
 function runTypeScript(directory: string): string | null {

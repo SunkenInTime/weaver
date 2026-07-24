@@ -47,6 +47,7 @@ pub const Model = struct {
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
     geometry: ?*const geometry_mod.Store = null,
+    fonts: []const manifest_mod.Font = &.{},
     /// Last origin we consider settled (launch placement or the last
     /// persisted drag), in the platform's logical window space. Null
     /// until the first platform frame report names the launch position.
@@ -405,7 +406,7 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
     const root_id = model.tree.root orelse return ui.panel(.{ .window_drag = true }, .{});
-    return buildNode(ui, &model.tree, root_id, true);
+    return buildNode(ui, &model.tree, model.fonts, root_id, true);
 }
 
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
@@ -413,9 +414,10 @@ fn hasPaintStyle(node: *const tree_mod.Node) bool {
         node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null;
 }
 
-fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi.Node) WidgetUi.Node {
+fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
     const count = @as(usize, @intFromBool(retained.shadow != null)) +
-        @as(usize, @intFromBool(retained.text_shadow != null));
+        @as(usize, @intFromBool(retained.text_shadow != null)) +
+        @as(usize, @intFromBool(font_id != null));
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
     const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
@@ -431,13 +433,17 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, source: WidgetUi
         } };
         cursor += 1;
     }
-    if (retained.text_shadow) |shadow| combined[cursor] = .{ .text_shadow = shadow };
+    if (retained.text_shadow) |shadow| {
+        combined[cursor] = .{ .text_shadow = shadow };
+        cursor += 1;
+    }
+    if (font_id) |id| combined[cursor] = .{ .text_font = id };
     var result = source;
     result.widget.immediate_commands = combined;
     return result;
 }
 
-fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
+fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_mod.Font, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
     const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
     var options: WidgetUi.ElementOptions = .{
         .global_key = .{ .int = id },
@@ -525,7 +531,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
                 .medium => .medium,
                 .semibold, .bold => .bold,
             };
-            return attachEffects(ui, retained, ui.text(options, retained.textSlice()));
+            return attachEffects(ui, retained, resolveFontId(retained, fonts), ui.text(options, retained.textSlice()));
         }
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
@@ -536,11 +542,11 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             },
             .scale = retained.font_scale,
         }};
-        return attachEffects(ui, retained, ui.paragraph(options, &span));
+        return attachEffects(ui, retained, resolveFontId(retained, fonts), ui.paragraph(options, &span));
     }
     const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch return ui.panel(.{}, .{});
     for (retained.children[0..retained.child_count], 0..) |child_id, index| {
-        children[index] = buildNode(ui, tree, child_id, false);
+        children[index] = buildNode(ui, tree, fonts, child_id, false);
     }
     const result = switch (retained.kind) {
         // SDK layout-only rows/columns do not paint their own style. A
@@ -582,7 +588,37 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
-    return attachEffects(ui, retained, result);
+    return attachEffects(ui, retained, null, result);
+}
+
+fn resolveFontId(node: *const tree_mod.Node, fonts: []const manifest_mod.Font) ?native_sdk.canvas.FontId {
+    const requested = node.fontFamilySlice();
+    // Null means "use Native's ordinary sans + weight resolution" and
+    // keeps the overwhelmingly common path free of a metadata command.
+    if (requested.len == 0 or std.mem.eql(u8, requested, "sans")) return null;
+    if (std.mem.eql(u8, requested, "mono")) return native_sdk.canvas.default_mono_font_id;
+    for (fonts) |font| if (std.mem.eql(u8, requested, font.stem)) return font.id;
+    var best: ?manifest_mod.Font = null;
+    var best_distance: u8 = std.math.maxInt(u8);
+    for (fonts) |font| {
+        if (!std.mem.eql(u8, requested, font.family)) continue;
+        const distance: u8 = @intCast(@abs(@as(i8, @intCast(@intFromEnum(node.font_weight))) - @as(i8, @intCast(@intFromEnum(font.weight)))));
+        if (distance < best_distance) {
+            best = font;
+            best_distance = distance;
+        }
+    }
+    return if (best) |font| font.id else null;
+}
+
+fn loadFonts(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, fonts: []const manifest_mod.Font) ![]const WidgetApp.FontRegistration {
+    const registrations = try allocator.alloc(WidgetApp.FontRegistration, fonts.len);
+    for (fonts, 0..) |font, index| {
+        const path = try std.fs.path.join(allocator, &.{ directory, font.file });
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(native_sdk.runtime.max_registered_canvas_font_bytes));
+        registrations[index] = .{ .id = font.id, .name = font.name, .ttf = bytes };
+    }
+    return registrations;
 }
 
 fn nativeCornerRadius(retained: f32) f32 {
@@ -691,6 +727,7 @@ pub fn main(init: std.process.Init) !void {
         .views = &shell_views,
     }};
     const scene: native_sdk.ShellConfig = .{ .windows = &shell_windows };
+    const fonts = try loadFonts(init.io, allocator, directory, loaded.manifest.fonts);
 
     var tokens = native_sdk.canvas.DesignTokens.theme(.{ .pack = .geist, .color_scheme = .dark });
     tokens.colors.background = native_sdk.canvas.Color.rgba8(0, 0, 0, 0);
@@ -699,6 +736,7 @@ pub fn main(init: std.process.Init) !void {
         .scene = scene,
         .canvas_label = "widget-canvas",
         .tokens = tokens,
+        .fonts = fonts,
         .update_fx = update,
         .init_fx = initEffects,
         .view = view,
@@ -708,6 +746,7 @@ pub fn main(init: std.process.Init) !void {
     });
     defer app_state.destroy();
     app_state.model.geometry = &geometry_store;
+    app_state.model.fonts = loaded.manifest.fonts;
     if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
     try app_state.model.provider.init(init.io, platform.providerEndpoint(
         init.environ_map.get("WEAVER_HOST_PIPE"),
@@ -887,7 +926,7 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try retained_tree.setFlexWrap(row, true);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, row, true));
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, row, true));
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
@@ -915,7 +954,7 @@ test "attached effects combine builder metadata with box and text shadows" {
     });
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, text_node, true));
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, text_node, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
@@ -929,4 +968,68 @@ test "attached effects combine builder metadata with box and text shadows" {
         .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
         else => return error.TestExpectedEqual,
     }
+}
+
+test "showcase headline keeps exact registered face through bold and text shadow" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const text_node = try retained_tree.createNode(.text);
+    try retained_tree.setText(text_node, "SECOND NATURE");
+    try retained_tree.setNumberProp(text_node, "fontScale", 30.0 / 14.0);
+    try retained_tree.setNumberProp(text_node, "lineHeight", 1.2);
+    try retained_tree.setNumberProp(text_node, "letterSpacing", 0.75);
+    try retained_tree.setFontFamily(text_node, "GeistPixel-Square");
+    try retained_tree.setFontWeight(text_node, "bold");
+    try retained_tree.setTextShadow(text_node, .{
+        .offset = .{ .dx = 0, .dy = 8 },
+        .blur = 10,
+        .color = native_sdk.canvas.Color.rgba8(0, 0, 0, 128),
+    });
+    const fonts = [_]manifest_mod.Font{.{
+        .id = 65,
+        .name = "GeistPixel-Square.ttf",
+        .stem = "GeistPixel-Square",
+        .family = "GeistPixel",
+        .weight = .regular,
+        .file = "assets/GeistPixel-Square.ttf",
+    }};
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, &fonts, text_node, true));
+    try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .text_style => |style| {
+            try std.testing.expectEqual(@as(f32, 36), style.line_height);
+            try std.testing.expectEqual(@as(f32, 0.75), style.letter_spacing);
+        },
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 10), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[2]) {
+        .text_font => |font_id| try std.testing.expectEqual(@as(native_sdk.canvas.FontId, 65), font_id),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "bundled font resolution honors exact stems families and nearest weights" {
+    var tree: tree_mod.Tree = .{};
+    const id = try tree.createNode(.text);
+    const fonts = [_]manifest_mod.Font{
+        .{ .id = 64, .name = "Display-Regular.ttf", .stem = "Display-Regular", .family = "Display", .weight = .regular, .file = "Display-Regular.ttf" },
+        .{ .id = 65, .name = "Display-Bold.ttf", .stem = "Display-Bold", .family = "Display", .weight = .bold, .file = "Display-Bold.ttf" },
+    };
+    try tree.setFontFamily(id, "Display");
+    try tree.setFontWeight(id, "semibold");
+    try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, 65), resolveFontId(try tree.nodeConst(id), &fonts));
+    try tree.setFontFamily(id, "Display-Regular");
+    try tree.setFontWeight(id, "bold");
+    try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, 64), resolveFontId(try tree.nodeConst(id), &fonts));
+    try tree.setFontFamily(id, "sans");
+    try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, null), resolveFontId(try tree.nodeConst(id), &fonts));
+    try tree.setFontFamily(id, "mono");
+    try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, native_sdk.canvas.default_mono_font_id), resolveFontId(try tree.nodeConst(id), &fonts));
 }

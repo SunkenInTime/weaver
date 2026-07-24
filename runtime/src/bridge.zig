@@ -301,6 +301,10 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setFontWeight(id, value.bytes) catch return fail(js, "invalid fontWeight");
+    } else if (std.mem.eql(u8, key.bytes, "fontFamily")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "fontFamily must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setFontFamily(id, value.bytes) catch return fail(js, "invalid fontFamily");
     } else if (std.mem.eql(u8, key.bytes, "textAlign")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "textAlign must be a string");
         defer c.JS_FreeCString(js, value.raw);

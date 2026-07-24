@@ -131,6 +131,8 @@ utility.
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
 | `text-[Npx]` | arbitrary font size (`N / 14` font scale) |
 | `font-{light,normal,medium,semibold,bold}` | font weight |
+| `font-sans`, `font-mono` | reserved built-in proportional and monospaced faces |
+| `font-[file-stem]` | a validated font file next to `widget.tsx`; the extension is omitted |
 | `text-{left,center,right}` | horizontal text alignment |
 | `leading-{none,tight,snug,normal,relaxed,loose}`, `leading-N`, `leading-[Npx]`, `leading-[multiplier]` | line-height multiplier; pixel forms resolve against final font size |
 | `tracking-{tighter,tight,normal,wide,wider,widest}`, `tracking-[Npx]`, `tracking-[Nem]` | letter spacing in logical pixels; negative arbitrary values are accepted |
@@ -157,6 +159,28 @@ Named text sizes use Tailwind's paired size/line-height defaults:
 Still deliberately absent (check-error): gradients, hover/state variants,
 and transitions. The shadow surface intentionally supports one shadow per
 node; comma-separated CSS shadow lists are not part of the packed wire form.
+
+### Bundled fonts
+
+`weaver check` discovers `.ttf` and `.otf` files directly beside
+`widget.tsx`. The widget profile permits at most two faces, each at most
+512 KiB. Faces must contain bounded TrueType `glyf` outlines and a Unicode
+format-4 cmap; OTF files using CFF outlines are rejected with a conversion
+fix-it because the deterministic reference renderer cannot paint CFF.
+Ordinary font files and their license files travel as readable `.weave`
+source, are copied into `dist`, and are registered before first layout.
+
+The exact stem always works (`GeistPixel-Square.ttf` becomes
+`font-[GeistPixel-Square]`). A terminal `-Light`, `-Regular`, `-Medium`,
+`-Semibold`, or `-Bold` (underscore also accepted) additionally groups
+faces into a family alias: `Display-Regular.ttf` plus `Display-Bold.ttf`
+can be selected with `font-[Display] font-bold`. The closest available
+registered weight is used. An exact file-stem match wins over family/weight
+resolution. A single custom face therefore deliberately
+degrades every requested weight to that face rather than fabricating or
+silently switching families. Built-in sans maps five requested weights to
+the three bundled Native rungs (regular, medium, bold); built-in mono has
+one face.
 
 ## CLI
 
