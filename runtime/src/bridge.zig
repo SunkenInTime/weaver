@@ -330,11 +330,13 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "overflowHidden") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset")) {
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
             state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
+        } else if (std.mem.eql(u8, key.bytes, "overflowHidden")) {
+            state(js).tree.setOverflowHidden(id, value != 0) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "flexWrap")) {
             state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "tabularNums")) {

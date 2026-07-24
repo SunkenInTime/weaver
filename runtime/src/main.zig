@@ -507,6 +507,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             .stretch => .stretch,
         },
         .flex_wrap = retained.flex_wrap,
+        .clip_content = retained.overflow_hidden,
         .width = if (retained.width >= 0) retained.width else null,
         .height = if (retained.height >= 0) retained.height else null,
         .min_width = retained.min_width,
@@ -608,6 +609,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             options.gap = 0;
             break :block ui.panel(options, .{ui.row(row_options, children)});
         } else ui.row(options, children),
+        .stack => ui.stack(options, children),
         .panel => ui.panel(options, children),
         .icon => ui.el(.icon, options, .{}),
         .button => ui.panel(options, children),
@@ -1098,4 +1100,32 @@ test "bundled font resolution honors exact stems families and nearest weights" {
     try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, null), resolveFontId(try tree.nodeConst(id), &fonts));
     try tree.setFontFamily(id, "mono");
     try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, native_sdk.canvas.default_mono_font_id), resolveFontId(try tree.nodeConst(id), &fonts));
+}
+
+test "retained stack projects overlay kind and rounded content clipping" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var tree: tree_mod.Tree = .{};
+    const stack_id = try tree.createNode(.stack);
+    const background_id = try tree.createNode(.panel);
+    const label_id = try tree.createNode(.text);
+    try tree.setNumberProp(stack_id, "width", 120);
+    try tree.setNumberProp(stack_id, "height", 64);
+    try tree.setNumberProp(stack_id, "radius", 14);
+    try tree.setNumberProp(stack_id, "radiusBottomLeft", 3);
+    try tree.setOverflowHidden(stack_id, true);
+    try tree.setText(label_id, "overlay");
+    try tree.appendChild(stack_id, background_id);
+    try tree.appendChild(stack_id, label_id);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const projected = buildNode(&ui, &tree, &.{}, stack_id, false);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, projected.widget.kind);
+    try std.testing.expect(projected.widget.layout.flags.clip_content);
+    try std.testing.expectEqual(@as(?f32, 14), projected.widget.style.radius);
+    try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_bottom_left);
+    try std.testing.expectEqual(@as(usize, 2), projected.nodes.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, projected.nodes[0].widget.kind);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, projected.nodes[1].widget.kind);
 }

@@ -79,6 +79,9 @@ test("widget renders one native generation and providers use native timers", asy
         iconStroke: 2,
         class: "text-red-500 w-6",
       }),
+      sdk.h("stack", { class: "w-full h-[32px] overflow-hidden rounded-xl" },
+        sdk.h("panel", { class: "size-full bg-slate-800" }),
+        sdk.h("text", null, "overlay")),
       sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
@@ -135,6 +138,11 @@ test("widget renders one native generation and providers use native timers", asy
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === iconId && operation[2] === key && operation[3] === value), `${key} icon wire prop`);
   }
+  const stackId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "stack")[2];
+  for (const [key, value] of [["widthPercent", 100], ["height", 32], ["radius", 12], ["overflowHidden", true]]) {
+    assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === stackId && operation[2] === key && operation[3] === value), `${key} stack wire prop`);
+  }
+  assert.equal(operations.filter((operation) => operation[0] === "appendChild" && operation[1] === stackId).length, 2);
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
   eventCallback(buttonId, "press", null);

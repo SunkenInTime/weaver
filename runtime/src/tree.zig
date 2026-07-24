@@ -17,6 +17,7 @@ pub const NodeId = u32;
 pub const Kind = enum {
     column,
     row,
+    stack,
     text,
     icon,
     panel,
@@ -107,6 +108,7 @@ pub const Node = struct {
     height_percent: f32 = 0,
     aspect_ratio: f32 = 0,
     truncate: bool = false,
+    overflow_hidden: bool = false,
     handles_press: bool = false,
     handles_change: bool = false,
     value: f32 = 0,
@@ -442,6 +444,13 @@ pub const Tree = struct {
         self.changed();
     }
 
+    pub fn setOverflowHidden(self: *Tree, id: NodeId, value: bool) Error!void {
+        const target = try self.node(id);
+        if (target.overflow_hidden == value) return;
+        target.overflow_hidden = value;
+        self.changed();
+    }
+
     pub fn setHandler(self: *Tree, id: NodeId, kind: []const u8, enabled: bool) Error!void {
         const target = try self.node(id);
         const slot: *bool = if (std.mem.eql(u8, kind, "press")) &target.handles_press else if (std.mem.eql(u8, kind, "change")) &target.handles_change else return error.InvalidProperty;
@@ -729,7 +738,7 @@ test "tree owns a bounded hierarchy" {
 
 test "tree stores styling breadth layout wire properties" {
     var tree: Tree = .{};
-    const id = try tree.createNode(.panel);
+    const id = try tree.createNode(.stack);
     try std.testing.expectEqual(CrossAlign.stretch, (try tree.nodeConst(id)).cross_align);
     try tree.setNumberProp(id, "paddingTop", 0);
     try tree.setNumberProp(id, "paddingRight", 12);
@@ -759,7 +768,9 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setShadow(id, .{ .offset = .{ .dx = 2, .dy = 3 }, .blur = 8, .spread = -1, .color = shadow_color });
     try tree.setShadowInset(id, true);
     try tree.setTextShadow(id, .{ .offset = .{ .dx = 1, .dy = 2 }, .blur = 4, .color = shadow_color });
+    try tree.setOverflowHidden(id, true);
     const node = try tree.nodeConst(id);
+    try std.testing.expectEqual(Kind.stack, node.kind);
     try std.testing.expectEqual(@as(f32, 0), node.padding_top);
     try std.testing.expectEqual(@as(f32, 12), node.padding_right);
     try std.testing.expectEqual(@as(f32, -8), node.margin_left);
@@ -787,6 +798,7 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, -1), node.shadow.?.spread);
     try std.testing.expect(node.shadow_inset);
     try std.testing.expectEqual(@as(f32, 4), node.text_shadow.?.blur);
+    try std.testing.expect(node.overflow_hidden);
     try tree.setNumberProp(id, "paddingTop", -1);
     try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
 }
