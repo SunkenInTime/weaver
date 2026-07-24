@@ -81,6 +81,10 @@ test("styling 01 utility families each have an accept case", () => {
   for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
 });
 
+test("cross-axis stretch is the explicit CSS-default utility", () => {
+  assert.deepEqual(compileClass("items-start items-stretch"), { crossAlign: "stretch" });
+});
+
 test("styling 01 rejects malformed new utilities with fix-its", () => {
   assert.throws(() => compileClass("w-3/0"), /Unknown class utility "w-3\/0"\. Did you mean/);
   assert.throws(() => compileClass("w-0/1"), /Unknown class utility "w-0\/1"\. Did you mean/);
@@ -95,5 +99,28 @@ test("styling 01 rejects malformed new utilities with fix-its", () => {
   assert.throws(() => compileClass(`p-[${"9".repeat(400)}px]`), /non-finite or absurd numeric value/);
   assert.throws(() => compileClass("w-[1000001px]"), /non-finite or absurd numeric value/);
   assert.throws(() => compileClass("aspect-[1000001]"), /non-finite or absurd numeric value/);
+});
+
+test("styling 02 accepts complete flex utilities and rejects near misses", () => {
+  const cases = [
+    ["justify-around", { mainAlign: "around" }],
+    ["justify-evenly", { mainAlign: "evenly" }],
+    ["grow-3", { grow: 3 }],
+    ["grow-[2.5]", { grow: 2.5 }],
+    ["shrink", { shrink: 1 }],
+    ["shrink-0", { shrink: 0 }],
+    ["self-auto", { alignSelf: "auto" }],
+    ["self-start", { alignSelf: "start" }],
+    ["self-center", { alignSelf: "center" }],
+    ["self-end", { alignSelf: "end" }],
+    ["self-stretch", { alignSelf: "stretch" }],
+    ["flex-wrap", { flexWrap: true }],
+    ["flex-wrap flex-nowrap", { flexWrap: false }],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+  assert.throws(() => compileClass("justify-space-around"), /Unknown class utility/);
+  assert.throws(() => compileClass("shrink-2"), /Unknown class utility/);
+  assert.throws(() => compileClass("self-baseline"), /Unknown class utility/);
+  assert.throws(() => compileClass("flex-wrap-reverse"), /Unknown class utility/);
 });
 

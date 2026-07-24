@@ -127,7 +127,7 @@ utility.
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
 | `font-{light,normal,medium,semibold,bold}` | font weight |
 | `opacity-NN` | node opacity |
-| `items-{start,center,end,baseline}` | cross-axis align |
+| `items-{start,center,end,baseline,stretch}` | cross-axis align; the default is `stretch` |
 | `justify-{start,center,end,between}` | main-axis align |
 | `grow` | flex grow 1 |
 | `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | fixed size |
@@ -324,3 +324,21 @@ non-negative.
 Percentage sizes are calculated from the parent's content box before margins;
 min/max bounds then clamp the laid-out frame. `aspect-*` does nothing when both
 axes are definite or both are automatic.
+
+## PR 02: flex completeness
+
+| Utility | Maps to |
+|---|---|
+| `justify-around`, `justify-evenly` | Tailwind main-axis free-space distribution |
+| `grow-N`, `grow-[N]` | numeric flex-grow factor (`grow` remains 1) |
+| `shrink`, `shrink-0` | opt in/out of compression below the preferred size |
+| `self-auto/start/center/end/stretch` | per-child cross-axis alignment |
+| `flex-wrap`, `flex-nowrap` | enable/disable row or column line wrapping |
+
+Weaver elements default to `shrink: 1`, matching Tailwind. When preferred
+sizes overflow a line, eligible children give up space in proportion to their
+available shrink capacity (preferred size minus min-size floor); `shrink-0`
+children never compress. If all floors still exceed the container, overflow
+remains explicit and the Native debug diagnostic fires. Wrapped lines use the
+container's `gap` on both axes. `items-baseline` remains an end-alignment
+approximation; true font baseline layout is outside this styling slice.

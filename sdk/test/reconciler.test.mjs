@@ -67,7 +67,7 @@ test("widget renders one native generation and providers use native timers", asy
     reverse = () => setReversed(true);
     saveMinutes = setMinutes;
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
-    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square" },
+    return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square justify-evenly grow-2 shrink-0 self-end flex-wrap" },
       sdk.h("panel", { class: "w-0" }),
       sdk.h("text", null, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
@@ -104,6 +104,7 @@ test("widget renders one native generation and providers use native timers", asy
   for (const [key, value] of [
     ["padding", 8], ["paddingTop", 0], ["marginLeft", 4], ["marginRight", 4],
     ["widthPercent", 50], ["minWidth", 16], ["maxWidth", 0], ["maxHeight", 60], ["aspectRatio", 1],
+    ["mainAlign", "evenly"], ["grow", 2], ["shrink", 0], ["alignSelf", "end"], ["flexWrap", true],
   ]) {
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === rootColumnId && operation[2] === key && operation[3] === value), `${key} wire prop`);
   }

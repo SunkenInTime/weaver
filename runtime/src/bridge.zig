@@ -289,18 +289,24 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setFontWeight(id, value.bytes) catch return fail(js, "invalid fontWeight");
-    } else if (std.mem.eql(u8, key.bytes, "crossAlign") or std.mem.eql(u8, key.bytes, "mainAlign")) {
+    } else if (std.mem.eql(u8, key.bytes, "crossAlign") or std.mem.eql(u8, key.bytes, "mainAlign") or std.mem.eql(u8, key.bytes, "alignSelf")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "alignment must be a string");
         defer c.JS_FreeCString(js, value.raw);
         if (std.mem.eql(u8, key.bytes, "crossAlign")) {
             state(js).tree.setCrossAlign(id, value.bytes) catch return fail(js, "invalid cross alignment");
+        } else if (std.mem.eql(u8, key.bytes, "alignSelf")) {
+            state(js).tree.setAlignSelf(id, value.bytes) catch return fail(js, "invalid self alignment");
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "flexWrap")) {
         const value = c.JS_ToBool(js, argv[2]);
-        if (value < 0) return fail(js, "truncate must be boolean");
-        state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
+        if (value < 0) return fail(js, "property must be boolean");
+        if (std.mem.eql(u8, key.bytes, "truncate")) {
+            state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
+        } else {
+            state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
+        }
     } else {
         var value: f64 = 0;
         if (c.JS_ToFloat64(js, &value, argv[2]) < 0) return fail(js, "property value must be numeric");
