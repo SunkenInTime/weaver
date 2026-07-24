@@ -122,5 +122,7 @@ test("styling 02 accepts complete flex utilities and rejects near misses", () =>
   assert.throws(() => compileClass("shrink-2"), /Unknown class utility/);
   assert.throws(() => compileClass("self-baseline"), /Unknown class utility/);
   assert.throws(() => compileClass("flex-wrap-reverse"), /Unknown class utility/);
+  assert.throws(() => compileClass("grow-1000001"), /non-finite or absurd numeric value/);
+  assert.throws(() => compileClass(`grow-[${"9".repeat(400)}]`), /non-finite or absurd numeric value/);
 });
 
