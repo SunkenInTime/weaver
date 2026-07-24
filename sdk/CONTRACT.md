@@ -427,3 +427,17 @@ layout API.
 
 The clip applies to images, text, panels, and nested content. Per-corner
 `rounded-*` utilities shape the mask, including asymmetric corners.
+
+## PR 10: image fitting, rounded masks, and tiling
+
+```ts
+<image src="./cover.png" fit="cover" class="rounded-xl" />
+<image src="./texture.png" tile />
+```
+
+`fit` accepts `cover`, `contain`, or `stretch`; omitted `fit` preserves the
+existing `stretch` behavior. Existing uniform and per-corner `rounded-*`
+utilities are applied directly to the image mask. `tile` repeats the image at
+its natural logical-pixel size from the image element's top-left and takes
+precedence over fit geometry; rounding still masks the tiled result. Image
+sources remain local widget assets.

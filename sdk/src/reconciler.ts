@@ -82,6 +82,8 @@ interface HostElementProps {
   iconPath?: string;
   iconViewBox?: string;
   iconStroke?: number;
+  fit?: "cover" | "contain" | "stretch";
+  tile?: boolean;
   onFrame?: (ctx: CanvasCtx, frame: CanvasFrame) => void;
   fps?: number;
 }
@@ -153,6 +155,12 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
       throw new Error("<icon> must be lowered to path data by weaver bundle");
     }
     source.class = `w-[24px] h-[24px] ${typeof source.class === "string" ? source.class : ""}`.trim();
+  }
+  if (type === "image") {
+    if (source.fit !== undefined && source.fit !== "cover" && source.fit !== "contain" && source.fit !== "stretch") {
+      throw new Error('<image> fit must be "cover", "contain", or "stretch"');
+    }
+    if (source.tile !== undefined && typeof source.tile !== "boolean") throw new Error("<image> tile must be boolean");
   }
   return {
     __weaverElement: true,
@@ -467,6 +475,12 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
       throw new Error("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path");
     }
     next.src = props.src;
+    if (props.fit !== undefined && props.fit !== "cover" && props.fit !== "contain" && props.fit !== "stretch") {
+      throw new Error('<image> fit must be "cover", "contain", or "stretch"');
+    }
+    if (props.tile !== undefined && typeof props.tile !== "boolean") throw new Error("<image> tile must be boolean");
+    next.fit = (props.fit ?? "stretch") as "cover" | "contain" | "stretch";
+    next.tile = (props.tile ?? false) as boolean;
   } else if (instance.type === "icon") {
     if (typeof props.iconPath !== "string" || props.iconPath.length === 0) throw new Error("<icon> requires lowered iconPath");
     if (typeof props.iconViewBox !== "string" || props.iconViewBox.length === 0) throw new Error("<icon> requires lowered iconViewBox");
@@ -490,6 +504,8 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (!Object.is(previous.iconPath, next.iconPath) && next.iconPath !== undefined) native.setProp(instance.id, "iconPath", next.iconPath);
   if (!Object.is(previous.iconViewBox, next.iconViewBox) && next.iconViewBox !== undefined) native.setProp(instance.id, "iconViewBox", next.iconViewBox);
   if (!Object.is(previous.iconStroke, next.iconStroke) && next.iconStroke !== undefined) native.setProp(instance.id, "iconStroke", next.iconStroke);
+  if (!Object.is(previous.fit, next.fit) && next.fit !== undefined) native.setProp(instance.id, "imageFit", next.fit);
+  if (!Object.is(previous.tile, next.tile) && next.tile !== undefined) native.setProp(instance.id, "imageTile", next.tile);
   instance.elementProps = next;
   if (instance.type === "canvas" && next.onFrame) {
     updateCanvasBinding(instance.id, next.onFrame, next.fps, instance.props.width ?? 0, instance.props.height ?? 0);

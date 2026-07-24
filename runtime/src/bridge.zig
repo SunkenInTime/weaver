@@ -308,6 +308,10 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = stringArg(js, argv[2]) catch return fail(js, "iconViewBox must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setIconViewBox(id, value.bytes) catch return fail(js, "invalid iconViewBox");
+    } else if (std.mem.eql(u8, key.bytes, "imageFit")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "imageFit must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setImageFit(id, value.bytes) catch return fail(js, "imageFit must be cover, contain, or stretch");
     } else if (std.mem.eql(u8, key.bytes, "fontWeight")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "fontWeight must be a string");
         defer c.JS_FreeCString(js, value.raw);
@@ -330,7 +334,7 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         } else {
             state(js).tree.setMainAlign(id, value.bytes) catch return fail(js, "invalid main alignment");
         }
-    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "overflowHidden") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset")) {
+    } else if (std.mem.eql(u8, key.bytes, "truncate") or std.mem.eql(u8, key.bytes, "overflowHidden") or std.mem.eql(u8, key.bytes, "flexWrap") or std.mem.eql(u8, key.bytes, "tabularNums") or std.mem.eql(u8, key.bytes, "shadowInset") or std.mem.eql(u8, key.bytes, "imageTile")) {
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
@@ -341,6 +345,8 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
             state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
         } else if (std.mem.eql(u8, key.bytes, "tabularNums")) {
             state(js).tree.setTabularNums(id, value != 0) catch return fail(js, "setProp failed");
+        } else if (std.mem.eql(u8, key.bytes, "imageTile")) {
+            state(js).tree.setImageTile(id, value != 0) catch return fail(js, "setProp failed");
         } else {
             state(js).tree.setShadowInset(id, value != 0) catch return fail(js, "setProp failed");
         }

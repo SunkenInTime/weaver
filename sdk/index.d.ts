@@ -111,7 +111,7 @@ declare global {
       panel: BoxProps;
       text: TextProps;
       icon: IconProps;
-      image: BoxProps & { src: string };
+      image: BoxProps & { src: string; fit?: "cover" | "contain" | "stretch"; tile?: boolean };
       button: BoxProps & { onPress: () => void };
       slider: BoxProps & { value: number; max: number; onChange: (value: number) => void };
       canvas: BoxProps & { fps?: number; onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void };
