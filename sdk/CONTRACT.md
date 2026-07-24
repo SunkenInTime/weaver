@@ -11,6 +11,11 @@ Design invariants (from ADRs 0001/0003/0005/0009):
   unknown utilities are check-time errors with fix-its.
 - Idle-zero: no state change → no ops → no repaint. The SDK never polls.
 - The reconciler runs in JS and emits retained-tree ops (never full frames).
+- `weaver check` estimates the exported widget's lowered Native tree through
+  local components and one level of relative imports, taking the maximum across
+  conditional JSX returns and counting statically evident implicit text nodes.
+  Dynamic collections and unresolved component output remain subject to the
+  authoritative Native runtime node/depth limits.
 
 ## Module shape
 

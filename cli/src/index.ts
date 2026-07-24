@@ -32,6 +32,7 @@ interface SourceProject {
   sourcePath: string;
   source: string;
   sourceFile: ts.SourceFile;
+  sourceFiles: ts.SourceFile[];
   config: WidgetConfigData;
 }
 
@@ -803,7 +804,38 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  return { directory, sourcePath, source, sourceFile, config };
+  return { directory, sourcePath, source, sourceFile, sourceFiles: loadDirectLocalImports(directory, sourceFile), config };
+}
+
+function localImportPath(directory: string, importer: ts.SourceFile, specifier: string): string | null {
+  if (!specifier.startsWith(".")) return null;
+  const unresolved = resolve(dirname(importer.fileName), specifier);
+  const candidates = extname(unresolved)
+    ? [unresolved]
+    : [`${unresolved}.tsx`, `${unresolved}.ts`, join(unresolved, "index.tsx"), join(unresolved, "index.ts")];
+  for (const candidate of candidates) {
+    if ((!pathsEqual(candidate, directory) && !pathInside(directory, candidate)) || !existsSync(candidate)) continue;
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // The ordinary TypeScript check reports an unstable or unreadable import.
+    }
+  }
+  return null;
+}
+
+function loadDirectLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
+  const files = [entry];
+  const loaded = new Set([resolve(entry.fileName)]);
+  for (const statement of entry.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const path = localImportPath(directory, entry, statement.moduleSpecifier.text);
+    if (!path || loaded.has(resolve(path))) continue;
+    loaded.add(resolve(path));
+    const source = readFileSync(path, "utf8");
+    files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+  }
+  return files;
 }
 
 function extractConfig(sourceFile: ts.SourceFile, errors: string[]): WidgetConfigData | null {
@@ -882,57 +914,86 @@ const nativeWidgetDepthLimit = 32;
 interface LoweredTreeMetrics { nodes: number; depth: number }
 
 function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
-  const components = new Map<string, ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment>();
-  const unwrapJsx = (expression: ts.Expression): ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null => {
+  type JsxRoot = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
+  const components = new Map<string, JsxRoot[]>();
+  const unwrapJsx = (expression: ts.Expression): JsxRoot | null => {
     let current = expression;
     while (ts.isParenthesizedExpression(current)) current = current.expression;
     return ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current) ? current : null;
   };
-  const returnedRoot = (body: ts.ConciseBody): ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null => {
-    if (!ts.isBlock(body)) return unwrapJsx(body);
-    let result: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment | null = null;
+  const expressionRoots = (expression: ts.Expression): JsxRoot[] => {
+    const direct = unwrapJsx(expression);
+    if (direct) return [direct];
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    if (ts.isConditionalExpression(current)) return [...expressionRoots(current.whenTrue), ...expressionRoots(current.whenFalse)];
+    if (ts.isBinaryExpression(current) && (current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || current.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+      return [...expressionRoots(current.left), ...expressionRoots(current.right)];
+    }
+    return [];
+  };
+  const returnedRoots = (body: ts.ConciseBody): JsxRoot[] => {
+    if (!ts.isBlock(body)) return expressionRoots(body);
+    const results: JsxRoot[] = [];
     const findReturn = (node: ts.Node): void => {
-      if (result || (node !== body && ts.isFunctionLike(node))) return;
-      if (ts.isReturnStatement(node) && node.expression) result = unwrapJsx(node.expression);
+      if (node !== body && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node) && node.expression) results.push(...expressionRoots(node.expression));
       else ts.forEachChild(node, findReturn);
     };
     findReturn(body);
-    return result;
+    return results;
   };
-  const indexComponents = (node: ts.Node): void => {
-    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
-      const root = returnedRoot(node.body);
-      if (root) components.set(node.name.text, root);
-    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
-      (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))) {
-      const root = returnedRoot(node.initializer.body);
-      if (root) components.set(node.name.text, root);
-    }
-    ts.forEachChild(node, indexComponents);
-  };
-  indexComponents(project.sourceFile);
-
-  const directRoots = (node: ts.Node): (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] => {
-    const roots: (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] = [];
-    const visit = (child: ts.Node): void => {
-      if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
-        roots.push(child);
-        return;
+  const definitions = new Map<ts.SourceFile, Map<string, JsxRoot[]>>();
+  for (const sourceFile of project.sourceFiles) {
+    const local = new Map<string, JsxRoot[]>();
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+        const roots = returnedRoots(statement.body);
+        if (roots.length > 0) local.set(statement.name.text, roots);
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (!ts.isIdentifier(declaration.name) || !declaration.initializer ||
+            (!ts.isArrowFunction(declaration.initializer) && !ts.isFunctionExpression(declaration.initializer))) continue;
+          const roots = returnedRoots(declaration.initializer.body);
+          if (roots.length > 0) local.set(declaration.name.text, roots);
+        }
       }
-      ts.forEachChild(child, visit);
-    };
-    ts.forEachChild(node, visit);
-    return roots;
-  };
+    }
+    definitions.set(sourceFile, local);
+    for (const [name, roots] of local) if (!components.has(name)) components.set(name, roots);
+  }
+  for (const statement of project.sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) continue;
+    const path = localImportPath(project.directory, project.sourceFile, statement.moduleSpecifier.text);
+    const importedFile = path ? project.sourceFiles.find((file) => pathsEqual(file.fileName, path)) : undefined;
+    const imported = importedFile ? definitions.get(importedFile) : undefined;
+    if (!imported) continue;
+    const bindings = statement.importClause.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        const roots = imported.get(binding.propertyName?.text ?? binding.name.text);
+        if (roots) components.set(binding.name.text, roots);
+      }
+    }
+    if (statement.importClause.name) {
+      const exportAssignment = importedFile!.statements.find(ts.isExportAssignment);
+      if (exportAssignment && ts.isIdentifier(exportAssignment.expression)) {
+        const roots = imported.get(exportAssignment.expression.text);
+        if (roots) components.set(statement.importClause.name.text, roots);
+      }
+    }
+  }
+
   const tagAndAttributes = (node: ts.JsxElement | ts.JsxSelfClosingElement): { tag: string; attributes: ts.JsxAttributes } =>
     ts.isJsxElement(node)
-      ? { tag: node.openingElement.tagName.getText(project.sourceFile), attributes: node.openingElement.attributes }
-      : { tag: node.tagName.getText(project.sourceFile), attributes: node.attributes };
+      ? { tag: node.openingElement.tagName.getText(node.getSourceFile()), attributes: node.openingElement.attributes }
+      : { tag: node.tagName.getText(node.getSourceFile()), attributes: node.attributes };
   const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
     if (tag !== "row" && tag !== "column") return false;
     const { attributes } = tagAndAttributes(node);
+    const sourceFile = node.getSourceFile();
     const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "class");
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
     const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
     if (classText === null) return false;
     try {
@@ -942,39 +1003,65 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       return false; // The normal class validator reports the actionable error.
     }
   };
-  const metrics = (node: ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment, visiting: Set<string>): LoweredTreeMetrics => {
+  const maximum = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
+    nodes: Math.max(0, ...values.map((value) => value.nodes)),
+    depth: Math.max(0, ...values.map((value) => value.depth)),
+  });
+  const isStaticPrimitive = (expression: ts.Expression): boolean => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current) ||
+      (ts.isPrefixUnaryExpression(current) && ts.isNumericLiteral(current.operand));
+  };
+  const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
+    const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
+      const result: LoweredTreeMetrics[] = [];
+      for (const child of children) {
+        if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+          result.push(metrics(child, visiting));
+        } else if (parentTag !== "text" && ts.isJsxText(child) && child.getText().trim() !== "") {
+          result.push({ nodes: 1, depth: 1 });
+        } else if (parentTag !== "text" && ts.isJsxExpression(child) && child.expression) {
+          const roots = expressionRoots(child.expression);
+          if (roots.length > 0) result.push(maximum(roots.map((root) => metrics(root, visiting))));
+          else if (isStaticPrimitive(child.expression)) result.push({ nodes: 1, depth: 1 });
+        }
+      }
+      return result;
+    };
     if (ts.isJsxFragment(node)) {
-      const children = directRoots(node).map((child) => metrics(child, visiting));
+      const children = childMetrics(node.children, null);
       return { nodes: children.reduce((sum, child) => sum + child.nodes, 0), depth: Math.max(0, ...children.map((child) => child.depth)) };
     }
     const { tag } = tagAndAttributes(node);
     if (/^[A-Z]/.test(tag) && components.has(tag) && !visiting.has(tag)) {
       const next = new Set(visiting);
       next.add(tag);
-      return metrics(components.get(tag)!, next);
+      return maximum(components.get(tag)!.map((root) => metrics(root, next)));
     }
-    const children = ts.isJsxElement(node) ? directRoots(node).map((child) => metrics(child, visiting)) : [];
+    const children = ts.isJsxElement(node) ? childMetrics(node.children, tag) : [];
     const ownDepth = isPaintedLayout(node, tag) ? 2 : 1;
     return {
       nodes: ownDepth + children.reduce((sum, child) => sum + child.nodes, 0),
       depth: ownDepth + Math.max(0, ...children.map((child) => child.depth)),
     };
   };
-  const roots: (ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment)[] = [];
-  const collectRoots = (node: ts.Node, insideJsx: boolean): void => {
-    const jsx = ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node);
-    if (jsx && !insideJsx) roots.push(node);
-    ts.forEachChild(node, (child) => collectRoots(child, insideJsx || jsx));
-  };
-  collectRoots(project.sourceFile, false);
-  for (const root of roots) {
-    const lowered = metrics(root, new Set());
-    if (lowered.nodes > nativeWidgetNodeLimit) {
-      errors.push(locationMessage(project.sourceFile, root, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); painted <row>/<column> elements add an inner layout node`));
-    }
-    if (lowered.depth > nativeWidgetDepthLimit) {
-      errors.push(locationMessage(project.sourceFile, root, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level`));
-    }
+  const exportNode = project.sourceFile.statements.find(ts.isExportAssignment);
+  const component = exportNode && ts.isCallExpression(exportNode.expression) ? exportNode.expression.arguments[1] : undefined;
+  if (!component) return;
+  let roots: JsxRoot[] = [];
+  if (ts.isArrowFunction(component) || ts.isFunctionExpression(component)) roots = returnedRoots(component.body);
+  else if (ts.isIdentifier(component)) roots = components.get(component.text) ?? [];
+  else roots = expressionRoots(component);
+  if (roots.length === 0) return;
+  const lowered = maximum(roots.map((root) => metrics(root, new Set())));
+  const evidenceNode = roots[0];
+  const limitation = " The static estimate follows the exported widget through local components and one level of relative imports; runtime limits remain authoritative for dynamic collections and unresolved component output.";
+  if (lowered.nodes > nativeWidgetNodeLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); painted <row>/<column> elements add an inner layout node.${limitation}`));
+  }
+  if (lowered.depth > nativeWidgetDepthLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level.${limitation}`));
   }
 }
 
