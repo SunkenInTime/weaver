@@ -265,3 +265,26 @@ Intel headless, Apple-silicon headless, and Apple-silicon session jobs (runs
 `29983968548`, `29983969846`, `29983972078`, and `29984071014`). Native
 PR13/PR14 have no configured checks; their exact pushed heads pass full local
 stock and widget-profile suites.
+
+## Path-icon centering re-verification
+
+The icon layout box was already centered by Native's stack child frame. The
+measured residual was an authored coordinate-system mismatch: Noro's exact
+Rainmeter paths are centered at `(14,14)`, while an omitted raw-icon viewBox
+uses the SDK's `0 0 24 24` default centered at `(12,12)`. PR13 now declares
+`viewBox="0 0 28 28"` on the unchanged prev/play/pause/next path strings.
+
+The minimized-desktop capture
+`E:\tmp\weaver-icon-centering-final-visual-gate.png` was opened at original
+resolution and scanned numerically. Against button centers `(64,290)`,
+`(170,290)`, and `(276,290)`, the bright-pixel bbox centers are
+`(63.5,289.5)`, `(169.5,289.5)`, and `(275.5,289.5)`: every axis differs by
+0.5px and passes the 1px acceptance. The pre-fix same-frame centers were
+`(65.5,291.5)`, `(171.5,292.0)`, and `(277.5,291.5)`.
+
+Native N5 also renders a symmetric 28px custom path inside a 100x100 centered
+button projection through the reference renderer, scans the resulting alpha
+bbox, and enforces a <=1px center delta on both axes. Full local Native
+N5-N8 stock/widget-profile gates and exact-head Weaver PR08-PR13
+Node/typecheck/runtime/release-audit gates pass; the all-13-head release audit
+passes at the restacked gitlinks.

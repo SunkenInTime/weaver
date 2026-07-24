@@ -318,3 +318,47 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 
 Review the two green draft stacks bottom-up, starting with Native N1 / Weaver
 PR01; no implementation or verification task remains.
+
+## Path-icon centering follow-up (2026-07-23)
+
+- Root cause: the Native stack child frame is geometrically centered at
+  `runtime/native-sdk/src/primitives/canvas/widget_layout.zig:1704-1744`.
+  A same-frame pixel scan disproved the inferred 6-8px layout-box offset. The
+  remaining Noro bias came from `examples/noro-shell/widget.tsx:44,51-52,58`:
+  the exact Rainmeter geometry is centered at `(14,14)` in a 28px meter, but
+  the omitted raw-icon viewBox selected the contract default `0 0 24 24`,
+  centered at `(12,12)`. PR13 now declares `viewBox="0 0 28 28"` without
+  changing any path command or commit `4241b12` corner radius.
+- Assumption/evidence rule: button centers are the checked-in
+  `Variables.inc` geometry `(64,290)`, `(170,290)`, `(276,290)` in the
+  340x356 widget capture. Bright icon pixels are those with RGB channels each
+  at least 160; this excludes the dark button chrome and includes antialiased
+  icon coverage consistently before and after.
+- Before (`E:\tmp\weaver-icon-centering-before-window.png`): prev
+  `(65.5,291.5)`, pause `(171.5,292.0)`, next `(277.5,291.5)`, respectively
+  `(+1.5,+1.5)`, `(+1.5,+2.0)`, `(+1.5,+1.5)` from the authored button
+  centers. After: all three are `(-0.5,-0.5)`.
+- Native N5 adds a reference-renderer regression at
+  `src/primitives/canvas/widget_builtin_tests.zig:808`: a 100x100 centered
+  pressable panel with a 28px path icon scans the rendered alpha bbox and
+  asserts both center axes are within 1px. N5 `3a16880f` passes focused canvas
+  (36.4s), stock (94.3s), and widget-profile (58.7s); N6 `bdac8c22`
+  stock/profile pass (89.6/66.4s), N7 `63554853` (94.3/66.4s), and N8
+  `111bb748` (80.5/87.4s).
+- Final Weaver exact-head gates all pass: PR08 `2908b6b5` (45 Node tests,
+  typecheck, runtime Zig, release audit), PR09 `f1fb2de5`, PR10 `56173ca5`,
+  PR11 `b4da16a6`, PR12 `2ebbe42e`, and PR13 `3740b951` pass the same four
+  gates; PR13 additionally passes `weaver check examples/noro-shell`.
+  `audit:release` passes all 13 Weaver heads at exact pins
+  `0e16af24/d6389750/d903766c/d903766c/aa6eacd5/eb6416df/eb6416df/3a16880f/bdac8c22/63554853/111bb748/111bb748/111bb748`.
+- Mandatory minimized-desktop visual gate:
+  `E:\tmp\weaver-icon-centering-final-visual-gate.png`, reopened with the
+  image viewer at original resolution. Numeric scan PASS: prev bbox
+  `57,283..70,296`, center `(63.5,289.5)`; pause
+  `163,282..176,297`, center `(169.5,289.5)`; next
+  `269,283..282,296`, center `(275.5,289.5)`. Every axis is 0.5px from its
+  authored button center. Solid geometry, exact paths, and all three corner
+  shapes remain visually intact.
+- GitHub rollups: pending the force-with-lease restack at the time this
+  evidence commit was authored; final check URLs/results are recorded in the
+  PR bodies and run report after polling.
