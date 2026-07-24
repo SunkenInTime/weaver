@@ -100,9 +100,9 @@ Updated: 2026-07-24 (macOS 26.5.1, attended physical styling verification)
 | 08 / N5 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `b26e362` | [`styling/N5-shadows`](https://github.com/SunkenInTime/native/pull/11) at `31d5710b` | complete, pushed, draft PRs open; path-icon redesign |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `3e85fc6` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `4981f66f` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `c1ecb1c` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `de432244` | complete, pushed, draft PRs open |
-| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `2f416b9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `c61d3518` | complete, pushed, draft PRs open |
-| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `a4041cd` | rides N8 `c61d3518` | complete, pushed, draft PR open |
-| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31), pressed-state implementation `012b3dc` plus this evidence ledger | rides N8 `c61d3518` | complete, pushed, draft PR open; code-head CI pending at ledger authoring |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `2f416b9` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14): interaction commit `c61d3518`, branch head `56152f29` | complete, pushed, draft PRs open |
+| 12 | [`styling/12-showcase`](https://github.com/SunkenInTime/weaver/pull/30) at `a4041cd` | pins N8 interaction commit `c61d3518` | complete, pushed, draft PR open |
+| 13 | [`styling/13-noro-shell`](https://github.com/SunkenInTime/weaver/pull/31) at `1602e3c`, including pressed-state implementation `012b3dc` | pins N8 head `56152f29` | complete, pushed, draft PR open; code/evidence head CI green |
 
 ## Completed gates
 
@@ -409,6 +409,8 @@ gates and all formerly failing physical Mac rows already pass.
   PASS; full stock PASS in 25.5s; full widget profile PASS in 71.2s. Git's
   `usr\bin` was added to `PATH` for the repository's existing `test -f`
   assertions; both WebView2 DLLs were present before the corrected rerun.
+  After the attended macOS repair advanced N8 to `56152f29`, the complete
+  Windows stock/profile suites passed again in 94.3s/88.4s.
 - Weaver PR11 `2f416b9` compiles named, arbitrary, inset, color-composed, and
   `shadow-none` hover/pressed shadows, projects their wire properties, and
   rejects an orphan descendant variant with the
@@ -449,7 +451,7 @@ gates and all formerly failing physical Mac rows already pass.
   then restored from the updated PR13 source for installed-mode idle
   verification. The unrelated source-missing Pomodoro registry entry was not
   modified.
-- CI code-head runs: PR29 `30088527353`, PR30 `30088529927`, PR31
-  `30088531190`. They were pending when this ledger entry was authored; final
-  rollups are recorded in the PR bodies and compact run report so a
-  documentation-only evidence commit does not recurse indefinitely.
+- CI PASS across Windows gate, Intel headless, Apple-silicon headless, and
+  Apple-silicon session: PR29 `30088527353`, PR30 `30088529927`, and final
+  PR31 code/evidence head `30090373720`. Native PR14 has no configured checks;
+  its exact final head passes both required local full suites.
