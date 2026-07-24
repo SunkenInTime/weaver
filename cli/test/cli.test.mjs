@@ -301,6 +301,41 @@ export default widget({ name: "Icon Test", size: [160, 80] }, () => <icon d="${o
   }
 });
 
+test("styling 11 requires descendant state variants to have a pressable ancestor", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-descendant-state-"));
+  try {
+    const widget = join(root, "widget");
+    mkdirSync(widget, { recursive: true });
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["widget.tsx"],
+    }));
+    const valid = `import { widget } from "@weaver/sdk";
+export default widget({ name: "State Test", size: [160, 80] }, () =>
+  <button onPress={() => {}} class="pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner">
+    <icon name="play" class="pressed:text-[#b6b6b6]" />
+  </button>);
+`;
+    writeFileSync(join(widget, "widget.tsx"), valid);
+    const accepted = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(accepted.status, 0, accepted.stderr);
+
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "State Test", size: [160, 80] }, () =>
+  <icon name="play" class="pressed:text-[#b6b6b6]" />);
+`);
+    const rejected = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /NearestPressableAncestor: state variants on non-pressable <icon> require a nearest <button> or <slider> ancestor/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function waitForPath(path) {
   const deadline = Date.now() + 5000;
   while (!existsSync(path)) {

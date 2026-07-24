@@ -15,6 +15,7 @@ export {
   type CanvasFrame,
   type MemoryData,
   type MediaData,
+  type PressEvent,
   type TimeData,
   type WFetchInit,
   type WFetchResponse,

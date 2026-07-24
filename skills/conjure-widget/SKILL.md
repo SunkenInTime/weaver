@@ -51,8 +51,8 @@ Render with `<column>`, `<row>`, `<panel>`, `<text>`, and path-backed
 Use a literal full-catalog Lucide name (`<icon name="play" />`) or literal
 custom SVG path data (`<icon d="M 9 5 L 21 12 L 9 19 Z" />`); custom paths
 may add `viewBox` and positive numeric `stroke`. Size icons geometrically with
-`w-*`/`h-*` and color them with `text-*`. Types declare `<image>`, `<button>`,
-and `<slider>`, but they arrive in M2; `<canvas>` arrives in M3.
+`w-*`/`h-*` and color them with `text-*`. `<image>`, `<button>`, and
+`<slider>` are available; `<canvas>` remains a later surface.
 
 ## Class utilities
 
@@ -73,16 +73,23 @@ One scale unit is 4 px. Use only:
 | `grow` | Flex grow 1 |
 | `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | Fixed size |
 | `truncate` | Single-line ellipsis on text |
+| `shadow-*`, `shadow-inner`, `shadow-[x_y_blur_spread_#hex]` | Box shadow |
+| `hover:` / `pressed:` + `bg-*`, `text-*`, `opacity-*`, `border-*`, or `shadow-*` | Native interaction-state override |
 
-Unknown utilities are errors. Split padding (`px-`/`py-`), borders, shadows,
-gradients, hover/state variants, transitions, and animations arrive in M2+.
+Unknown utilities are errors. Gradients, transitions, and animations outside
+the documented surface remain errors.
+
+For a non-pressable child inside a `<button>` or `<slider>`, `hover:` and
+`pressed:` automatically follow the nearest pressable ancestor; do not add a
+`group` class. A state variant outside any pressable ancestor fails
+`weaver check` with `NearestPressableAncestor`.
 
 ## M1 boundaries
 
 - Use only the `time` provider. It supplies `hh`, `mm`, `ss`, `weekday`,
   `month`, `day`, `year`, and `epochMs` once per second while subscribed.
-- Do not create input elements or fake them with inert panels; interactions
-  arrive in M2.
+- Use `<button>`/`<slider>` for interaction; do not fake controls with inert
+  panels.
 - Do not fetch. `origins` is validated now, but network access arrives in M2.
 - Keep `capabilities` empty. The capability ladder arrives in M2.
 - Plain TSX is bundled automatically; do not add dependencies or external

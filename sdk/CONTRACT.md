@@ -441,3 +441,55 @@ utilities are applied directly to the image mask. `tile` repeats the image at
 its natural logical-pixel size from the image element's top-left and takes
 precedence over fit geometry; rounding still masks the tiled result. Image
 sources remain local widget assets.
+
+## PR 11: native interaction states and press events
+
+`hover:` and `pressed:` are supported only for the five native-swappable
+visual channels below. Every other state-prefixed utility is a loud
+`weaver check` error naming these supported forms.
+
+| Utility | Native override |
+|---|---|
+| `hover:bg-<color>`, `pressed:bg-<color>` | background color |
+| `hover:text-<color>`, `pressed:text-<color>` | foreground/text color |
+| `hover:opacity-N`, `pressed:opacity-N` | node opacity (`N` is 0–100) |
+| `hover:border-<color>`, `pressed:border-<color>` | border color; border width remains the base style |
+| `hover:shadow-*`, `pressed:shadow-*` | complete box-shadow replacement, including named shadows, arbitrary shadows, `shadow-inner`, and `shadow-none` |
+
+Named Tailwind v4 colors, bracketed hex colors, and `/NN` alpha use the same
+forms and values as their unprefixed counterparts. Overrides inherit every
+base channel they do not name. Pressed wins over hover when both native states
+are active; disabled elements use the base style. Swaps use retained native
+state and its existing invalidation path: no JS callback, timer, polling, or
+per-frame work is introduced. The earlier M2 note that hover styling was
+unscheduled is superseded by this bounded surface.
+
+On a non-pressable node, `hover:` and `pressed:` utilities resolve against
+the nearest pressable ancestor (`<button>` or `<slider>`). This is Weaver's
+implicit group-state rule: no `group` class or `group-*` prefix is needed.
+A state variant on a non-pressable node outside any pressable ancestor is a
+`weaver check` error with the `NearestPressableAncestor` fix-it.
+
+```ts
+interface PressEvent {
+  x: number; y: number; // node-local logical pixels
+  u: number; v: number; // x/width and y/height, clamped to 0–1
+}
+
+<button
+  onPress={(event?: PressEvent) => { /* a zero-argument handler remains valid */ }}
+  onDoublePress={(event: PressEvent) => {}}
+  onRightPress={(event: PressEvent) => {}}
+  class="bg-zinc-900 hover:bg-zinc-800 pressed:bg-black pressed:shadow-inner"
+>
+  <icon name="play" class="text-white pressed:text-zinc-300" />
+</button>
+```
+
+`onPress` remains required on `<button>` and its parameter is optional for
+source compatibility. `onDoublePress` and `onRightPress` are optional. A
+double click sends the ordinary press for its first release, then prefers the
+double-press handler on the double release. Right press uses the dedicated
+handler when present. Coordinates are computed from the native laid-out hit
+bounds before entering JS. `<slider>` retains its existing `onChange` surface
+and can use the same `pressed:` visual channels during its native drag state.

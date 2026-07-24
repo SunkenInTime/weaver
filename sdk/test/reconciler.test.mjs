@@ -54,6 +54,9 @@ test("widget renders one native generation and providers use native timers", asy
   let reverse;
   let saveMinutes;
   let presses = 0;
+  let pressEvent;
+  let doublePressEvent;
+  let rightPressEvent;
   let sliderValue = 0;
   let retainedCanvasContext;
   sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu", "audio", "media"] }, () => {
@@ -83,7 +86,12 @@ test("widget renders one native generation and providers use native timers", asy
         sdk.h("panel", { class: "size-full bg-slate-800" }),
         sdk.h("text", null, "overlay")),
       sdk.h("image", { src: "./cover.png", fit: "cover", tile: true, class: "w-6 h-4 rounded-tl-lg rounded-br-2xl" }),
-      sdk.h("button", { onPress: () => { presses += 1; } }, sdk.h("text", null, minutes)),
+      sdk.h("button", {
+        class: "bg-zinc-900 hover:bg-zinc-800 hover:text-white hover:opacity-90 hover:border-zinc-600 hover:shadow-md pressed:bg-black pressed:text-red-500 pressed:opacity-70 pressed:border-white pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner",
+        onPress: (event) => { presses += 1; pressEvent = event; },
+        onDoublePress: (event) => { doublePressEvent = event; },
+        onRightPress: (event) => { rightPressEvent = event; },
+      }, sdk.h("text", null, minutes)),
       sdk.h("slider", { value: minutes, max: 60, onChange: (value) => { sliderValue = value; } }),
       sdk.h("canvas", {
         class: "w-[8px] h-[4px]",
@@ -150,11 +158,26 @@ test("widget renders one native generation and providers use native timers", asy
   }
   const buttonId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "button")[2];
   const sliderId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "slider")[2];
-  eventCallback(buttonId, "press", null);
+  for (const [key, value] of [
+    ["hoverBackground", "#27272AFF"], ["hoverTextColor", "#FFFFFFFF"], ["hoverOpacity", 0.9], ["hoverBorderColor", "#52525CFF"],
+    ["hoverShadow", "0 4 6 -1 #0000001A"],
+    ["pressedBackground", "#000000FF"], ["pressedTextColor", "#FB2C36FF"], ["pressedOpacity", 0.7], ["pressedBorderColor", "#FFFFFFFF"],
+    ["pressedShadow", "0 2 4 0 #0000004D"], ["pressedShadowInset", true],
+  ]) {
+    assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === buttonId && operation[2] === key && operation[3] === value), `${key} interaction wire prop`);
+  }
+  eventCallback(buttonId, "press", { x: 25, y: 10, w: 100, h: 40 });
+  eventCallback(buttonId, "doublepress", { x: 80, y: 30, w: 100, h: 40 });
+  eventCallback(buttonId, "rightpress", { x: 50, y: 20, w: 100, h: 40 });
   eventCallback(sliderId, "change", 42);
   assert.equal(presses, 1);
+  assert.deepEqual(pressEvent, { x: 25, y: 10, u: 0.25, v: 0.25 });
+  assert.deepEqual(doublePressEvent, { x: 80, y: 30, u: 0.8, v: 0.75 });
+  assert.deepEqual(rightPressEvent, { x: 50, y: 20, u: 0.5, v: 0.5 });
   assert.equal(sliderValue, 42);
   assert.ok(operations.some((operation) => operation[0] === "setHandler" && operation[1] === buttonId && operation[2] === "press" && operation[3] === true));
+  assert.ok(operations.some((operation) => operation[0] === "setHandler" && operation[1] === buttonId && operation[2] === "doublepress" && operation[3] === true));
+  assert.ok(operations.some((operation) => operation[0] === "setHandler" && operation[1] === buttonId && operation[2] === "rightpress" && operation[3] === true));
   const createCount = operations.filter(([name]) => name === "createNode").length;
   reverse();
   await Promise.resolve();
@@ -198,6 +221,13 @@ test("styling 10 image props reject invalid fit and tile before native mutation"
   const operationCount = operations.length;
   assert.throws(() => sdk.h("image", { src: "./cover.png", fit: "scale-down" }), /fit must be "cover", "contain", or "stretch"/);
   assert.throws(() => sdk.h("image", { src: "./cover.png", tile: "yes" }), /tile must be boolean/);
+  assert.equal(operations.length, operationCount);
+});
+
+test("styling 11 button handlers reject invalid callbacks before native mutation", () => {
+  const operationCount = operations.length;
+  assert.throws(() => sdk.h("button", { onPress: () => {}, onDoublePress: true }), /onDoublePress must be a function/);
+  assert.throws(() => sdk.h("button", { onPress: () => {}, onRightPress: "menu" }), /onRightPress must be a function/);
   assert.equal(operations.length, operationCount);
 });
 
