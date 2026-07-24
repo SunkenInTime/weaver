@@ -125,6 +125,7 @@ utility.
 | `rounded-{t,r,b,l,tl,tr,br,bl}[-{md,lg,xl,2xl,3xl,full}]`, arbitrary `[Npx]` | selected corner radii; later classes win per corner |
 | `border`, `border-N`, `border-[Npx]` | border width in pixels; width-only utilities default to `#E5E7EBFF` (gray-200) |
 | `border-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | border color; color alone does not create width |
+| `bg-`, `text-`, `border-` + Tailwind v4 named color (`red-50` through `taupe-950`, `white`, `black`, `transparent`), optional `/NN` | official v4.3.3 palette converted from OKLCH to the runtime's sRGB8 wire format; alpha multiplies the named color's alpha |
 | `bg-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | background color |
 | `text-[#…]` | text color |
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compileClass } from "../src/class-compiler.ts";
+import { tailwindColors } from "../src/tailwind-colors.js";
 
 test("class compiler maps the frozen M1 utility surface", () => {
   assert.deepEqual(
@@ -151,5 +152,33 @@ test("styling 03 rejects malformed radii and borders", () => {
     assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
   }
   assert.throws(() => compileClass("border-[#123456]/101"), /Color alpha must be between 0 and 100/);
+});
+
+test("styling 04 table pins Tailwind v4.3.3 sRGB8 spot values", () => {
+  assert.equal(Object.keys(tailwindColors).length, 289);
+  assert.equal(tailwindColors["red-500"], "#FB2C36FF");
+  assert.equal(tailwindColors["amber-400"], "#FFB900FF");
+  assert.equal(tailwindColors["emerald-600"], "#009966FF");
+  assert.equal(tailwindColors["sky-400"], "#00BCFFFF");
+  assert.equal(tailwindColors["violet-700"], "#7008E7FF");
+  assert.equal(tailwindColors["slate-400"], "#90A1B9FF");
+  assert.equal(tailwindColors["gray-200"], "#E5E7EBFF");
+  assert.equal(tailwindColors["zinc-900"], "#18181BFF");
+  assert.equal(tailwindColors["mauve-500"], "#79697BFF");
+  assert.equal(tailwindColors["taupe-950"], "#0C0A09FF");
+});
+
+test("styling 04 accepts named colors and alpha for every color channel", () => {
+  assert.deepEqual(compileClass("bg-zinc-900 text-slate-400/70 border-red-500/25"), {
+    background: "#18181BFF", textColor: "#90A1B9B3", borderColor: "#FB2C3640",
+  });
+  assert.deepEqual(compileClass("bg-white text-black border-transparent"), {
+    background: "#FFFFFFFF", textColor: "#000000FF", borderColor: "#00000000",
+  });
+  assert.deepEqual(compileClass("bg-transparent/50 text-[#123456]/20"), {
+    background: "#00000000", textColor: "#12345633",
+  });
+  assert.throws(() => compileClass("bg-red-975"), /Unknown class utility/);
+  assert.throws(() => compileClass("text-slate-400/101"), /Color alpha must be between 0 and 100/);
 });
 
