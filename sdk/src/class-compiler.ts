@@ -40,10 +40,14 @@ export interface ClassProps {
   hoverTextColor?: string;
   hoverOpacity?: number;
   hoverBorderColor?: string;
+  hoverShadow?: string;
+  hoverShadowInset?: boolean;
   pressedBackground?: string;
   pressedTextColor?: string;
   pressedOpacity?: number;
   pressedBorderColor?: string;
+  pressedShadow?: string;
+  pressedShadowInset?: boolean;
   crossAlign?: CrossAlign;
   mainAlign?: MainAlign;
   grow?: number;
@@ -119,6 +123,10 @@ type CompileOutput = ClassProps & {
   lineHeightExplicit?: boolean;
   shadowGeometry?: string;
   shadowColor?: string;
+  hoverShadowGeometry?: string;
+  hoverShadowColor?: string;
+  pressedShadowGeometry?: string;
+  pressedShadowColor?: string;
   textShadowGeometry?: string;
 };
 
@@ -205,12 +213,18 @@ export function compileClass(className: string): ClassProps {
   if (output.lineHeightPx !== undefined) output.lineHeight = output.lineHeightPx / fontPixels;
   if (output.letterSpacingEm !== undefined) output.letterSpacing = output.letterSpacingEm * fontPixels;
   if (output.shadowGeometry !== undefined) output.shadow = `${output.shadowGeometry} ${output.shadowColor ?? "#0000001A"}`;
+  if (output.hoverShadowGeometry !== undefined) output.hoverShadow = `${output.hoverShadowGeometry} ${output.hoverShadowColor ?? "#0000001A"}`;
+  if (output.pressedShadowGeometry !== undefined) output.pressedShadow = `${output.pressedShadowGeometry} ${output.pressedShadowColor ?? "#0000001A"}`;
   if (output.textShadowGeometry !== undefined) output.textShadow = `${output.textShadowGeometry} #00000026`;
   delete output.lineHeightPx;
   delete output.letterSpacingEm;
   delete output.lineHeightExplicit;
   delete output.shadowGeometry;
   delete output.shadowColor;
+  delete output.hoverShadowGeometry;
+  delete output.hoverShadowColor;
+  delete output.pressedShadowGeometry;
+  delete output.pressedShadowColor;
   delete output.textShadowGeometry;
   return output;
 }
@@ -580,6 +594,48 @@ function applyUtility(output: CompileOutput, utility: string): void {
 }
 
 function applyStateUtility(output: CompileOutput, state: "hover" | "pressed", utility: string, authored: string): void {
+  if (utility === "shadow" || utility.startsWith("shadow-")) {
+    const shadowKey = state === "hover" ? "hoverShadow" : "pressedShadow";
+    const insetKey = state === "hover" ? "hoverShadowInset" : "pressedShadowInset";
+    const geometryKey = state === "hover" ? "hoverShadowGeometry" : "pressedShadowGeometry";
+    const colorKey = state === "hover" ? "hoverShadowColor" : "pressedShadowColor";
+    const variant: CompileOutput = {
+      shadow: output[shadowKey] === "none" ? "" : undefined,
+      shadowInset: output[insetKey],
+      shadowGeometry: output[geometryKey],
+      shadowColor: output[colorKey],
+    };
+    try {
+      applyUtility(variant, utility);
+    } catch {
+      throw unsupportedStateUtility(authored, state);
+    }
+    const keys = Object.keys(variant) as (keyof CompileOutput)[];
+    if (keys.some((key) => !["shadow", "shadowInset", "shadowGeometry", "shadowColor"].includes(key))) {
+      throw unsupportedStateUtility(authored, state);
+    }
+    if (variant.shadow === "" && variant.shadowGeometry === undefined) {
+      output[shadowKey] = "none";
+      delete output[geometryKey];
+      delete output[colorKey];
+      output[insetKey] = false;
+      return;
+    }
+    if (variant.shadowGeometry !== undefined) {
+      delete output[shadowKey];
+      output[geometryKey] = variant.shadowGeometry;
+      if (variant.shadowColor === undefined) delete output[colorKey];
+      else output[colorKey] = variant.shadowColor;
+      output[insetKey] = variant.shadowInset ?? false;
+      return;
+    }
+    // A color-only shadow utility composes with an earlier geometry, or
+    // preserves an earlier explicit shadow-none when no geometry exists.
+    if (variant.shadow === "") output[shadowKey] = "none";
+    if (variant.shadowColor === undefined) delete output[colorKey];
+    else output[colorKey] = variant.shadowColor;
+    return;
+  }
   const variant: CompileOutput = {};
   try {
     applyUtility(variant, utility);
@@ -600,7 +656,7 @@ function applyStateUtility(output: CompileOutput, state: "hover" | "pressed", ut
 function unsupportedStateUtility(authored: string, state: "hover" | "pressed"): UtilityError {
   return new UtilityError(
     authored,
-    `State variant "${authored}" supports only ${state}:bg-<color>, ${state}:text-<color>, ${state}:opacity-N, or ${state}:border-<color>`,
+    `State variant "${authored}" supports only ${state}:bg-<color>, ${state}:text-<color>, ${state}:opacity-N, ${state}:border-<color>, or ${state}:shadow-*`,
   );
 }
 
