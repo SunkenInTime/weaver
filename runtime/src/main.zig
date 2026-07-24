@@ -1053,12 +1053,49 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
 }
 
-test "dev reload frame hook consumes one pending wake" {
+test "dev reload crosses requestFrame into the frame-requested hook exactly once" {
+    const TestApp = struct {
+        model: Model = .{},
+        reloads: usize = 0,
+
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-dev-reload-wake",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+                .frame_requested_fn = frameRequested,
+            };
+        }
+
+        fn frameRequested(context: *anyopaque, _: *native_sdk.Runtime) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            if (onFrameRequested(&self.model)) |msg| {
+                if (msg == .dev_reload) self.reloads += 1;
+            }
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    var app_state: TestApp = .{};
+    const app = app_state.app();
+    try harness.start(app);
+
     dev_reload_pending.store(false, .release);
-    try std.testing.expect(takePendingDevReload() == null);
-    dev_reload_pending.store(true, .release);
-    try std.testing.expectEqual(Msg.dev_reload, takePendingDevReload().?);
-    try std.testing.expect(takePendingDevReload() == null);
+    dev_reload_runtime.store(@intFromPtr(&harness.runtime), .release);
+    defer {
+        dev_reload_runtime.store(0, .release);
+        dev_reload_pending.store(false, .release);
+    }
+    const notifier = try std.Thread.spawn(.{}, notifyDevReload, .{});
+    notifier.join();
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.pendingFrameRequestCount());
+
+    const frame_event = harness.null_platform.takeFrameRequest().?;
+    try std.testing.expect(frame_event == .frame_requested);
+    try harness.runtime.dispatchPlatformEvent(app, frame_event);
+    try std.testing.expectEqual(@as(usize, 1), app_state.reloads);
+    try std.testing.expect(onFrameRequested(&app_state.model) == null);
 }
 
 test "corner radius projection preserves authored values and maps retained unset in-band" {
