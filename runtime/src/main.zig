@@ -216,6 +216,7 @@ fn retainedPressNodeId(tree: *const tree_mod.Tree, target_id: native_sdk.canvas.
         const node = tree.nodeConst(id) catch continue;
         const kind: native_sdk.canvas.WidgetKind = switch (node.kind) {
             .button => .panel,
+            .slider => .slider,
             else => continue,
         };
         if (native_sdk.canvas.globalWidgetId(kind, native_sdk.canvas.uiKey(id)) == target_id) return id;
@@ -235,6 +236,10 @@ test "interaction projection retains exact channels and press identity" {
     const id = try tree.createNode(.button);
     const target_id = native_sdk.canvas.globalWidgetId(.panel, native_sdk.canvas.uiKey(id));
     try std.testing.expectEqual(id, retainedPressNodeId(&tree, target_id).?);
+
+    const slider_id = try tree.createNode(.slider);
+    const slider_target_id = native_sdk.canvas.globalWidgetId(.slider, native_sdk.canvas.uiKey(slider_id));
+    try std.testing.expectEqual(slider_id, retainedPressNodeId(&tree, slider_target_id).?);
 }
 
 /// A dragged position is user state, not widget source (ADR 0004/0011):

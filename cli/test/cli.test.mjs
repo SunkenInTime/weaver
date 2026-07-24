@@ -335,6 +335,15 @@ export default widget({ name: "State Test", size: [160, 80] }, () =>
     assert.equal(accepted.status, 0, accepted.stderr);
 
     writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+const StateIcon = () => <icon name="play" class="pressed:text-[#b6b6b6]" />;
+const Pressable = ({ children }: { children: any }) => <button onPress={() => {}}>{children}</button>;
+export default widget({ name: "State Test", size: [160, 80] }, () =>
+  <Pressable><StateIcon /></Pressable>);
+`);
+    const componentBoundary = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(componentBoundary.status, 0, componentBoundary.stderr);
+
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
 export default widget({ name: "State Test", size: [160, 80] }, () =>
   <icon name="play" class="pressed:text-[#b6b6b6]" />);
 `);

@@ -473,7 +473,10 @@ On a non-pressable node, `hover:` and `pressed:` utilities resolve against
 the nearest pressable ancestor (`<button>` or `<slider>`). This is Weaver's
 implicit group-state rule: no `group` class or `group-*` prefix is needed.
 A state variant on a non-pressable node outside any pressable ancestor is a
-`weaver check` error with the `NearestPressableAncestor` fix-it.
+`weaver check` error with the `NearestPressableAncestor` fix-it when the
+entry-file JSX proves that ancestry. Component boundaries are accepted because
+the static check cannot prove their rendered ancestry; Native runtime
+resolution remains authoritative.
 
 ```ts
 interface PressEvent {

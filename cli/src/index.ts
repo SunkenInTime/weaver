@@ -1171,16 +1171,25 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
   const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
-  const hasPressableJsxAncestor = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): boolean => {
+  const stateVariantAncestry = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): "pressable" | "component-boundary" | "none" => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (ts.isJsxElement(current) && current.openingElement !== node) {
         const tag = current.openingElement.tagName.getText(project.sourceFile);
-        if (tag === "button" || tag === "slider") return true;
+        if (tag === "button" || tag === "slider") return "pressable";
+        if (/^[A-Z]/.test(tag)) return "component-boundary";
+      }
+      if (ts.isFunctionLike(current)) {
+        const parent = current.parent;
+        const isInlineWidgetRoot = ts.isCallExpression(parent) &&
+          ts.isIdentifier(parent.expression) &&
+          parent.expression.text === "widget" &&
+          parent.arguments[1] === current;
+        if (!isInlineWidgetRoot) return "component-boundary";
       }
       current = current.parent;
     }
-    return false;
+    return "none";
   };
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -1193,7 +1202,7 @@ function validateSource(project: SourceProject): string[] {
           try {
             const compiled = compileClass(classText);
             const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
-            if (hasStateVariant && tag !== "button" && tag !== "slider" && !hasPressableJsxAncestor(node)) {
+            if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
               errors.push(locationMessage(
                 project.sourceFile,
                 classAttribute,
