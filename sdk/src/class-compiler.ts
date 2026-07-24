@@ -3,6 +3,14 @@ export type MainAlign = "start" | "center" | "end" | "between";
 
 export interface ClassProps {
   padding?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  marginTop?: number;
+  marginRight?: number;
+  marginBottom?: number;
+  marginLeft?: number;
   gap?: number;
   radius?: number;
   background?: string;
@@ -15,6 +23,13 @@ export interface ClassProps {
   grow?: number;
   width?: number;
   height?: number;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  widthPercent?: number;
+  heightPercent?: number;
+  aspectRatio?: number;
   truncate?: boolean;
 }
 
@@ -49,15 +64,32 @@ const radii: Readonly<Record<string, number>> = {
   "rounded-full": 9999,
 };
 
+const maxUtilityNumber = 1_000_000;
+
+function utilityNumber(raw: string, utility: string, multiplier = 1): number {
+  const value = Number(raw) * multiplier;
+  if (!Number.isFinite(value) || Math.abs(value) > maxUtilityNumber) {
+    throw new UtilityError(
+      utility,
+      `Class utility "${utility}" has a non-finite or absurd numeric value (maximum ${maxUtilityNumber})`,
+    );
+  }
+  return value;
+}
+
 const exampleUtilities = [
-  "p-4", "p-[13px]", "gap-2", "gap-[13px]", "rounded", "rounded-md",
+  "p-4", "p-[13px]", "px-4", "py-4", "pt-4", "pr-4", "pb-4", "pl-4",
+  "m-4", "mx-4", "my-4", "mt-4", "mr-4", "mb-4", "ml-4", "-mt-4",
+  "gap-2", "gap-[13px]", "rounded", "rounded-md",
   "rounded-lg", "rounded-xl", "rounded-2xl", "rounded-3xl", "rounded-full",
   "rounded-[13px]", "bg-[#11141c]/86", "text-[#ffffff]", "text-xs",
   "text-sm", "text-base", "text-lg", "text-xl", "text-2xl", "text-3xl",
   "text-4xl", "font-light", "font-normal", "font-medium", "font-semibold",
   "font-bold", "opacity-70", "items-start", "items-center", "items-end",
   "items-baseline", "justify-start", "justify-center", "justify-end",
-  "justify-between", "grow", "w-12", "w-[48px]", "h-12", "h-[48px]",
+  "justify-between", "grow", "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
+  "h-12", "h-[48px]", "h-full", "size-12", "min-w-12", "max-w-[160px]",
+  "min-h-12", "max-h-[160px]", "aspect-square", "aspect-video", "aspect-[4/3]",
   "truncate",
 ] as const;
 
@@ -70,25 +102,43 @@ export function compileClass(className: string): ClassProps {
 }
 
 function applyUtility(output: ClassProps, utility: string): void {
-  if (/^(?:px|py|pt|pr|pb|pl)-/.test(utility) || /^(?:border|shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
+  if (/^(?:border|shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
 
   let match: RegExpExecArray | null;
   if ((match = /^p-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output.padding = Number(match[1]) * 4;
+    output.padding = utilityNumber(match[1], utility, 4);
+    clearPaddingSides(output);
     return;
   }
   if ((match = /^p-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.padding = Number(match[1]);
+    output.padding = utilityNumber(match[1], utility);
+    clearPaddingSides(output);
+    return;
+  }
+  if ((match = /^(px|py|pt|pr|pb|pl)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    applyPaddingSides(output, match[1], utilityNumber(match[2], utility, 4));
+    return;
+  }
+  if ((match = /^(px|py|pt|pr|pb|pl)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    applyPaddingSides(output, match[1], utilityNumber(match[2], utility));
+    return;
+  }
+  if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    applyMarginSides(output, match[2], utilityNumber(match[3], utility, 4) * (match[1] ? -1 : 1));
+    return;
+  }
+  if ((match = /^(-)?(m|mx|my|mt|mr|mb|ml)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    applyMarginSides(output, match[2], utilityNumber(match[3], utility) * (match[1] ? -1 : 1));
     return;
   }
   if ((match = /^gap-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output.gap = Number(match[1]) * 4;
+    output.gap = utilityNumber(match[1], utility, 4);
     return;
   }
   if ((match = /^gap-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.gap = Number(match[1]);
+    output.gap = utilityNumber(match[1], utility);
     return;
   }
   if (utility in radii) {
@@ -96,7 +146,7 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^rounded-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output.radius = Number(match[1]);
+    output.radius = utilityNumber(match[1], utility);
     return;
   }
   if ((match = /^bg-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
@@ -116,7 +166,7 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^opacity-(\d{1,3})$/.exec(utility))) {
-    const percent = Number(match[1]);
+    const percent = utilityNumber(match[1], utility);
     if (percent <= 100) {
       output.opacity = percent / 100;
       return;
@@ -135,18 +185,153 @@ function applyUtility(output: ClassProps, utility: string): void {
     return;
   }
   if ((match = /^(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
-    output[match[1] === "w" ? "width" : "height"] = Number(match[2]) * 4;
+    setAxisSize(output, match[1], utilityNumber(match[2], utility, 4));
     return;
   }
   if ((match = /^(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
-    output[match[1] === "w" ? "width" : "height"] = Number(match[2]);
+    setAxisSize(output, match[1], utilityNumber(match[2], utility));
     return;
+  }
+  if ((match = /^(w|h)-full$/.exec(utility))) {
+    setAxisPercent(output, match[1], 100);
+    return;
+  }
+  if ((match = /^(w|h)-(\d+)\/(\d+)$/.exec(utility))) {
+    const numerator = utilityNumber(match[2], utility);
+    const denominator = utilityNumber(match[3], utility);
+    if (denominator > 0 && numerator > 0 && numerator <= denominator) {
+      setAxisPercent(output, match[1], numerator * 100 / denominator);
+      return;
+    }
+  }
+  if ((match = /^(w|h)-auto$/.exec(utility))) {
+    clearAxisSize(output, match[1]);
+    return;
+  }
+  if ((match = /^size-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    const value = utilityNumber(match[1], utility, 4);
+    setAxisSize(output, "w", value);
+    setAxisSize(output, "h", value);
+    return;
+  }
+  if ((match = /^size-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    const value = utilityNumber(match[1], utility);
+    setAxisSize(output, "w", value);
+    setAxisSize(output, "h", value);
+    return;
+  }
+  if (utility === "size-full") {
+    setAxisPercent(output, "w", 100);
+    setAxisPercent(output, "h", 100);
+    return;
+  }
+  if ((match = /^(min|max)-(w|h)-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    setBound(output, match[1], match[2], utilityNumber(match[3], utility, 4));
+    return;
+  }
+  if ((match = /^(min|max)-(w|h)-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    setBound(output, match[1], match[2], utilityNumber(match[3], utility));
+    return;
+  }
+  if (utility === "aspect-square") {
+    output.aspectRatio = 1;
+    return;
+  }
+  if (utility === "aspect-video") {
+    output.aspectRatio = 16 / 9;
+    return;
+  }
+  if (utility === "aspect-auto") {
+    delete output.aspectRatio;
+    return;
+  }
+  if ((match = /^aspect-\[(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    const numerator = utilityNumber(match[1], utility);
+    const denominator = utilityNumber(match[2], utility);
+    if (denominator > 0) {
+      const ratio = numerator / denominator;
+      if (!Number.isFinite(ratio) || ratio > maxUtilityNumber) {
+        throw new UtilityError(utility, `Class utility "${utility}" has an absurd aspect ratio`);
+      }
+      output.aspectRatio = ratio;
+      return;
+    }
+  }
+  if ((match = /^aspect-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    const ratio = utilityNumber(match[1], utility);
+    if (ratio > 0) {
+      output.aspectRatio = ratio;
+      return;
+    }
+    throw new UtilityError(utility, `Class utility "${utility}" requires an aspect ratio greater than zero`);
   }
   if (utility === "truncate") {
     output.truncate = true;
     return;
   }
   throw unknownUtility(utility);
+}
+
+type PaddingSide = "paddingTop" | "paddingRight" | "paddingBottom" | "paddingLeft";
+type MarginSide = "marginTop" | "marginRight" | "marginBottom" | "marginLeft";
+
+function clearPaddingSides(output: ClassProps): void {
+  delete output.paddingTop;
+  delete output.paddingRight;
+  delete output.paddingBottom;
+  delete output.paddingLeft;
+}
+
+function applyPaddingSides(output: ClassProps, axis: string, value: number): void {
+  const sides: Record<string, PaddingSide[]> = {
+    px: ["paddingLeft", "paddingRight"], py: ["paddingTop", "paddingBottom"],
+    pt: ["paddingTop"], pr: ["paddingRight"], pb: ["paddingBottom"], pl: ["paddingLeft"],
+  };
+  for (const side of sides[axis]) output[side] = value;
+}
+
+function applyMarginSides(output: ClassProps, axis: string, value: number): void {
+  const sides: Record<string, MarginSide[]> = {
+    m: ["marginTop", "marginRight", "marginBottom", "marginLeft"],
+    mx: ["marginLeft", "marginRight"], my: ["marginTop", "marginBottom"],
+    mt: ["marginTop"], mr: ["marginRight"], mb: ["marginBottom"], ml: ["marginLeft"],
+  };
+  for (const side of sides[axis]) output[side] = value;
+}
+
+function setAxisSize(output: ClassProps, axis: string, value: number): void {
+  if (axis === "w") {
+    output.width = value;
+    delete output.widthPercent;
+  } else {
+    output.height = value;
+    delete output.heightPercent;
+  }
+}
+
+function setAxisPercent(output: ClassProps, axis: string, value: number): void {
+  if (axis === "w") {
+    output.widthPercent = value;
+    delete output.width;
+  } else {
+    output.heightPercent = value;
+    delete output.height;
+  }
+}
+
+function clearAxisSize(output: ClassProps, axis: string): void {
+  if (axis === "w") {
+    delete output.width;
+    delete output.widthPercent;
+  } else {
+    delete output.height;
+    delete output.heightPercent;
+  }
+}
+
+function setBound(output: ClassProps, bound: string, axis: string, value: number): void {
+  const key = `${bound}${axis === "w" ? "Width" : "Height"}` as "minWidth" | "minHeight" | "maxWidth" | "maxHeight";
+  output[key] = value;
 }
 
 function normalizeColor(source: string, alphaPercent?: string): string {

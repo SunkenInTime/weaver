@@ -417,9 +417,13 @@ function reorder(parentId: number, currentSource: number[], target: number[]): v
 
 function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
   const defaults: Required<ClassProps> = {
-    padding: 0, gap: 0, radius: 0, background: "", textColor: "",
+    padding: 0, paddingTop: -1, paddingRight: -1, paddingBottom: -1, paddingLeft: -1,
+    marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
+    gap: 0, radius: 0, background: "", textColor: "",
     fontScale: 1, fontWeight: "normal", opacity: 1, crossAlign: "start",
-    mainAlign: "start", grow: 0, width: 0, height: 0, truncate: false,
+    mainAlign: "start", grow: 0, width: -1, height: -1,
+    minWidth: 0, minHeight: 0, maxWidth: -1, maxHeight: -1,
+    widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false,
   };
   for (const key of Object.keys(defaults) as (keyof ClassProps)[]) {
     const before = previous[key] ?? defaults[key];
