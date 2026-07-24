@@ -362,3 +362,24 @@ PR01; no implementation or verification task remains.
 - GitHub rollups: pending the force-with-lease restack at the time this
   evidence commit was authored; final check URLs/results are recorded in the
   PR bodies and run report after polling.
+
+## CI readiness hardening after centering restack (2026-07-24)
+
+- Assumption/action: two independently reproduced Intel failures on PR08 and
+  PR12 were treated as a real flaky gate rather than hidden by repeated
+  reruns. Both read the macOS HTTPS fixture's port file after creation but
+  before its contents were written. PR01 now publishes that fixture file by
+  atomic replace, and its reader waits through an observed empty file. The
+  earlier PR13 Apple failure likewise replaced a single `setImmediate`
+  scheduling guess with an awaited server `connection` event while retaining
+  the exact one-notification assertion and a 5s test timeout.
+- Weaver PR01-PR13 were restacked from the hardened PR01 base. Exact code
+  heads are `513608a8/1161ff90/7cea4e77/303d8c40/b79a0074/03ce828f/83b9892e/`
+  `a08aebf5/d2a80577/884e65cf/4a967c8c/237ff406/9f9c9a1b`.
+  Every exact head passes `npm test`, `npm run typecheck`,
+  `zig build test -Dweb-layer=exclude -Dtrace=off --build-file runtime/build.zig`,
+  and `npm run audit:release`; PR13 also passes
+  `weaver check examples/noro-shell`.
+- Native N5-N8 commits and Weaver gitlinks remain unchanged:
+  `3a16880f/bdac8c22/63554853/111bb748`. No production assertion, test, or CI
+  step was removed or weakened.
