@@ -493,3 +493,40 @@ double-press handler on the double release. Right press uses the dedicated
 handler when present. Coordinates are computed from the native laid-out hit
 bounds before entering JS. `<slider>` retains its existing `onChange` surface
 and can use the same `pressed:` visual channels during its native drag state.
+
+## Consolidated v0.4 authoring tables
+
+These tables supersede the M1 scheduling notes for the shipped surface. They
+are the close-of-stack review index; details and bounds remain normative in
+the sections above.
+
+| Element | Shipped props beyond `class` and `children` | Content model |
+|---|---|---|
+| `<column>` | none | box children, vertical flex |
+| `<row>` | none | box children, horizontal flex |
+| `<stack>` | none | box children, overlay layout; paint the backdrop on a child |
+| `<panel>` | none | box children, vertical flex with a painted surface |
+| `<text>` | none | strings and numbers only |
+| `<icon>` | required literal `name` from `iconNames` | no children |
+| `<image>` | required local `src`; optional `fit="cover/contain/stretch"`, `tile` | no rendered children |
+| `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress` | box children |
+| `<slider>` | required `value`, `max`, `onChange` | no rendered children |
+| `<canvas>` | required `onFrame`; optional `fps` | no rendered children |
+
+| Class family | Complete shipped forms |
+|---|---|
+| spacing | `p-N`, `p-[Npx]`, `px/py/pt/pr/pb/pl-N`, bracketed directional padding, `m/mx/my/mt/mr/mb/ml-N`, bracketed margins, negative margins, `gap-N`, `gap-[Npx]` |
+| sizing | `w/h-N`, `w/h-[Npx]`, `w/h-full`, `w/h-A/B`, `w/h-auto`, `size-N`, `size-[Npx]`, `size-full`, `min/max-w/h-N`, bracketed bounds, `aspect-square/video/auto`, `aspect-[W/H]`, `aspect-[N]` |
+| flex | `items-start/center/end/baseline`, `justify-start/center/end/between/around/evenly`, `grow`, `grow-N`, `grow-[N]`, `shrink`, `shrink-0`, `self-auto/start/center/end/stretch`, `flex-wrap`, `flex-nowrap` |
+| radii | `rounded`, `rounded-md/lg/xl/2xl/3xl/full`, `rounded-[Npx]`, directional and corner `rounded-t/r/b/l/tl/tr/br/bl` forms with the same suffixes |
+| borders | `border`, `border-N`, `border-[Npx]`, `border-<named-color>`, `border-[#hex]`, optional `/NN` color alpha |
+| colors | `bg/text/border-<Tailwind-v4-color>`, `bg/text/border-[#hex]`, optional `/NN` alpha |
+| typography | `text-xs/sm/base/lg/xl/2xl/3xl/4xl`, `text-[Npx]`, `font-light/normal/medium/semibold/bold`, `font-sans/mono`, `font-[file-stem]`, `text-left/center/right`, all documented `leading-*` and `tracking-*` forms, `line-clamp-N/none`, `tabular-nums`, `normal-nums`, `truncate` |
+| effects | `shadow`, `shadow-sm/md/lg/xl/inner/none`, `shadow-[X_Y_BLUR_SPREAD_#hex]`, `shadow-<color>`, `text-shadow`, `text-shadow-sm/md/lg/none`, `opacity-N` |
+| overflow | `overflow-hidden` |
+| native state | `hover/pressed:bg-<color>`, `hover/pressed:text-<color>`, `hover/pressed:opacity-N`, `hover/pressed:border-<color>` |
+
+The contract-table unit test freezes both row sets and compiles a representative
+for every syntax branch. Gradients, transitions, positioned layout, arbitrary
+state prefixes, and every utility absent from these tables remain loud
+`UtilityError` failures with a fix-it.
