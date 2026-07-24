@@ -1,6 +1,42 @@
 # Styling breadth run status
 
-Updated: 2026-07-24 (macOS 26.5.1, attended physical styling verification)
+Updated: 2026-07-24 (Greptile sweep restack in progress)
+
+## 2026-07-24 Greptile review sweep
+
+Eleven Weaver inline comments were fetched from PRs 20, 21, 22, 23, 26,
+29, and 31. Native PRs had no Greptile comments; the only Native change in
+this sweep is the separately requested deterministic press-cycle test.
+
+| PR / comment | Finding | Verdict | Action | Fix/proof commit |
+|---|---|---|---|---|
+| 20 / `3647511317` | `grow-N` and `grow-[N]` bypass numeric bounds | REAL | Routed both forms through `utilityNumber`; added overflow/non-finite regressions at the lowest flex layer. | `dfe1437` |
+| 21 / `3647512118` | dead JSX helpers consume the static tree budget | REAL | Budget traversal now starts only from the exported widget component and follows reachable local components. | `059d213` |
+| 21 / `3647512226` | only the first JSX return branch is budgeted | REAL | Collects all JSX-returning branches and budgets their maximum, never their sum. | `059d213` |
+| 21 / `3647512306` | imported components are undercounted | REAL | Resolves one level of relative TS/TSX imports, including named aliases; errors and the contract state the remaining dynamic/runtime authority boundary. | `059d213` |
+| 21 / `3647512404` | implicit primitive children are omitted | REAL | Counts statically evident string/number children that reconciliation lowers to Native text nodes, without double-counting content already owned by `<text>`. | `059d213` |
+| 22 / `3647507456` | palette identity accepts any 286 regex matches | REAL | Requires the pinned Tailwind 4.3.3 `theme.css` SHA-256, validates all 286 family/shade keys, and pins the complete generated map digest. | `0f1a5ba` |
+| 23 / `3647521234` | `text-sm text-[20px]` should clear the named leading | WRONG | No code change: arbitrary font size sets only size, while Weaver's documented left-to-right semantics retain the named size's authored 20px leading. Added an exact compile regression (`fontScale=20/14`, `lineHeight=1`, hence 20px). | `7e3145a` |
+| 26 / `3647510950` | imported icon geometry omits the Lucide license | REAL | License inclusion is now set by every local TSX module loaded by the icon-lowering bundle plugin; copying occurs after bundle analysis. | `712c619` |
+| 29 / `3647509639` | valid descendant variants fail across component boundaries | REAL | Only provably orphaned entry-file JSX is rejected; component-boundary cases are accepted and documented as runtime-authoritative. | `f5a52cb` |
+| 29 / `3647509710` | press target lookup drops sliders | REAL | Maps every current pressable retained kind (`button`, `slider`) to its projected Native kind and tests both identities. | `f5a52cb` |
+| 31 / `3647529695` | reload-wake test bypasses `requestFrame` | REAL | Spawned-thread notification now uses the live NullPlatform service, consumes its real `frame_requested` event, dispatches it through Runtime, and reaches `onFrameRequested` once. | `08cbfe4` |
+
+- Tailwind verification evidence: official Tailwind documents arbitrary
+  `text-[<value>]` as font-size-only. Tailwind 3.4.17 emits named `text-sm`
+  leading as `1.25rem` (20px); Weaver intentionally replaces Tailwind's
+  stylesheet-order conflict rule with its contracted left-to-right last-wins
+  rule, so the required combined result is 20px font size with retained 20px
+  leading. Tailwind 4.3.3 was also compiled locally to verify the arbitrary
+  utility itself emits no line-height declaration.
+- Static budget estimator boundary: one relative import level and statically
+  evident primitive children are estimated; dynamic collections, render-prop
+  output, and unresolved component output remain governed by Native's
+  authoritative 128-node/32-depth checks.
+- Native carry-in result: PASS. A real primary down-up cycle through UiApp's
+  platform/runtime path dispatches zero typed press events on down and exactly
+  one on up (`3f6a68b6`); no production double-fire existed, so no dispatch
+  behavior was changed. Weaver pins that proof in `d9f4c43`.
 
 ## 2026-07-23 path-icon redesign
 
