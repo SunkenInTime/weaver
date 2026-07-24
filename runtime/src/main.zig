@@ -408,6 +408,11 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
     return buildNode(ui, &model.tree, root_id, true);
 }
 
+fn hasPaintStyle(node: *const tree_mod.Node) bool {
+    return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
+        node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0;
+}
+
 fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
     const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
     var options: WidgetUi.ElementOptions = .{
@@ -466,6 +471,12 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
             .background = retained.background,
             .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
+            .radius_top_left = nativeCornerRadius(retained.radius_top_left),
+            .radius_top_right = nativeCornerRadius(retained.radius_top_right),
+            .radius_bottom_right = nativeCornerRadius(retained.radius_bottom_right),
+            .radius_bottom_left = nativeCornerRadius(retained.radius_bottom_left),
+            .border = retained.border_color,
+            .stroke_width = retained.border_width,
             .quiet_hover = true,
         },
         .on_press = if (retained.handles_press) Msg{ .press = id } else null,
@@ -494,22 +505,24 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         // styled column is contractually a column-layout box, which is the
         // builder's panel primitive; unstyled columns keep the lean node.
         // A styled row gets the same painting panel around its row layout.
-        .column => if (retained.background != null) block: {
+        .column => if (hasPaintStyle(retained)) block: {
             const column_options: WidgetUi.ElementOptions = .{
                 .gap = retained.gap,
                 .grow = 1,
                 .cross = options.cross,
                 .main = options.main,
+                .flex_wrap = retained.flex_wrap,
             };
             options.gap = 0;
             break :block ui.panel(options, .{ui.column(column_options, children)});
         } else ui.column(options, children),
-        .row => if (retained.background != null) block: {
+        .row => if (hasPaintStyle(retained)) block: {
             const row_options: WidgetUi.ElementOptions = .{
                 .gap = retained.gap,
                 .grow = 1,
                 .cross = options.cross,
                 .main = options.main,
+                .flex_wrap = retained.flex_wrap,
             };
             options.gap = 0;
             break :block ui.panel(options, .{ui.row(row_options, children)});
@@ -527,6 +540,10 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, id: tree_mod.NodeId, is_
         .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
         .text => unreachable,
     };
+}
+
+fn nativeCornerRadius(retained: f32) f32 {
+    return if (retained >= 0) retained else -std.math.inf(f32);
 }
 
 fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
@@ -809,4 +826,27 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "corner radius projection preserves authored values and maps retained unset in-band" {
+    try std.testing.expectEqual(@as(f32, 12.5), nativeCornerRadius(12.5));
+    try std.testing.expect(nativeCornerRadius(-1) == -std.math.inf(f32));
+}
+
+test "painted row lowering preserves flex wrap on the inner layout node" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var retained_tree: tree_mod.Tree = .{};
+    const row = try retained_tree.createNode(.row);
+    const child = try retained_tree.createNode(.panel);
+    try retained_tree.appendChild(row, child);
+    try retained_tree.setBackground(row, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    try retained_tree.setFlexWrap(row, true);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNode(&ui, &retained_tree, row, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
+    try std.testing.expect(built.root.children[0].layout.flex_wrap);
 }

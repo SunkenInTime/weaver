@@ -57,8 +57,14 @@ pub const Node = struct {
     margin_left: f32 = 0,
     gap: f32 = 0,
     radius: f32 = 0,
+    radius_top_left: f32 = -1,
+    radius_top_right: f32 = -1,
+    radius_bottom_right: f32 = -1,
+    radius_bottom_left: f32 = -1,
+    border_width: f32 = 0,
     opacity: f32 = 1,
     background: ?native_sdk.canvas.Color = null,
+    border_color: ?native_sdk.canvas.Color = null,
     text_color: ?native_sdk.canvas.Color = null,
     font_scale: f32 = 1,
     font_weight: FontWeight = .regular,
@@ -215,6 +221,16 @@ pub const Tree = struct {
             &target.gap
         else if (std.mem.eql(u8, key, "radius"))
             &target.radius
+        else if (std.mem.eql(u8, key, "radiusTopLeft"))
+            &target.radius_top_left
+        else if (std.mem.eql(u8, key, "radiusTopRight"))
+            &target.radius_top_right
+        else if (std.mem.eql(u8, key, "radiusBottomRight"))
+            &target.radius_bottom_right
+        else if (std.mem.eql(u8, key, "radiusBottomLeft"))
+            &target.radius_bottom_left
+        else if (std.mem.eql(u8, key, "borderWidth"))
+            &target.border_width
         else if (std.mem.eql(u8, key, "opacity"))
             &target.opacity
         else if (std.mem.eql(u8, key, "fontScale"))
@@ -247,7 +263,7 @@ pub const Tree = struct {
             std.math.clamp(value, 0, 1)
         else if (std.mem.startsWith(u8, key, "margin"))
             value
-        else if (std.mem.startsWith(u8, key, "padding") and !std.mem.eql(u8, key, "padding"))
+        else if ((std.mem.startsWith(u8, key, "padding") and !std.mem.eql(u8, key, "padding")) or std.mem.startsWith(u8, key, "radius"))
             @max(value, -1)
         else if (std.mem.eql(u8, key, "width") or std.mem.eql(u8, key, "height") or
             std.mem.eql(u8, key, "maxWidth") or std.mem.eql(u8, key, "maxHeight"))
@@ -278,6 +294,13 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (std.meta.eql(target.text_color, color)) return;
         target.text_color = color;
+        self.changed();
+    }
+
+    pub fn setBorderColor(self: *Tree, id: NodeId, color: ?native_sdk.canvas.Color) Error!void {
+        const target = try self.node(id);
+        if (std.meta.eql(target.border_color, color)) return;
+        target.border_color = color;
         self.changed();
     }
 
@@ -591,6 +614,11 @@ test "tree stores styling breadth layout wire properties" {
     try tree.setNumberProp(id, "width", 0);
     try tree.setNumberProp(id, "maxWidth", 0);
     try tree.setNumberProp(id, "shrink", 0);
+    try tree.setNumberProp(id, "radiusTopLeft", 14);
+    try tree.setNumberProp(id, "radiusBottomRight", 2);
+    try tree.setNumberProp(id, "borderWidth", 1);
+    const border = native_sdk.canvas.Color.rgba8(229, 231, 235, 255);
+    try tree.setBorderColor(id, border);
     try tree.setMainAlign(id, "evenly");
     try tree.setAlignSelf(id, "stretch");
     try tree.setFlexWrap(id, true);
@@ -605,6 +633,10 @@ test "tree stores styling breadth layout wire properties" {
     try std.testing.expectEqual(@as(f32, 0), node.width);
     try std.testing.expectEqual(@as(f32, 0), node.max_width);
     try std.testing.expectEqual(@as(f32, 0), node.shrink);
+    try std.testing.expectEqual(@as(f32, 14), node.radius_top_left);
+    try std.testing.expectEqual(@as(f32, 2), node.radius_bottom_right);
+    try std.testing.expectEqual(@as(f32, 1), node.border_width);
+    try std.testing.expectEqualDeep(border, node.border_color.?);
     try std.testing.expectEqual(MainAlign.evenly, node.main_align);
     try std.testing.expectEqual(SelfAlign.stretch, node.align_self);
     try std.testing.expect(node.flex_wrap);

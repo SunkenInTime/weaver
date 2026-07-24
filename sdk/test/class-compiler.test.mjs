@@ -124,3 +124,32 @@ test("styling 02 accepts complete flex utilities and rejects near misses", () =>
   assert.throws(() => compileClass("flex-wrap-reverse"), /Unknown class utility/);
 });
 
+test("styling 03 accepts per-corner radii and border utilities", () => {
+  const cases = [
+    ["rounded-t-xl", { radiusTopLeft: 12, radiusTopRight: 12 }],
+    ["rounded-r-[3px]", { radiusTopRight: 3, radiusBottomRight: 3 }],
+    ["rounded-b", { radiusBottomLeft: 4, radiusBottomRight: 4 }],
+    ["rounded-l-full", { radiusTopLeft: 9999, radiusBottomLeft: 9999 }],
+    ["rounded-tl-lg", { radiusTopLeft: 8 }], ["rounded-tr-md", { radiusTopRight: 6 }],
+    ["rounded-br-2xl", { radiusBottomRight: 16 }], ["rounded-bl-[7px]", { radiusBottomLeft: 7 }],
+    ["border", { borderWidth: 1, borderColor: "#E5E7EBFF" }],
+    ["border-2", { borderWidth: 2, borderColor: "#E5E7EBFF" }],
+    ["border-[1.5px]", { borderWidth: 1.5, borderColor: "#E5E7EBFF" }],
+    ["border-[#123]", { borderColor: "#112233FF" }],
+    ["border-[#112233]/50", { borderColor: "#11223380" }],
+  ];
+  for (const [utility, expected] of cases) assert.deepEqual(compileClass(utility), expected, utility);
+  assert.deepEqual(compileClass("rounded-xl rounded-t-[36px] rounded-b-[4px]"), {
+    radius: 12, radiusTopLeft: 36, radiusTopRight: 36, radiusBottomLeft: 4, radiusBottomRight: 4,
+  });
+  assert.deepEqual(compileClass("rounded-t-xl rounded-lg"), { radius: 8 });
+  assert.deepEqual(compileClass("border-[#123456] border-4"), { borderColor: "#123456FF", borderWidth: 4 });
+});
+
+test("styling 03 rejects malformed radii and borders", () => {
+  for (const utility of ["rounded-x-lg", "rounded-t-7", "rounded-t-[-1px]", "border--1", "border-[2rem]", "border-[#12]"]) {
+    assert.throws(() => compileClass(utility), /Unknown class utility/, utility);
+  }
+  assert.throws(() => compileClass("border-[#123456]/101"), /Color alpha must be between 0 and 100/);
+});
+

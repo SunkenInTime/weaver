@@ -272,14 +272,16 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
     const key = stringArg(js, argv[1]) catch return fail(js, "property key must be a string");
     defer c.JS_FreeCString(js, key.raw);
-    if (std.mem.eql(u8, key.bytes, "background") or std.mem.eql(u8, key.bytes, "textColor")) {
+    if (std.mem.eql(u8, key.bytes, "background") or std.mem.eql(u8, key.bytes, "textColor") or std.mem.eql(u8, key.bytes, "borderColor")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "background must be #RRGGBBAA");
         defer c.JS_FreeCString(js, value.raw);
         const color = if (value.bytes.len == 0) null else parseColor(value.bytes) orelse return fail(js, "color must be #RRGGBBAA");
         if (std.mem.eql(u8, key.bytes, "background")) {
             state(js).tree.setBackground(id, color) catch return fail(js, "setProp failed");
-        } else {
+        } else if (std.mem.eql(u8, key.bytes, "textColor")) {
             state(js).tree.setTextColor(id, color) catch return fail(js, "setProp failed");
+        } else {
+            state(js).tree.setBorderColor(id, color) catch return fail(js, "setProp failed");
         }
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
