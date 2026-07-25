@@ -607,10 +607,10 @@ Widgets must use conditional rendering because `<image>.src` remains required:
   : <panel class="bg-zinc-800" />}
 ```
 
-weaverd is the cache's sole writer. On Windows the root is
-`%LOCALAPPDATA%\weaver\artcache`, inheriting the per-user LocalAppData access
-boundary; the runtime receives that one root in `WEAVER_ART_CACHE` only for
-widgets subscribed to media. Filenames are lowercase SHA-256 hex plus `.img`.
+weaverd is the cache's sole writer. On hosts with per-user LocalAppData, the
+root is `%LOCALAPPDATA%\weaver\artcache`, inheriting that access boundary; the
+runtime receives that one root in `WEAVER_ART_CACHE` only for widgets
+subscribed to media. Filenames are lowercase SHA-256 hex plus `.img`.
 Inputs over 1 MiB are skipped. A new file is written to a unique exclusive
 temporary file, flushed and synchronized, then atomically renamed without
 replacement. Temporary files are removed on failure and startup. Only a
@@ -620,8 +620,8 @@ never removes the currently published hash.
 
 The widget profile reserves 256 KiB of decoded RGBA per registered image.
 Host artwork whose decoded dimensions exceed that fixed slot is aspect-fit
-downsampled with Windows Imaging Component to at most 256×256 and encoded as
-PNG before publication. The 1 MiB limit applies to both the original SMTC
+downsampled with the host image decoder to at most 256×256 and encoded as PNG
+before publication. The 1 MiB limit applies to both the original provider
 payload and the normalized cache file. This transformation never expands a
 runtime memory bound or touches the Native SDK dependency.
 
@@ -641,7 +641,7 @@ generation comparison.
 
 The runtime canonicalizes the widget root and host art-cache root once. Widget
 assets must remain within the widget root. Host art paths must be ordinary
-drive-absolute Windows paths within the cache at a case-insensitive component
-boundary. Drive-relative, rooted-current-drive, UNC, device-namespace, `..`,
-missing, and prefix-collision paths are rejected. Widgets cannot nominate an
-additional readable root.
+drive-absolute paths within the cache at a case-insensitive component boundary.
+Drive-relative, rooted-current-drive, UNC, device-namespace, `..`, missing, and
+prefix-collision paths are rejected. Widgets cannot nominate an additional
+readable root.
