@@ -26,6 +26,11 @@ export interface ClassProps {
   textColor?: string;
   fontScale?: number;
   fontWeight?: "light" | "normal" | "medium" | "semibold" | "bold";
+  textAlign?: "start" | "center" | "end";
+  lineHeight?: number;
+  letterSpacing?: number;
+  lineClamp?: number;
+  tabularNums?: boolean;
   opacity?: number;
   crossAlign?: CrossAlign;
   mainAlign?: MainAlign;
@@ -66,6 +71,41 @@ const fontScales: Readonly<Record<string, number>> = {
   "4xl": 36 / 14,
 };
 
+const defaultLineHeightPixels: Readonly<Record<string, number>> = {
+  xs: 16,
+  sm: 20,
+  base: 24,
+  lg: 28,
+  xl: 28,
+  "2xl": 32,
+  "3xl": 36,
+  "4xl": 40,
+};
+
+const lineHeights: Readonly<Record<string, number>> = {
+  none: 1,
+  tight: 1.25,
+  snug: 1.375,
+  normal: 1.5,
+  relaxed: 1.625,
+  loose: 2,
+};
+
+const trackingEms: Readonly<Record<string, number>> = {
+  tighter: -0.05,
+  tight: -0.025,
+  normal: 0,
+  wide: 0.025,
+  wider: 0.05,
+  widest: 0.1,
+};
+
+type CompileOutput = ClassProps & {
+  lineHeightPx?: number;
+  letterSpacingEm?: number;
+  lineHeightExplicit?: boolean;
+};
+
 const radii: Readonly<Record<string, number>> = {
   rounded: 4,
   "rounded-md": 6,
@@ -99,6 +139,8 @@ const exampleUtilities = [
   "text-4xl", "font-light", "font-normal", "font-medium", "font-semibold",
   "font-bold", "opacity-70", "items-start", "items-center", "items-end",
   "items-baseline", "items-stretch", "justify-start", "justify-center", "justify-end",
+  "font-bold", "text-left", "text-center", "text-right", "text-[13px]",
+  "leading-tight", "tracking-wide", "line-clamp-2", "tabular-nums",
   "justify-between", "justify-around", "justify-evenly", "grow", "grow-2", "shrink", "shrink-0",
   "self-auto", "self-start", "self-center", "self-end", "self-stretch", "flex-wrap", "flex-nowrap",
   "w-12", "w-[48px]", "w-full", "w-1/2", "w-auto",
@@ -108,14 +150,20 @@ const exampleUtilities = [
 ] as const;
 
 export function compileClass(className: string): ClassProps {
-  const output: ClassProps = {};
+  const output: CompileOutput = {};
   for (const utility of className.trim().split(/\s+/).filter(Boolean)) {
     applyUtility(output, utility);
   }
+  const fontPixels = 14 * (output.fontScale ?? 1);
+  if (output.lineHeightPx !== undefined) output.lineHeight = output.lineHeightPx / fontPixels;
+  if (output.letterSpacingEm !== undefined) output.letterSpacing = output.letterSpacingEm * fontPixels;
+  delete output.lineHeightPx;
+  delete output.letterSpacingEm;
+  delete output.lineHeightExplicit;
   return output;
 }
 
-function applyUtility(output: ClassProps, utility: string): void {
+function applyUtility(output: CompileOutput, utility: string): void {
   if (/^(?:shadow|bg-gradient|from-|via-|to-|hover:|focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
@@ -197,6 +245,13 @@ function applyUtility(output: ClassProps, utility: string): void {
     output.textColor = normalizeColor(match[1], match[2]);
     return;
   }
+  if ((match = /^text-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    const pixels = utilityNumber(match[1], utility);
+    if (pixels > 0) {
+      output.fontScale = pixels / 14;
+      return;
+    }
+  }
   if ((match = /^(bg|text|border)-([a-z]+(?:-\d+)?)(?:\/(\d{1,3}))?$/.exec(utility))) {
     const color = tailwindColors[match[2]];
     if (color !== undefined) {
@@ -209,6 +264,10 @@ function applyUtility(output: ClassProps, utility: string): void {
   }
   if ((match = /^text-(xs|sm|base|lg|xl|2xl|3xl|4xl)$/.exec(utility))) {
     output.fontScale = fontScales[match[1]];
+    if (!output.lineHeightExplicit) {
+      output.lineHeightPx = defaultLineHeightPixels[match[1]];
+      delete output.lineHeight;
+    }
     return;
   }
   if ((match = /^font-(light|normal|medium|semibold|bold)$/.exec(utility))) {
@@ -232,6 +291,68 @@ function applyUtility(output: ClassProps, utility: string): void {
   }
   if (utility === "grow") {
     output.grow = 1;
+    return;
+  }
+  if ((match = /^text-(left|center|right)$/.exec(utility))) {
+    output.textAlign = match[1] === "left" ? "start" : match[1] === "right" ? "end" : "center";
+    return;
+  }
+  if ((match = /^leading-(none|tight|snug|normal|relaxed|loose)$/.exec(utility))) {
+    output.lineHeight = lineHeights[match[1]];
+    delete output.lineHeightPx;
+    output.lineHeightExplicit = true;
+    return;
+  }
+  if ((match = /^leading-(\d+(?:\.\d+)?)$/.exec(utility))) {
+    output.lineHeightPx = utilityNumber(match[1], utility, 4);
+    delete output.lineHeight;
+    output.lineHeightExplicit = true;
+    return;
+  }
+  if ((match = /^leading-\[(\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    output.lineHeightPx = utilityNumber(match[1], utility);
+    delete output.lineHeight;
+    output.lineHeightExplicit = true;
+    return;
+  }
+  if ((match = /^leading-\[(\d+(?:\.\d+)?)\]$/.exec(utility))) {
+    const multiplier = utilityNumber(match[1], utility);
+    if (multiplier > 0) {
+      output.lineHeight = multiplier;
+      delete output.lineHeightPx;
+      output.lineHeightExplicit = true;
+      return;
+    }
+  }
+  if ((match = /^tracking-(tighter|tight|normal|wide|wider|widest)$/.exec(utility))) {
+    output.letterSpacingEm = trackingEms[match[1]];
+    delete output.letterSpacing;
+    return;
+  }
+  if ((match = /^tracking-\[(-?\d+(?:\.\d+)?)px\]$/.exec(utility))) {
+    output.letterSpacing = utilityNumber(match[1], utility);
+    delete output.letterSpacingEm;
+    return;
+  }
+  if ((match = /^tracking-\[(-?\d+(?:\.\d+)?)em\]$/.exec(utility))) {
+    output.letterSpacingEm = utilityNumber(match[1], utility);
+    delete output.letterSpacing;
+    return;
+  }
+  if ((match = /^line-clamp-([1-9]\d*)$/.exec(utility))) {
+    output.lineClamp = utilityNumber(match[1], utility);
+    return;
+  }
+  if (utility === "line-clamp-none") {
+    output.lineClamp = 0;
+    return;
+  }
+  if (utility === "tabular-nums") {
+    output.tabularNums = true;
+    return;
+  }
+  if (utility === "normal-nums") {
+    output.tabularNums = false;
     return;
   }
   if ((match = /^grow-(\d+(?:\.\d+)?)$/.exec(utility))) {
