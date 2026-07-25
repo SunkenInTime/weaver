@@ -41,6 +41,7 @@ export interface MediaData {
   status: "playing" | "paused" | "stopped";
   playing: boolean;
   sourceApp: string;
+  artPath?: string;
   positionMs: number;
   durationMs: number;
 }
