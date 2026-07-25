@@ -1,8 +1,8 @@
 # macOS MediaRemote adapter gate
 
-This spike records the layer-04 gate from `docs/media-v2-brief.md`. It does not
-link, load, invoke, or copy declarations from Apple's private MediaRemote
-framework.
+This spike records the layer-04 gate from `docs/media-v2-brief.md`. The
+attended-Mac execution gate passed on 2026-07-25; the full report is
+`docs/media-evidence/pr04-mac-spike.md`.
 
 Run the static half on macOS after building the host:
 
@@ -17,12 +17,13 @@ The audit reports:
   with their code-signing identity when `codesign` can read it;
 - whether the built Weaver host links MediaRemote or imports a symbol whose
   name contains `MediaRemote`;
-- the two execution gates, `realMetadataFrame` and `deliveredCommand`, as
-  `false`.
+- the exact vendored script hash, upstream commit marker, framework signature,
+  license, and absence of Homebrew paths in the production adapter;
+- the recorded execution gate and the separate, honest
+  `UNVERIFIED_NEEDS_ATTENDED_MAC` state for Weaver's implementation.
 
-Inventorying a private Apple-signed executable is not an invocation contract.
-The spike remains blocked until an attended Mac run records all of the
-following together:
+Inventorying a private Apple-signed executable was not an invocation contract.
+The attended run recorded all of the following together:
 
 1. the exact Apple-signed executable or service invoked;
 2. the exact invocation and bidirectional IPC protocol;
@@ -33,5 +34,6 @@ following together:
 7. one real system-player metadata frame;
 8. one command visibly delivered to that player.
 
-Compile-only, framework-presence, symbol-inventory, and application-local
-`MPNowPlayingInfoCenter` results do not satisfy items 7 or 8.
+Compile-only and static inventory still do not prove Weaver's implementation
+produces frames or delivers commands. That live matrix remains
+`UNVERIFIED (needs attended Mac)`.
