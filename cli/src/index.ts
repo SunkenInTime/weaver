@@ -1171,6 +1171,26 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
   const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
+  const stateVariantAncestry = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): "pressable" | "component-boundary" | "none" => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isJsxElement(current) && current.openingElement !== node) {
+        const tag = current.openingElement.tagName.getText(project.sourceFile);
+        if (tag === "button" || tag === "slider") return "pressable";
+        if (/^[A-Z]/.test(tag)) return "component-boundary";
+      }
+      if (ts.isFunctionLike(current)) {
+        const parent = current.parent;
+        const isInlineWidgetRoot = ts.isCallExpression(parent) &&
+          ts.isIdentifier(parent.expression) &&
+          parent.expression.text === "widget" &&
+          parent.arguments[1] === current;
+        if (!isInlineWidgetRoot) return "component-boundary";
+      }
+      current = current.parent;
+    }
+    return "none";
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(project.sourceFile);
@@ -1181,6 +1201,14 @@ function validateSource(project: SourceProject): string[] {
         else {
           try {
             const compiled = compileClass(classText);
+            const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
+            if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
+              errors.push(locationMessage(
+                project.sourceFile,
+                classAttribute,
+                `NearestPressableAncestor: state variants on non-pressable <${tag}> require a nearest <button> or <slider> ancestor. Fix: move the utility to the pressable node or place this node inside one.`,
+              ));
+            }
             if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
               errors.push(locationMessage(project.sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));

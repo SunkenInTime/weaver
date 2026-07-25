@@ -1,4 +1,5 @@
 interface WeaverNativeFetchResponse { status: number; body: string }
+interface NativePressPayload { x: number; y: number; w: number; h: number }
 
 interface WeaverNativeBridge {
   createNode(type: "column" | "row" | "stack" | "text" | "icon" | "panel" | "button" | "slider" | "image" | "canvas"): number;
@@ -10,8 +11,8 @@ interface WeaverNativeBridge {
   setRoot(id: number): void;
   beginBatch(): void;
   endBatch(): void;
-  setHandler(id: number, kind: "press" | "change", enabled: boolean): void;
-  onEvent(callback: (id: number, kind: "press" | "change", payload: number | null) => void): void;
+  setHandler(id: number, kind: "press" | "doublepress" | "rightpress" | "change", enabled: boolean): void;
+  onEvent(callback: (id: number, kind: "press" | "doublepress" | "rightpress" | "change", payload: number | NativePressPayload | null) => void): void;
   hostAvailable(): boolean;
   onProvider(callback: (jsonLine: string) => void): void;
   setInterval(ms: number): number;

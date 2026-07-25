@@ -43,7 +43,7 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 | 08 | [`styling/08-icons`](https://github.com/SunkenInTime/weaver/pull/26) at `e66ea8cd` | none (rides N5's PR07 font seam) | complete, pushed, draft PR open |
 | 09 / N6 | [`styling/09-stack-overflow`](https://github.com/SunkenInTime/weaver/pull/27) at `16e49390` | [`styling/N6-stack-overflow`](https://github.com/SunkenInTime/native/pull/12) at `9411bc45` | complete, pushed, draft PRs open |
 | 10 / N7 | [`styling/10-image-v2`](https://github.com/SunkenInTime/weaver/pull/28) at `8669cfae` | [`styling/N7-image-v2`](https://github.com/SunkenInTime/native/pull/13) at `f8dec62f` | complete, pushed, draft PRs open |
-| 11 / N8 | `styling/11-interaction` | `styling/N8-interaction` | pending |
+| 11 / N8 | [`styling/11-interaction`](https://github.com/SunkenInTime/weaver/pull/29) at `25f6f63` | [`styling/N8-interaction`](https://github.com/SunkenInTime/native/pull/14) at `52c7627a` | complete, pushed, draft PRs open |
 | 12 | `styling/12-showcase` | none | pending |
 
 ## Completed gates
@@ -70,6 +70,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - Native N7: focused canvas suite PASS in 55.8s; `zig build validate` PASS in 10.4s; stock suite PASS in 95.8s; widget-profile suite PASS in 52.2s. Exact tests cover native-size 2x1 tiling across a 5x2 destination, public UI propagation, asymmetric image masks, packet JSON/wire-v7, and fingerprint changes. Draft PR: https://github.com/SunkenInTime/native/pull/13.
 - Weaver 10: `npm test` PASS 42/42 in 22.1s; `npm run typecheck` PASS in 4.0s; example TypeScript/check/bundle and `git diff --check` PASS; runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 25.8s; ReleaseFast runtime build PASS in 68.7s. Isolated `weaver dev examples/styling-images` reached `running` at 55s uptime with one startup, software/pixels presentation, and no exception/crash/restart line; shutdown and the broad process audit left no clone-owned process.
 - Release-audit repair: PR01 through PR10 now each require their branch's exact Native gitlink. A branch-by-branch checkout, recursive submodule update, and `npm run audit:release` sweep passed all ten heads (`e7648949`, `457c2dd9`, `bb20a1f5`, `85cda5d7`, `0d36b403`, `b96b72f8`, `65aff3ea`, `e66ea8cd`, `16e49390`, `8669cfae`).
+- Native N8: focused profile canvas suite PASS in 70.2s after the target-id follow-up; `zig build validate` PASS in 38.4s; stock suite PASS in 46.0s; widget-profile suite PASS in 59.6s. Exact tests cover retained hover/pressed channel resolution, pressed precedence, target/local geometry, click count, double/right dispatch, invalidation, and hostile arena bounds. Draft PR: https://github.com/SunkenInTime/native/pull/14.
+- Weaver 11: `npm test` PASS 45/45 in 27.4s; `npm run typecheck` PASS in 2.8s; final runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS in 10.7s; ReleaseFast runtime test PASS in 60.6s; CLI build and example TypeScript/check/bundle PASS. Corrected isolated `weaver dev examples/styling-interaction` reached `running` at 67s uptime with one startup, software/pixels presentation, and zero exception/crash/restart lines; shutdown and broad process audit left no clone-owned process.
 
 ## Assumptions
 
@@ -104,6 +106,11 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 29. Image `tile` ignores `fit` and repeats the selected source rectangle at its native logical-pixel dimensions, anchored at the normalized destination's top-left. Sampling and the destination's asymmetric rounded mask still apply.
 30. The AppKit host caps one image command at 65,536 repeated tile draws; a pathological command beyond that refuses packet presentation through the existing fallback path instead of hanging the host.
 31. Image `fit` and `tile` are typed `<image>` attributes rather than pseudo-CSS utilities; the existing `rounded-*` compiler surface is the single source of image mask radii. Consequently PR10 adds prop acceptance/rejection and exact projection tests but no duplicate fit/tile class family.
+32. Native N8 stores rare hover/pressed style records in the existing immediate-command slice so the common Widget allocation and hostile profile budget remain unchanged. Disabled widgets ignore authored variants, and pressed wins over hover when both retained state bits are true.
+33. Native's historical `on_hold` message and the new typed `on_right_press_event` share the compact secondary-gesture slot required to keep the arena-resident UI Node bounded. If both are authored, the dedicated right-press handler wins; with no right handler, right press retains the `on_hold` fallback.
+34. `WidgetPressEvent` carries the Native structural target id in addition to geometry. Weaver resolves it against at most 128 retained nodes using the same public global-id function, then exposes only `{x,y,u,v}` to JS; this avoids per-node callback closures and keeps the target id out of the widget API.
+35. `pressed:` is the brief's explicit state-prefix spelling even though Tailwind CSS calls its nearest built-in pseudo-state `active:`. Only the brief's four channels are accepted, with the underlying color and opacity utility semantics kept exact; unsupported state channels remain loud check-time errors.
+36. Normalized press coordinates are clamped to 0–1, with zero-size axes yielding zero, so the API keeps the promised normalized range even for degenerate or edge hit geometry.
 
 ## UNVERIFIED / BLOCKED
 
@@ -127,6 +134,9 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - `BLOCKED (unrelated Native fast gate)`: N7 fast gate passes zig-test (31s), validate (<1s), frontend examples (5s), and mobile examples (38s), but the same five `examples-native` switches omit `Event.window_frame`; `examples-native` failed after 99s and total gate time was 173.7s.
 - `RESOLVED (stack release audit)`: PR27's first post-push CI run failed its Windows gate and both macOS headless jobs only at `npm run audit:release`: actual Native pin `9411bc45`, stale expected pin `91949e15`. No test or CI step was removed or weakened. The stack was rebased bottom-up so PR01–PR10 each require their own exact gitlink, and the ten-branch local audit sweep passed; GitHub reruns were triggered by the force-with-lease pushes.
 - `UNVERIFIED (needs Mac)`: Weaver 10 / Native N7 physical cover/contain/tile and asymmetric image-mask pixels. Evidence available now: exact reference tiling, retained/wire projection assertions, AppKit decoder/source wiring, all Windows gates, and a stable Windows software live run; physical output still requires Mac hardware.
+- `BLOCKED (unrelated Native fast gate)`: N8 fast gate against N7 passes zig-test (28s), validate (1s), frontend examples (8s), and mobile examples (53s), but `examples-native` fails after 155s in the same five unchanged exhaustive switches that omit pre-existing `Event.window_frame`; total gate time 245.1s. N8 changes neither those examples nor the runtime Event tag set.
+- `UNVERIFIED (needs Mac)`: Weaver 11 / Native N8 physical hover/pressed pixels and macOS right-click delivery. Evidence available now: exact Native state/event tests, stock/profile suites, exact Weaver wire/projection tests, and a stable Windows software live run; physical macOS behavior awaits hardware and headless CI is pending.
+- `RESOLVED during PR11`: the first live smoke used the prior runtime executable and produced three `unsupported property` crash-restarts. An explicit ReleaseFast runtime executable rebuild followed by a fresh isolated run reached 67s uptime with one startup and zero exception/crash/restart lines; the failed attempt was not accepted as evidence.
 
 ## Cleanup state
 
@@ -139,7 +149,8 @@ Updated: 2026-07-23 (Windows 11, unattended path-icon redesign)
 - PR08 isolated install/dev data under `.dev-smoke-pr08` and its temporary `.weave` archive were removed after uninstall and `weaver down`; the final process audit found no clone-owned runtime, host, watcher, or esbuild process.
 - Before PR09 smoke, a fresh audit found two stale clone-owned Node/esbuild watcher pairs for the PR07 and PR08 examples despite the earlier narrower audits; PIDs 20764/9468 and 44400/1928 were terminated. PR09 isolated data and generated output were removed after shutdown, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
 - PR10 isolated data and generated output were removed after `weaver down`; the dev watcher and its esbuild helper were explicitly stopped, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
+- PR11 isolated data and generated output were removed after `weaver down`; the dev watcher and esbuild helper were explicitly stopped, and the final broad executable-path audit found no clone-owned runtime, host, watcher, or esbuild process.
 
 ## Next executable task
 
-Implement Native `styling/N8-interaction` from N7: add retained hover/pressed visual overrides at the surface-render resolution point, expose double/right press handlers plus node-local press coordinates, add exact state/event tests, then run focused/validate/stock/profile/fast gates and open the draft fork PR.
+Create Weaver `styling/12-showcase` from PR11, implement `examples/retro-player-shell` with the full stacked surface, update the conjure skill and consolidated contract/results tables, capture Windows measurements/screenshots, run the complete final verification matrix, and open the final draft PR without changing either default branch.
