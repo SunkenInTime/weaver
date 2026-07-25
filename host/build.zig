@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("psapi", .{});
     exe.root_module.linkSystemLibrary("ntdll", .{});
     exe.root_module.linkSystemLibrary("ole32", .{});
+    exe.root_module.linkSystemLibrary("windowscodecs", .{});
     exe.root_module.linkSystemLibrary("windowsapp", .{});
     b.installArtifact(exe);
 
@@ -107,6 +108,7 @@ pub fn build(b: *std.Build) void {
     tests.root_module.linkSystemLibrary("psapi", .{});
     tests.root_module.linkSystemLibrary("ntdll", .{});
     tests.root_module.linkSystemLibrary("ole32", .{});
+    tests.root_module.linkSystemLibrary("windowscodecs", .{});
     tests.root_module.linkSystemLibrary("windowsapp", .{});
     const test_step = b.step("test", "Run weaverd unit tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);

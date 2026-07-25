@@ -36,6 +36,14 @@ This run will not change the submodule pointer.
 - Layer 02 recovered-work verification: host `zig build test` and runtime
   `zig build test -Dweb-layer=exclude -Dtrace=off`: PASS after the unattended
   session was resumed.
+- Layer 02 SDK/example gates: `npm test` PASS 62/62, `npm run typecheck` PASS,
+  `weaver check examples/now-playing` PASS.
+- Layer 02 production builds: host `zig build` PASS; runtime
+  `zig build -Dweb-layer=exclude -Dtrace=off` PASS.
+- Layer 02 live/visual gate: PASS after repairing the observed 300×300
+  `ImageTooLarge` failure with bounded host-side normalization. Viewed settled,
+  track-change, and pause captures plus per-element results are in
+  `docs/media-evidence/pr02-visual.md`.
 
 ## Blockers and unverified gates
 
@@ -49,10 +57,10 @@ This run will not change the submodule pointer.
 Layer 02 implementation is in progress. The host now consumes coalesced SMTC
 events, publishes bounded artwork through the host-owned hash cache, and emits
 optional `artPath`; the runtime has canonical art-root containment and dynamic
-same-ID image re-registration. SDK/example and verification work is active.
+same-ID image re-registration. Automated and live visual gates pass; the
+required static-image parent/head idle A/B is active.
 
 ## Next executable task
 
-Run the complete layer-02 unit/type/build gates, then launch
-`examples/now-playing` with Spotify for track-change art latency and the
-binding visual capture/checklist.
+Measure parent/head idle CPU and private memory with the identical
+`examples/styling-images` widget, then finalize the layer-02 draft PR.

@@ -618,6 +618,13 @@ complete successfully published file can enter a provider frame. Successful
 publication updates the LRU timestamp; pruning retains at most 32 images and
 never removes the currently published hash.
 
+The widget profile reserves 256 KiB of decoded RGBA per registered image.
+Host artwork whose decoded dimensions exceed that fixed slot is aspect-fit
+downsampled with Windows Imaging Component to at most 256×256 and encoded as
+PNG before publication. The 1 MiB limit applies to both the original SMTC
+payload and the normalized cache file. This transformation never expands a
+runtime memory bound or touches the Native SDK dependency.
+
 SMTC manager/session property events only set coalescing dirty flags. The
 existing one-second host poll consumes those flags, refreshes metadata and art,
 and continues to sample playback/timeline state. Event callbacks never perform
