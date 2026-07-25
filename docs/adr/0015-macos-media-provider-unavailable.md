@@ -1,5 +1,7 @@
 # macOS v0 reports media unavailable rather than use a private system-player API
 
+Status: superseded by ADR 0017.
+
 Weaver will not ship a macOS media provider in v0. At the final macOS 14.2
 floor, no public distributable API gives a background host system-wide access
 to another application's Now Playing metadata, playback state, position,

@@ -1,5 +1,19 @@
 # Media PR 04 macOS adapter spike: BLOCKED
 
+## 2026-07-25 attended-Mac addendum: superseded
+
+This BLOCKED decision is historical and superseded. Dara's attended run on an
+M2 Mac produced all eight required outputs, including a real system-wide
+Spotify metadata frame and a visibly delivered pause command. The gate is
+**PASSED** per [`pr04-mac-spike.md`](pr04-mac-spike.md), with raw output in
+[`pr04-live-session.txt`](pr04-live-session.txt) and before/after screenshots
+in this directory.
+
+That evidence proves the `/usr/bin/perl` adapter route. It does not prove that
+Weaver's layer-04 implementation produced a frame or delivered a command; that
+implementation remains **UNVERIFIED (needs attended Mac)** until its own live
+matrix is run.
+
 Date: 2026-07-25
 
 Decision: **BLOCKED — no PR 04 implementation or draft PR is opened.**

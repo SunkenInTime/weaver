@@ -33,7 +33,22 @@ while IFS= read -r candidate; do
 done <"$private_candidates"
 
 host_binary="$root/host/zig-out/Weaverd.app/Contents/MacOS/weaverd"
+adapter_root="$root/host/zig-out/Weaverd.app/Contents/Resources/mediaremote-adapter"
+adapter_script="$adapter_root/mediaremote-adapter.pl"
+adapter_framework="$adapter_root/MediaRemoteAdapter.framework/MediaRemoteAdapter"
+adapter_license="$adapter_root/LICENSE"
 test -x "$host_binary"
+test -f "$adapter_script"
+test -x "$adapter_framework"
+test -f "$adapter_license"
+test "$(shasum -a 256 "$adapter_script" | awk '{print $1}')" = "984d622eeebbcb17656d157a49272b02fb741593ae2ec624d1926c12d955c8a1"
+codesign --verify --strict "$adapter_root/MediaRemoteAdapter.framework"
+grep -q CFBundleGetFunctionPointerForName \
+  "$root/host/assets/mediaremote-adapter/src/private/MediaRemote.m"
+grep -q '3ac3d4bdf862c7b5399b4fba4df5689f5c38609a' \
+  "$root/host/assets/mediaremote-adapter/UPSTREAM.md"
+! grep -R -E '/opt/homebrew|/usr/local/Cellar' \
+  "$root/host/src/providers_macos.zig" "$root/host/src/macos_host.zig"
 otool -L "$host_binary" | grep -i MediaRemote >"$linked" || true
 nm -u "$host_binary" 2>/dev/null | grep -i MediaRemote >"$symbols" || true
 
@@ -58,10 +73,15 @@ result = {
     "weaverMediaRemoteDependencies": linked,
     "weaverMediaRemoteUndefinedSymbols": symbols,
     "executionGate": {
-        "realMetadataFrame": False,
-        "deliveredCommand": False,
-        "status": "BLOCKED",
-        "reason": "static inventory cannot prove a real system-player frame or delivered command",
+        "realMetadataFrame": True,
+        "deliveredCommand": True,
+        "status": "PASSED_RECORDED_ATTENDED_EVIDENCE",
+        "evidence": "docs/media-evidence/pr04-mac-spike.md",
+        "staticAuditProvesExecution": False,
+    },
+    "implementationLiveGate": {
+        "status": "UNVERIFIED_NEEDS_ATTENDED_MAC",
+        "reason": "the spike proves the route, not Weaver's implementation",
     },
 }
 print(json.dumps(result, indent=2, sort_keys=True))

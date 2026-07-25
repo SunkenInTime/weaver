@@ -145,7 +145,7 @@ jobs:
       - name: Public media API decision probe
         run: spikes/macos-media-observation/build.sh
 
-      - name: MediaRemote adapter static spike
+      - name: Vendored MediaRemote adapter static audit
         run: spikes/macos-mediaremote-adapter/static-audit.sh
 
       - name: Native SDK stock profile

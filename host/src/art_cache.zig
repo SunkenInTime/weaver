@@ -1,16 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const windows = std.os.windows;
-
-extern "kernel32" fn MoveFileExW(
-    existing_file_name: [*:0]const u16,
-    new_file_name: [*:0]const u16,
-    flags: u32,
-) callconv(.winapi) windows.BOOL;
-
-const movefile_write_through: u32 = 0x00000008;
-
 pub const max_input_bytes: usize = 1024 * 1024;
 pub const max_files: usize = 32;
 pub const hash_hex_bytes: usize = 64;
@@ -84,7 +74,7 @@ pub const Cache = struct {
             const temp_path = try std.fmt.allocPrint(
                 self.allocator,
                 "{s}.{d}.{d}.tmp",
-                .{ final_path, windows.GetCurrentProcessId(), self.temp_nonce },
+                .{ final_path, processId(), self.temp_nonce },
             );
             defer self.allocator.free(temp_path);
             errdefer cwd.deleteFile(self.io, temp_path) catch {};
@@ -97,7 +87,7 @@ pub const Cache = struct {
                 try writer.interface.flush();
                 try file.sync(self.io);
             }
-            const moved = try moveNoReplace(self.allocator, temp_path, final_path);
+            const moved = try moveNoReplace(self.io, temp_path, final_path);
             if (!moved) cwd.deleteFile(self.io, temp_path) catch {};
         }
 
@@ -178,20 +168,25 @@ fn isImageFilename(name: []const u8) bool {
     return true;
 }
 
-fn moveNoReplace(allocator: std.mem.Allocator, source: []const u8, destination: []const u8) !bool {
-    const source_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, source);
-    defer allocator.free(source_w);
-    const destination_w = try std.unicode.utf8ToUtf16LeAllocZ(allocator, destination);
-    defer allocator.free(destination_w);
-    if (MoveFileExW(source_w.ptr, destination_w.ptr, movefile_write_through).toBool()) return true;
-    return switch (windows.GetLastError()) {
-        .ALREADY_EXISTS, .FILE_EXISTS => false,
-        else => error.ArtCacheRenameFailed,
+fn moveNoReplace(io: std.Io, source: []const u8, destination: []const u8) !bool {
+    const cwd = std.Io.Dir.cwd();
+    cwd.renamePreserve(source, cwd, destination, io) catch |err| switch (err) {
+        error.PathAlreadyExists => return false,
+        else => return error.ArtCacheRenameFailed,
+    };
+    return true;
+}
+
+fn processId() u64 {
+    return switch (builtin.os.tag) {
+        .windows => std.os.windows.GetCurrentProcessId(),
+        .macos => @intCast(std.posix.system.getpid()),
+        else => @compileError("art cache supports only Windows and macOS"),
     };
 }
 
 fn testRoot(allocator: std.mem.Allocator, suffix: []const u8) ![]u8 {
-    return std.fmt.allocPrint(allocator, ".zig-cache/weaver-art-cache-{d}-{s}", .{ windows.GetCurrentProcessId(), suffix });
+    return std.fmt.allocPrint(allocator, ".zig-cache/weaver-art-cache-{d}-{s}", .{ processId(), suffix });
 }
 
 fn testImageCount(io: std.Io, root: []const u8) !usize {

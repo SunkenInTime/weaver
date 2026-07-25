@@ -127,15 +127,16 @@ try {
   await waitFor("dev registration removal acknowledgement", () => status()?.widgets?.length === 0);
 
   run(["install", join(repoRoot, "examples", "now-playing")]);
-  const unavailableMedia = await waitFor("explicit unavailable macOS media status", () => {
+  const macMedia = await waitFor("settled macOS media adapter status", () => {
     const document = status();
     const widget = document?.widgets?.[0];
     const providers = document?.providers;
     return widget?.name === "Now Playing" && widget.state === "running" &&
-      providers?.mediaAvailability === "unavailable" && providers.mediaSubscribers === 1 &&
-      providers.mediaPipeFrames === 0 && { document, widget, providers };
-  });
-  trackedPids.add(unavailableMedia.widget.pid);
+      ["available", "unavailable"].includes(providers?.mediaAvailability) &&
+      providers.mediaSubscribers === 1 && providers.mediaPipeFrames >= 1 &&
+      { document, widget, providers };
+  }, 20_000);
+  trackedPids.add(macMedia.widget.pid);
   const mediaRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))
     .map((name) => join(root, name)))
@@ -149,12 +150,15 @@ try {
     1,
     "transport-capable unavailable media did not allocate its duplex command endpoint",
   );
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
-  assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
+  assert.ok(
+    ["available", "unavailable"].includes(status().providers.mediaAvailability),
+    "macOS media adapter did not expose an honest live-or-loss diagnostic",
+  );
   run(["uninstall", "Now Playing"]);
-  await waitFor("unavailable media teardown", () => {
+  await waitFor("macOS media adapter teardown", () => {
     const document = status();
-    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 && document;
+    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 &&
+      document.providers.mediaAvailability === "idle" && document;
   });
 
   const validEmptyRegistry = readFileSync(registryFile, "utf8");

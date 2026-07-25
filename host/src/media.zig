@@ -3,9 +3,12 @@ const builtin = @import("builtin");
 const art_cache = @import("art_cache.zig");
 const media_commands = @import("media_commands.zig");
 
-const native = @cImport({
-    @cInclude("windows_providers.h");
-});
+const native = if (builtin.os.tag == .windows)
+    @cImport({
+        @cInclude("windows_providers.h");
+    })
+else
+    struct {};
 
 pub const max_text_bytes: usize = 512;
 pub const max_source_app_bytes: usize = 256;
@@ -67,7 +70,7 @@ pub const Frame = struct {
     }
 };
 
-pub const Provider = struct {
+pub const Provider = if (builtin.os.tag == .windows) struct {
     session: ?*native.WeaverMediaSession = null,
     cache: ?*art_cache.Cache = null,
     next_open_ms: u64 = 0,
@@ -229,14 +232,13 @@ pub const Provider = struct {
         self.awaiting_session_art_resolution = false;
         if (self.cache) |cache| cache.clearPublished();
     }
-
     fn resolveArtworkUnavailable(self: *Provider) void {
         // Retain the durable prior path and pin for recovery/housekeeping, but
         // make the refreshed metadata frame explicitly artless.
         self.current_art_matches_session = false;
         self.awaiting_session_art_resolution = false;
     }
-};
+} else struct {};
 
 pub fn formatFrame(frame: *const Frame, output: []u8) ![]const u8 {
     var writer = std.Io.Writer.fixed(output);
@@ -350,6 +352,7 @@ test "native playback status maps to the frozen tri-state" {
 }
 
 test "native media dirty flags start dirty and coalesce duplicate events" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
 }
 
@@ -366,6 +369,7 @@ test "native media bounds unresolved artwork before publishing metadata without 
 }
 
 test "art refresh failure retains prior path and cache pin until genuine no-art" {
+    if (builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-refresh-retention";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
