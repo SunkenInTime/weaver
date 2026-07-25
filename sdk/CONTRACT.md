@@ -562,14 +562,15 @@ interface MediaData {
 ```
 
 `playing` remains on the wire and in the SDK for source and installed-bundle
-compatibility. It is always exactly `status === "playing"`. Windows maps SMTC
-`Playing` to `"playing"`, `Paused` to `"paused"`, and every other playback
-state to `"stopped"`.
+compatibility. It is always exactly `status === "playing"`. The host maps the
+platform's playing state to `"playing"`, paused state to `"paused"`, and every
+other playback state to `"stopped"`.
 
-`sourceApp` is display-only. Windows uses the installed package's display name
-when SMTC's source AUMID resolves to a package without prompting, otherwise the
-raw AUMID is returned verbatim. It is `""` only when SMTC supplies no source
-identifier. Widget logic must not branch on this display string.
+`sourceApp` is display-only. The host uses the installed package's display
+name when the source identifier resolves to a package without prompting;
+otherwise the raw identifier is returned verbatim. It is `""` only when the
+platform supplies no source identifier. Widget logic must not branch on this
+display string.
 
 No observable media session has one canonical frame: empty title, artist,
 album, and source; zero position and duration; `status: "stopped"`;
