@@ -1,6 +1,24 @@
 # Styling breadth run status
 
-Updated: 2026-07-24 (Greptile sweep restack in progress)
+Updated: 2026-07-24 (Greptile merge-bar loop in progress)
+
+## 2026-07-24 Greptile merge-bar loop
+
+- Exit bar: every Weaver PR 19-31 must have a current-head Greptile review
+  with confidence at least 4/5, zero unresolved/unaddressed P1 findings, and
+  green current-head CI.
+- Review association assumption: a Greptile review is current only when its
+  review commit OID equals the PR head OID. Older review threads are evidence
+  for re-review, not actionable current-head findings.
+- Iteration 1 current-head triage found two P1s, both on PR21: direct default
+  function imports remained opaque, and same-named helpers from separate
+  imported modules shared a global first-definition-wins scope.
+- PR21 fix `15a95e6` registers `export default function` components and keys
+  nested component resolution to the declaring source module. Exact
+  regressions cover both forms. The estimator remains deliberately bounded to
+  one level of relative imports; Native runtime limits remain authoritative
+  beyond that documented AST estimate.
+- No Native fork change was required in iteration 1.
 
 ## 2026-07-24 Greptile review sweep
 
