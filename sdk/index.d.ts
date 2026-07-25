@@ -100,11 +100,16 @@ declare global {
       children?: string | number | (string | number)[];
     }
 
+    type IconProps =
+      | { class?: string; name: string; d?: never; viewBox?: never; stroke?: never }
+      | { class?: string; d: string; viewBox?: string; stroke?: number; name?: never };
+
     interface IntrinsicElements {
       column: BoxProps;
       row: BoxProps;
       panel: BoxProps;
       text: TextProps;
+      icon: IconProps;
       image: BoxProps & { src: string };
       button: BoxProps & { onPress: () => void };
       slider: BoxProps & { value: number; max: number; onChange: (value: number) => void };

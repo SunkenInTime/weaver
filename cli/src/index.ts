@@ -8,12 +8,16 @@ import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { signalDevReload } from "./dev-reload.js";
+import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
 import { extractWeave, isWeaveSourceEntryIncluded, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sdkRoot = join(repoRoot, "sdk", "src");
+const sdkAssetsRoot = join(sdkRoot, "..", "assets");
+const iconLicenseSource = join(sdkAssetsRoot, "LUCIDE-LICENSE.txt");
+const iconLicenseFile = "Lucide-LICENSE.txt";
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", `weaver-widget${executableSuffix}`);
 const hostExecutable = process.platform === "darwin"
@@ -35,6 +39,7 @@ interface SourceProject {
   sourceFiles: ts.SourceFile[];
   config: WidgetConfigData;
   fonts: RuntimeFont[];
+  usesIcons: boolean;
 }
 
 type FontWeightName = "light" | "regular" | "medium" | "semibold" | "bold";
@@ -198,6 +203,9 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
   mkdirSync(outputDirectory, { recursive: true });
   copyWidgetAssets(directory, outputDirectory);
   const bundle = await compileWidgetBundle(project, join(outputDirectory, "bundle.js"));
+  if (project.usesIcons) {
+    copyFileSync(iconLicenseSource, join(outputDirectory, iconLicenseFile));
+  }
   writeAtomic(join(outputDirectory, "bundle.js"), bundle);
   const manifest: RuntimeManifest = {
     name: project.config.name,
@@ -227,7 +235,10 @@ async function compileWidgetBundle(project: SourceProject, outfile: string): Pro
     jsxImportSource: "@weaver/sdk",
     legalComments: "none",
     minify: true,
-    plugins: [weaverResolutionPlugin(project.directory)],
+    plugins: [
+      iconLoweringPlugin(project.directory, () => { project.usesIcons = true; }),
+      weaverResolutionPlugin(project.directory),
+    ],
     logLevel: "silent",
     write: false,
   });
@@ -289,6 +300,18 @@ function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
   return found;
 }
 
+function sourceUsesIcon(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (node.tagName.getText(sourceFile) === "icon") found = true;
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
 /// `dist` is the runtime artifact, so local image paths must mean the same
 /// thing after install as they did beside widget.tsx. Copy every ordinary
 /// widget-owned file recursively while excluding authoring/build outputs;
@@ -335,6 +358,26 @@ function weaverResolutionPlugin(sourceRoot: string): import("esbuild").Plugin {
           return { errors: [{ text: `Import "${args.path}" escapes the widget source root ${sourceRoot}` }] };
         }
         return null;
+      });
+    },
+  };
+}
+
+function iconLoweringPlugin(sourceRoot: string, onIconSource: () => void): import("esbuild").Plugin {
+  const canonicalSourceRoot = realpathSync(sourceRoot);
+  return {
+    name: "weaver-icon-lowering",
+    setup(pluginBuild) {
+      pluginBuild.onLoad({ filter: /\.tsx$/ }, (args) => {
+        if (!pathsEqual(args.path, canonicalSourceRoot) && !pathInside(canonicalSourceRoot, args.path)) return null;
+        const source = readFileSync(args.path, "utf8");
+        try {
+          const sourceFile = ts.createSourceFile(args.path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+          if (sourceUsesIcon(sourceFile)) onIconSource();
+          return { contents: lowerIconSource(args.path, source), loader: "tsx" };
+        } catch (error) {
+          return { errors: [{ text: error instanceof Error ? error.message : String(error), location: { file: args.path } }] };
+        }
       });
     },
   };
@@ -822,14 +865,17 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
+  const sourceFiles = loadDirectLocalImports(directory, sourceFile);
+  const usesIcons = sourceFiles.some(sourceUsesIcon);
   return {
     directory,
     sourcePath,
     source,
     sourceFile,
-    sourceFiles: loadDirectLocalImports(directory, sourceFile),
+    sourceFiles,
     config,
     fonts: discoverWidgetFonts(directory),
+    usesIcons,
   };
 }
 
@@ -1150,6 +1196,13 @@ function validateSource(project: SourceProject): string[] {
           errors.push(locationMessage(project.sourceFile, sourceAttribute ?? node, "RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path"));
         }
       }
+      if (tag === "icon") {
+        try {
+          resolveIconSpec(project.sourceFile, node.attributes);
+        } catch (error) {
+          errors.push(locationMessage(project.sourceFile, node, error instanceof Error ? error.message : String(error)));
+        }
+      }
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "useProvider") {
       const argument = node.arguments[0];
@@ -1179,10 +1232,10 @@ function discoverWidgetFonts(directory: string): RuntimeFont[] {
     .sort((left, right) => left.name.localeCompare(right.name, "en"));
   const errors: string[] = [];
   if (candidates.length > MAX_WIDGET_FONTS) {
-    errors.push(`Bundled fonts exceed the widget-profile limit of ${MAX_WIDGET_FONTS} faces: ${candidates.map((entry) => entry.name).join(", ")}`);
+    errors.push(`Registered fonts exceed the widget-profile limit of ${MAX_WIDGET_FONTS} faces: ${candidates.map((entry) => entry.name).join(", ")}`);
   }
   const fonts: RuntimeFont[] = [];
-  for (const [index, entry] of candidates.entries()) {
+  for (const entry of candidates) {
     const path = join(directory, entry.name);
     const stem = basename(entry.name, extname(entry.name));
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(stem)) {
@@ -1202,7 +1255,7 @@ function discoverWidgetFonts(directory: string): RuntimeFont[] {
     const variant = /^(.*?)[_-](light|regular|medium|semibold|bold)$/i.exec(stem);
     const family = variant?.[1] || stem;
     const weight = (variant?.[2]?.toLowerCase() ?? "regular") as FontWeightName;
-    fonts.push({ id: FIRST_REGISTERED_FONT_ID + index, name: entry.name, stem, family, weight, file: entry.name });
+    fonts.push({ id: FIRST_REGISTERED_FONT_ID + fonts.length, name: entry.name, stem, family, weight, file: entry.name });
   }
   const duplicateStem = fonts.find((font, index) => fonts.findIndex((candidate) => candidate.stem.toLowerCase() === font.stem.toLowerCase()) !== index);
   if (duplicateStem) errors.push(`${duplicateStem.name}: bundled font stems must be unique ignoring case`);
