@@ -26,7 +26,14 @@ pub const Engine = struct {
     deadline_ms: u64 = 0,
     executing: bool = false,
 
-    pub fn create(allocator: std.mem.Allocator, tree: *tree_mod.Tree, storage: *storage_mod.Store, origins: []const []const u8, provider: *provider_mod.Client) !*Engine {
+    pub fn create(
+        allocator: std.mem.Allocator,
+        tree: *tree_mod.Tree,
+        storage: *storage_mod.Store,
+        origins: []const []const u8,
+        provider: *provider_mod.Client,
+        media_transport_enabled: bool,
+    ) !*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
         const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
@@ -39,7 +46,13 @@ pub const Engine = struct {
             .bridge_state = undefined,
             .provider = provider,
         };
-        self.bridge_state = .{ .tree = tree, .storage = storage, .provider = provider, .origins = origins };
+        self.bridge_state = .{
+            .tree = tree,
+            .storage = storage,
+            .provider = provider,
+            .origins = origins,
+            .media_transport_enabled = media_transport_enabled,
+        };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
@@ -152,7 +165,7 @@ pub const Engine = struct {
     }
 
     pub fn hasHostProvider(self: *const Engine) bool {
-        return self.provider.available;
+        return self.provider.isAvailable();
     }
 
     pub fn drainProviders(self: *Engine) Error!usize {
@@ -164,6 +177,7 @@ pub const Engine = struct {
             if (!bridge.dispatchProvider(self.context, &self.bridge_state, line)) return self.reportException();
             count += 1;
         }
+        if (!bridge.dispatchMediaAcks(self.context, &self.bridge_state)) return self.reportException();
         try self.pumpJobs();
         return count;
     }

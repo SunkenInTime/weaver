@@ -645,3 +645,66 @@ drive-absolute paths within the cache at a case-insensitive component boundary.
 Drive-relative, rooted-current-drive, UNC, device-namespace, `..`, missing, and
 prefix-collision paths are rejected. Widgets cannot nominate an additional
 readable root.
+
+## PR 03: media transport capability
+
+Media control is a separate, explicit capability. A widget must declare
+`capabilities: ["media-transport"]`; `subscribe: ["media"]` is not required
+for transport-only widgets. The SDK surface is:
+
+```ts
+interface MediaTransport {
+  play(): Promise<boolean>;
+  pause(): Promise<boolean>;
+  next(): Promise<boolean>;
+  previous(): Promise<boolean>;
+  seek(ms: number): Promise<boolean>;
+}
+
+const transport = useMediaTransport();
+```
+
+`seek` is absolute and accepts only finite, non-negative integer
+milliseconds. The host clamps it to a known session duration. A promise
+resolves `true` only when the OS media API reports success. It resolves
+`false` when a valid request reaches weaverd but the capability is refused,
+there is no session, or the OS declines the operation. Channel
+unavailability, malformed protocol, a three-second timeout, disconnect, and
+shutdown reject.
+
+Each runtime owns one monotonically increasing safe-integer command-ID
+sequence. At most four commands may be pending per widget; a fifth rejects
+immediately. Commands are FIFO, and weaverd accepts at most five verbs per
+widget in any one-second sliding window.
+
+The existing provider endpoint is duplex. Runtime-to-host command lines and
+host-to-runtime acknowledgement lines are newline-delimited JSON:
+
+```json
+{"command":"media","verb":"play","id":1}
+{"command":"media","verb":"seek","seekMs":42000,"id":2}
+{"ack":1,"ok":true}
+```
+
+The command object has exactly `command`, `verb`, optional `seekMs`, and `id`;
+`command` is `"media"` and verbs are `play`, `pause`, `next`, `previous`, or
+`seek`. `seekMs` is present only for `seek`. The acknowledgement object has
+exactly `ack` and `ok`.
+
+One blocking host reader thread per widget validates framing and enqueues
+commands without calling platform media APIs or writing to the endpoint. The
+host supervision loop is the sole writer of provider frames and
+acknowledgements; it independently checks the declared capability, applies
+the rate limit, and dispatches the OS operation. Queue overflow drops the
+command and schedules a negative acknowledgement.
+
+The runtime reader is the sole endpoint reader. It demultiplexes complete
+lines by top-level key: provider frames retain their four-entry drop-oldest
+queue, while acknowledgements use a separate non-dropping four-entry queue.
+Runtime writes are serialized by a send mutex, and the existing single
+provider dispatcher drains both lanes on the app loop. `native.mediaCommand`
+is absent unless the runtime manifest declares `media-transport`.
+
+Windows implements the verbs through SMTC request APIs. macOS carries the
+same duplex plumbing in this layer but honestly returns `false` for valid
+commands until the separately spike-gated adapter exists.

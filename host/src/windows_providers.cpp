@@ -21,6 +21,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -533,6 +534,38 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         return 1;
     } catch (...) {
         return -2;
+    }
+}
+
+extern "C" int weaver_media_command(WeaverMediaSession *state, int command, uint64_t seek_ms) {
+    if (!state || !state->manager) return 0;
+    try {
+        const auto session = state->manager.GetCurrentSession();
+        if (!session) return 0;
+        switch (command) {
+            case WEAVER_MEDIA_COMMAND_PLAY:
+                return session.TryPlayAsync().get() ? 1 : 0;
+            case WEAVER_MEDIA_COMMAND_PAUSE:
+                return session.TryPauseAsync().get() ? 1 : 0;
+            case WEAVER_MEDIA_COMMAND_NEXT:
+                return session.TrySkipNextAsync().get() ? 1 : 0;
+            case WEAVER_MEDIA_COMMAND_PREVIOUS:
+                return session.TrySkipPreviousAsync().get() ? 1 : 0;
+            case WEAVER_MEDIA_COMMAND_SEEK: {
+                const auto timeline = session.GetTimelineProperties();
+                const int64_t duration_ms = std::max<int64_t>(
+                    0,
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        timeline.EndTime() - timeline.StartTime()).count());
+                if (duration_ms > 0) seek_ms = std::min<uint64_t>(seek_ms, static_cast<uint64_t>(duration_ms));
+                if (seek_ms > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / 10000)) return 0;
+                return session.TryChangePlaybackPositionAsync(static_cast<int64_t>(seek_ms * 10000)).get() ? 1 : 0;
+            }
+            default:
+                return 0;
+        }
+    } catch (...) {
+        return 0;
     }
 }
 

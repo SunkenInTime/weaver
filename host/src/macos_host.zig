@@ -1,5 +1,6 @@
 const std = @import("std");
 const audio = @import("audio.zig");
+const media_commands = @import("media_commands.zig");
 const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
 const provider_protocol = @import("provider_protocol.zig");
@@ -137,6 +138,7 @@ const ProviderEndpoint = struct {
     thread: std.Thread,
     mutex: std.Io.Mutex = .init,
     stream: ?std.Io.net.Stream = null,
+    command_queue: media_commands.Queue = .{},
     stopping: bool = false,
 
     fn start(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*ProviderEndpoint {
@@ -170,12 +172,20 @@ const ProviderEndpoint = struct {
     fn acceptMain(self: *ProviderEndpoint) void {
         const stream = self.listener.accept(self.io) catch return;
         self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
         if (self.stopping) {
+            self.mutex.unlock(self.io);
             stream.close(self.io);
             return;
         }
         self.stream = stream;
+        self.mutex.unlock(self.io);
+
+        var read_buffer: [media_commands.max_line_bytes * 2]u8 = undefined;
+        var reader = stream.reader(self.io, &read_buffer);
+        while (reader.interface.takeDelimiter('\n') catch {
+            self.command_queue.malformed.store(true, .release);
+            return;
+        }) |line| self.command_queue.pushLine(line);
     }
 
     pub fn write(self: *ProviderEndpoint, bytes: []const u8) bool {
@@ -187,6 +197,14 @@ const ProviderEndpoint = struct {
         writer.interface.writeAll(bytes) catch return false;
         writer.interface.flush() catch return false;
         return true;
+    }
+
+    pub fn takeCommand(self: *ProviderEndpoint) ?media_commands.Command {
+        return self.command_queue.take();
+    }
+
+    pub fn takeNack(self: *ProviderEndpoint) ?u64 {
+        return self.command_queue.takeNack();
     }
 };
 
@@ -227,6 +245,7 @@ const MacSlotState = struct {
     process: ?posix.pid_t = null,
     exit_code: ?u32 = null,
     endpoint: ?*ProviderEndpoint = null,
+    command_rate: media_commands.RateLimiter = .{},
     costs: CostSamples = .{},
     threads: u32 = 0,
     backend_path_buffer: [max_path_bytes]u8 = undefined,
@@ -317,6 +336,29 @@ const Host = struct {
         }
     }
 
+    fn drainMediaCommands(self: *Host, now_ms: u64) void {
+        var ack_buffer: [64]u8 = undefined;
+        for (&self.slots) |*slot| {
+            const endpoint = slot.platform.endpoint orelse continue;
+            while (endpoint.takeNack()) |id| {
+                const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
+                _ = endpoint.write(ack);
+            }
+            while (endpoint.takeCommand()) |command| {
+                const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
+                // The MediaRemote adapter is deliberately absent until the
+                // spike-gated layer 04. A valid declared request therefore
+                // reaches weaverd and is honestly declined.
+                const ok = allowed and false;
+                const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
+                _ = endpoint.write(ack);
+            }
+            if (endpoint.command_queue.malformed.swap(false, .acq_rel)) {
+                std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
+            }
+        }
+    }
+
     fn launch(self: *Host, slot: *Slot, now_ms: u64) !void {
         try self.ensureBundle(slot.source());
         const dist = try std.fs.path.join(self.allocator, &.{ slot.source(), "dist" });
@@ -325,15 +367,19 @@ const Host = struct {
         defer self.allocator.free(manifest_path);
         const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, manifest_path, self.allocator, .limited(64 * 1024));
         defer self.allocator.free(manifest_bytes);
-        const Manifest = struct { subscribe: []const []const u8 = &.{}, renderBackend: []const u8 = "software" };
+        const Manifest = struct {
+            subscribe: []const []const u8 = &.{},
+            capabilities: []const []const u8 = &.{},
+            renderBackend: []const u8 = "software",
+        };
         const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
         defer manifest.deinit();
-        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.renderBackend, false);
+        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.capabilities, manifest.value.renderBackend, false);
 
         // ADR 0015 makes media explicitly unavailable on macOS. A media-only
         // Widget keeps its no-data state without a socket, reader thread, or
         // provider timer; supported providers still share one endpoint.
-        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio;
+        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media_transport;
         var endpoint_path: ?[]u8 = null;
         defer if (endpoint_path) |path| self.allocator.free(path);
         if (needs_endpoint) {
@@ -373,6 +419,7 @@ const Host = struct {
         try self.writeChildMarker(slot.platform.process.?);
         slot.platform.exit_code = null;
         slot.platform.costs = .{};
+        slot.platform.command_rate = .{};
         supervisor.markRunning(slot, now_ms, self.artifactMtime(slot.source()));
     }
 
@@ -687,6 +734,7 @@ fn run(init: std.process.Init) !void {
         };
         const now = monotonicMilliseconds();
         host.supervise(now);
+        host.drainMediaCommands(now);
         host.sampleAudio(now);
         const audio_availability_changed = audio_availability != host.audio_provider.availability;
         audio_availability = host.audio_provider.availability;

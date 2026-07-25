@@ -28,6 +28,10 @@ globalThis.native = {
   onEvent(callback) { eventCallback = callback; },
   hostAvailable() { return hostAvailable; },
   onProvider(callback) { providerCallback = callback; },
+  mediaCommand(json, callback) {
+    operations.push(["mediaCommand", json]);
+    queueMicrotask(() => callback(true, null));
+  },
   setInterval(ms) { const id = nextTimer++; operations.push(["setInterval", ms, id]); return id; },
   clearInterval(id) { operations.push(["clearInterval", id]); callbacks.delete(id); },
   onTimer(id, callback) { operations.push(["onTimer", id]); callbacks.set(id, callback); },
@@ -61,11 +65,13 @@ test("widget renders one native generation and providers use native timers", asy
   let rightPressEvent;
   let sliderValue = 0;
   let retainedCanvasContext;
-  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu", "audio", "media"] }, () => {
+  let transport;
+  sdk.widget({ name: "Test", size: [100, 50], subscribe: ["time", "cpu", "audio", "media"], capabilities: ["media-transport"] }, () => {
     const time = sdk.useProvider("time");
     const cpu = sdk.useProvider("cpu");
     const audio = sdk.useProvider("audio");
     const media = sdk.useProvider("media");
+    transport = sdk.useMediaTransport();
     sdk.useInterval(() => {}, 2500);
     const [reversed, setReversed] = sdk.useState(false);
     const [minutes, setMinutes] = sdk.useStorage("minutes", 25);
@@ -215,6 +221,12 @@ test("widget renders one native generation and providers use native timers", asy
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "Test Song"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "playing:Test Player"));
   assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[2] === "source" && operation[3] === "C:\\Users\\test\\AppData\\Local\\weaver\\artcache\\abc.img"));
+  assert.equal(await transport.play(), true);
+  assert.deepEqual(
+    JSON.parse(operations.findLast((operation) => operation[0] === "mediaCommand")[1]),
+    { command: "media", verb: "play", id: 1 },
+  );
+  await assert.rejects(transport.seek(1.5), /finite non-negative integer/);
   const canvasNodes = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas");
   const pausedCanvasNode = canvasNodes[0][2];
   const canvasNode = canvasNodes[1][2];

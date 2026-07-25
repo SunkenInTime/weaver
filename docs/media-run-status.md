@@ -54,6 +54,17 @@ This run will not change the submodule pointer.
   no-art state changes the snapshot. The new retention/no-art test and
   `host: zig build test` pass.
 
+- Layer 03 focused SDK/CLI tests: PASS after fixing two recovered-work
+  integration defects (missing SDK export and a misplaced test fixture).
+- Layer 03 `npm test`: PASS, 63/63 tests.
+- Layer 03 `npm run typecheck`: PASS.
+- Layer 03 `runtime`: `zig build test -Dweb-layer=exclude -Dtrace=off`: PASS.
+  A capability-wall test forces the conditional native bridge path to compile
+  and proves undeclared runtimes receive no `native.mediaCommand`.
+- Layer 03 `host`: `zig build test`: PASS.
+- Layer 03 production builds: runtime and host PASS.
+- Layer 03 example: `weaver check examples/now-playing`: PASS.
+
 ## Blockers and unverified gates
 
 - None for the Windows stack.

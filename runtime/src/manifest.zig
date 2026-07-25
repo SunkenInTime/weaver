@@ -39,6 +39,7 @@ pub const Manifest = struct {
     transparent: bool = true,
     origins: []const []const u8 = &.{},
     subscribe: []const []const u8 = &.{},
+    capabilities: []const []const u8 = &.{},
     renderBackend: []const u8 = "software",
     fonts: []const Font = &.{},
 };
@@ -81,6 +82,9 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     }
     for (parsed.subscribe) |provider| {
         if (!std.mem.eql(u8, provider, "time") and !std.mem.eql(u8, provider, "cpu") and !std.mem.eql(u8, provider, "memory") and !std.mem.eql(u8, provider, "audio") and !std.mem.eql(u8, provider, "media")) return error.InvalidProvider;
+    }
+    for (parsed.capabilities) |capability| {
+        if (!std.mem.eql(u8, capability, "media-transport")) return error.InvalidCapability;
     }
     if (parsed.fonts.len > native_sdk.runtime.max_registered_canvas_fonts) return error.TooManyFonts;
     for (parsed.fonts) |font| {
@@ -188,6 +192,15 @@ test "clock manifest shape parses" {
     const parsed = try std.json.parseFromSlice(Manifest, std.testing.allocator, source, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(f32, 240), parsed.value.size[0]);
+}
+
+test "media transport is the only runtime capability" {
+    const accepted =
+        \\{"name":"Transport","size":[240,110],"capabilities":["media-transport"]}
+    ;
+    const parsed = try std.json.parseFromSlice(Manifest, std.testing.allocator, accepted, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("media-transport", parsed.value.capabilities[0]);
 }
 
 test "font manifest paths stay root-adjacent and use supported extensions" {

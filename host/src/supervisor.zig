@@ -31,6 +31,7 @@ pub fn Slot(comptime PlatformState: type) type {
         wants_memory: bool = false,
         wants_audio: bool = false,
         wants_media: bool = false,
+        wants_media_transport: bool = false,
         wants_gpu: bool = false,
         cpu_sent: bool = false,
         memory_sent: bool = false,
@@ -128,17 +129,27 @@ pub fn nextSlotAction(slot: anytype, source_exists: bool, process_running: bool,
     return .none;
 }
 
-pub fn selectManifest(slot: anytype, subscriptions: []const []const u8, render_backend: []const u8, force_software: bool) void {
+pub fn selectManifest(
+    slot: anytype,
+    subscriptions: []const []const u8,
+    capabilities: []const []const u8,
+    render_backend: []const u8,
+    force_software: bool,
+) void {
     slot.wants_cpu = false;
     slot.wants_memory = false;
     slot.wants_audio = false;
     slot.wants_media = false;
+    slot.wants_media_transport = false;
     slot.wants_gpu = !force_software and std.mem.eql(u8, render_backend, "gpu");
     for (subscriptions) |name| {
         if (std.mem.eql(u8, name, "cpu")) slot.wants_cpu = true;
         if (std.mem.eql(u8, name, "memory")) slot.wants_memory = true;
         if (std.mem.eql(u8, name, "audio")) slot.wants_audio = true;
         if (std.mem.eql(u8, name, "media")) slot.wants_media = true;
+    }
+    for (capabilities) |name| {
+        if (std.mem.eql(u8, name, "media-transport")) slot.wants_media_transport = true;
     }
 }
 
@@ -363,8 +374,8 @@ test "slot state machine preserves subscriptions renderer policy and crash backo
     try slot.setRegistration(.{ .name = "System", .sourcePath = "/owned/system", .enabled = true, .dev = false });
     slot.state = .starting;
     try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slot, true, false, false, 0));
-    selectManifest(&slot, &.{ "cpu", "memory", "audio", "media" }, "gpu", false);
-    try std.testing.expect(slot.wants_cpu and slot.wants_memory and slot.wants_audio and slot.wants_media and slot.wants_gpu);
+    selectManifest(&slot, &.{ "cpu", "memory", "audio", "media" }, &.{"media-transport"}, "gpu", false);
+    try std.testing.expect(slot.wants_cpu and slot.wants_memory and slot.wants_audio and slot.wants_media and slot.wants_media_transport and slot.wants_gpu);
     markRunning(&slot, 100, 9);
     try std.testing.expectEqual(RunState.running, slot.state);
     recordCrash(&slot, 200, 7);
