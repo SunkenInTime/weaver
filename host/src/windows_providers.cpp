@@ -7,6 +7,7 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
+#include <wincodec.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
@@ -20,6 +21,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 
 struct WeaverAudioCapture {
     IMMDeviceEnumerator *enumerator = nullptr;
@@ -156,6 +158,93 @@ extern "C" int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t 
 }
 
 constexpr size_t max_artwork_bytes = 1024 * 1024;
+constexpr uint64_t max_artwork_pixel_bytes = 256 * 1024;
+
+static bool normalized_artwork_bytes(
+    const uint8_t *source,
+    size_t source_length,
+    std::vector<uint8_t> &output) {
+    try {
+        winrt::com_ptr<IWICImagingFactory> factory;
+        winrt::check_hresult(CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(factory.put())));
+        winrt::com_ptr<IWICStream> input;
+        winrt::check_hresult(factory->CreateStream(input.put()));
+        winrt::check_hresult(input->InitializeFromMemory(
+            const_cast<BYTE *>(source),
+            static_cast<DWORD>(source_length)));
+        winrt::com_ptr<IWICBitmapDecoder> decoder;
+        winrt::check_hresult(factory->CreateDecoderFromStream(
+            input.get(),
+            nullptr,
+            WICDecodeMetadataCacheOnLoad,
+            decoder.put()));
+        winrt::com_ptr<IWICBitmapFrameDecode> frame;
+        winrt::check_hresult(decoder->GetFrame(0, frame.put()));
+        UINT width = 0;
+        UINT height = 0;
+        winrt::check_hresult(frame->GetSize(&width, &height));
+        if (width == 0 || height == 0) return false;
+        if (static_cast<uint64_t>(width) * height * 4 <= max_artwork_pixel_bytes) {
+            output.assign(source, source + source_length);
+            return true;
+        }
+
+        const double scale = 256.0 / static_cast<double>(std::max(width, height));
+        const UINT target_width = std::max<UINT>(1, static_cast<UINT>(width * scale));
+        const UINT target_height = std::max<UINT>(1, static_cast<UINT>(height * scale));
+        winrt::com_ptr<IWICBitmapScaler> scaler;
+        winrt::check_hresult(factory->CreateBitmapScaler(scaler.put()));
+        winrt::check_hresult(scaler->Initialize(
+            frame.get(),
+            target_width,
+            target_height,
+            WICBitmapInterpolationModeFant));
+        winrt::com_ptr<IWICFormatConverter> converter;
+        winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
+        winrt::check_hresult(converter->Initialize(
+            scaler.get(),
+            GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom));
+
+        winrt::com_ptr<IStream> output_stream;
+        winrt::check_hresult(CreateStreamOnHGlobal(nullptr, TRUE, output_stream.put()));
+        winrt::com_ptr<IWICBitmapEncoder> encoder;
+        winrt::check_hresult(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put()));
+        winrt::check_hresult(encoder->Initialize(output_stream.get(), WICBitmapEncoderNoCache));
+        winrt::com_ptr<IWICBitmapFrameEncode> output_frame;
+        winrt::com_ptr<IPropertyBag2> properties;
+        winrt::check_hresult(encoder->CreateNewFrame(output_frame.put(), properties.put()));
+        winrt::check_hresult(output_frame->Initialize(properties.get()));
+        winrt::check_hresult(output_frame->SetSize(target_width, target_height));
+        WICPixelFormatGUID pixel_format = GUID_WICPixelFormat32bppBGRA;
+        winrt::check_hresult(output_frame->SetPixelFormat(&pixel_format));
+        if (pixel_format != GUID_WICPixelFormat32bppBGRA) return false;
+        winrt::check_hresult(output_frame->WriteSource(converter.get(), nullptr));
+        winrt::check_hresult(output_frame->Commit());
+        winrt::check_hresult(encoder->Commit());
+
+        HGLOBAL memory = nullptr;
+        winrt::check_hresult(GetHGlobalFromStream(output_stream.get(), &memory));
+        const SIZE_T length = GlobalSize(memory);
+        if (length == 0 || length > max_artwork_bytes) return false;
+        const void *bytes = GlobalLock(memory);
+        if (!bytes) return false;
+        output.assign(
+            static_cast<const uint8_t *>(bytes),
+            static_cast<const uint8_t *>(bytes) + length);
+        GlobalUnlock(memory);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
 struct WeaverMediaDirtyFlags {
     std::atomic<bool> session{true};
@@ -283,11 +372,15 @@ static bool read_thumbnail(
         winrt::Windows::Storage::Streams::DataReader reader(input);
         const uint32_t loaded = reader.LoadAsync(static_cast<uint32_t>(size)).get();
         if (loaded != size) return false;
-        auto bytes = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[loaded]);
+        std::vector<uint8_t> raw(loaded);
+        reader.ReadBytes(winrt::array_view<uint8_t>(raw));
+        std::vector<uint8_t> normalized;
+        if (!normalized_artwork_bytes(raw.data(), raw.size(), normalized)) return false;
+        auto bytes = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[normalized.size()]);
         if (!bytes) return false;
-        reader.ReadBytes(winrt::array_view<uint8_t>(bytes.get(), bytes.get() + loaded));
+        std::memcpy(bytes.get(), normalized.data(), normalized.size());
         artwork->bytes = bytes.release();
-        artwork->length = loaded;
+        artwork->length = normalized.size();
         return true;
     } catch (...) {
         return false;
