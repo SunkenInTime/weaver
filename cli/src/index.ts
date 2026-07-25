@@ -32,6 +32,7 @@ interface SourceProject {
   sourcePath: string;
   source: string;
   sourceFile: ts.SourceFile;
+  sourceFiles: ts.SourceFile[];
   config: WidgetConfigData;
 }
 
@@ -803,7 +804,38 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  return { directory, sourcePath, source, sourceFile, config };
+  return { directory, sourcePath, source, sourceFile, sourceFiles: loadDirectLocalImports(directory, sourceFile), config };
+}
+
+function localImportPath(directory: string, importer: ts.SourceFile, specifier: string): string | null {
+  if (!specifier.startsWith(".")) return null;
+  const unresolved = resolve(dirname(importer.fileName), specifier);
+  const candidates = extname(unresolved)
+    ? [unresolved]
+    : [`${unresolved}.tsx`, `${unresolved}.ts`, join(unresolved, "index.tsx"), join(unresolved, "index.ts")];
+  for (const candidate of candidates) {
+    if ((!pathsEqual(candidate, directory) && !pathInside(directory, candidate)) || !existsSync(candidate)) continue;
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // The ordinary TypeScript check reports an unstable or unreadable import.
+    }
+  }
+  return null;
+}
+
+function loadDirectLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
+  const files = [entry];
+  const loaded = new Set([resolve(entry.fileName)]);
+  for (const statement of entry.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const path = localImportPath(directory, entry, statement.moduleSpecifier.text);
+    if (!path || loaded.has(resolve(path))) continue;
+    loaded.add(resolve(path));
+    const source = readFileSync(path, "utf8");
+    files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+  }
+  return files;
 }
 
 function extractConfig(sourceFile: ts.SourceFile, errors: string[]): WidgetConfigData | null {
@@ -876,6 +908,194 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   return value as unknown as WidgetConfigData;
 }
 
+const nativeWidgetNodeLimit = 128;
+const nativeWidgetDepthLimit = 32;
+
+interface LoweredTreeMetrics { nodes: number; depth: number }
+
+function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
+  type JsxRoot = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
+  interface ComponentDefinition {
+    key: string;
+    roots: JsxRoot[];
+  }
+  const unwrapJsx = (expression: ts.Expression): JsxRoot | null => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) || ts.isJsxFragment(current) ? current : null;
+  };
+  const expressionRoots = (expression: ts.Expression): JsxRoot[] => {
+    const direct = unwrapJsx(expression);
+    if (direct) return [direct];
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    if (ts.isConditionalExpression(current)) return [...expressionRoots(current.whenTrue), ...expressionRoots(current.whenFalse)];
+    if (ts.isBinaryExpression(current) && (current.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken || current.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+      return [...expressionRoots(current.left), ...expressionRoots(current.right)];
+    }
+    return [];
+  };
+  const returnedRoots = (body: ts.ConciseBody): JsxRoot[] => {
+    if (!ts.isBlock(body)) return expressionRoots(body);
+    const results: JsxRoot[] = [];
+    const findReturn = (node: ts.Node): void => {
+      if (node !== body && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node) && node.expression) results.push(...expressionRoots(node.expression));
+      else ts.forEachChild(node, findReturn);
+    };
+    findReturn(body);
+    return results;
+  };
+  const definitions = new Map<ts.SourceFile, Map<string, ComponentDefinition>>();
+  const defaultDefinitions = new Map<ts.SourceFile, ComponentDefinition>();
+  for (const sourceFile of project.sourceFiles) {
+    const local = new Map<string, ComponentDefinition>();
+    const definition = (name: string, roots: JsxRoot[]): ComponentDefinition => ({
+      key: `${resolve(sourceFile.fileName)}#${name}`,
+      roots,
+    });
+    for (const statement of sourceFile.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.body) {
+        const roots = returnedRoots(statement.body);
+        if (roots.length === 0) continue;
+        if (statement.name) local.set(statement.name.text, definition(statement.name.text, roots));
+        if (statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) {
+          defaultDefinitions.set(sourceFile, definition("default", roots));
+        }
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (!ts.isIdentifier(declaration.name) || !declaration.initializer ||
+            (!ts.isArrowFunction(declaration.initializer) && !ts.isFunctionExpression(declaration.initializer))) continue;
+          const roots = returnedRoots(declaration.initializer.body);
+          if (roots.length > 0) local.set(declaration.name.text, definition(declaration.name.text, roots));
+        }
+      }
+    }
+    definitions.set(sourceFile, local);
+    const exportAssignment = sourceFile.statements.find(ts.isExportAssignment);
+    if (exportAssignment) {
+      if (ts.isIdentifier(exportAssignment.expression)) {
+        const exported = local.get(exportAssignment.expression.text);
+        if (exported) defaultDefinitions.set(sourceFile, exported);
+      } else if (ts.isArrowFunction(exportAssignment.expression) || ts.isFunctionExpression(exportAssignment.expression)) {
+        const roots = returnedRoots(exportAssignment.expression.body);
+        if (roots.length > 0) defaultDefinitions.set(sourceFile, definition("default", roots));
+      }
+    }
+    for (const statement of sourceFile.statements) {
+      if (!ts.isExportDeclaration(statement) || statement.moduleSpecifier || !statement.exportClause ||
+        !ts.isNamedExports(statement.exportClause)) continue;
+      for (const specifier of statement.exportClause.elements) {
+        if (specifier.name.text !== "default") continue;
+        const exported = local.get(specifier.propertyName?.text ?? specifier.name.text);
+        if (exported) defaultDefinitions.set(sourceFile, exported);
+      }
+    }
+  }
+  const componentScopes = new Map<ts.SourceFile, Map<string, ComponentDefinition>>();
+  for (const [sourceFile, local] of definitions) componentScopes.set(sourceFile, new Map(local));
+  for (const statement of project.sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) continue;
+    const path = localImportPath(project.directory, project.sourceFile, statement.moduleSpecifier.text);
+    const importedFile = path ? project.sourceFiles.find((file) => pathsEqual(file.fileName, path)) : undefined;
+    const imported = importedFile ? definitions.get(importedFile) : undefined;
+    if (!imported) continue;
+    const entryScope = componentScopes.get(project.sourceFile)!;
+    const bindings = statement.importClause.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        const component = imported.get(binding.propertyName?.text ?? binding.name.text);
+        if (component) entryScope.set(binding.name.text, component);
+      }
+    }
+    if (statement.importClause.name) {
+      const component = defaultDefinitions.get(importedFile!);
+      if (component) entryScope.set(statement.importClause.name.text, component);
+    }
+  }
+
+  const tagAndAttributes = (node: ts.JsxElement | ts.JsxSelfClosingElement): { tag: string; attributes: ts.JsxAttributes } =>
+    ts.isJsxElement(node)
+      ? { tag: node.openingElement.tagName.getText(node.getSourceFile()), attributes: node.openingElement.attributes }
+      : { tag: node.tagName.getText(node.getSourceFile()), attributes: node.attributes };
+  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
+    if (tag !== "row" && tag !== "column") return false;
+    const { attributes } = tagAndAttributes(node);
+    const sourceFile = node.getSourceFile();
+    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
+    if (classText === null) return false;
+    try {
+      const compiled = compileClass(classText);
+      return Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"));
+    } catch {
+      return false; // The normal class validator reports the actionable error.
+    }
+  };
+  const maximum = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
+    nodes: Math.max(0, ...values.map((value) => value.nodes)),
+    depth: Math.max(0, ...values.map((value) => value.depth)),
+  });
+  const isStaticPrimitive = (expression: ts.Expression): boolean => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current)) current = current.expression;
+    return ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current) ||
+      (ts.isPrefixUnaryExpression(current) && ts.isNumericLiteral(current.operand));
+  };
+  const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
+    const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
+      const result: LoweredTreeMetrics[] = [];
+      for (const child of children) {
+        if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+          result.push(metrics(child, visiting));
+        } else if (parentTag !== "text" && ts.isJsxText(child) && child.getText().trim() !== "") {
+          result.push({ nodes: 1, depth: 1 });
+        } else if (parentTag !== "text" && ts.isJsxExpression(child) && child.expression) {
+          const roots = expressionRoots(child.expression);
+          if (roots.length > 0) result.push(maximum(roots.map((root) => metrics(root, visiting))));
+          else if (isStaticPrimitive(child.expression)) result.push({ nodes: 1, depth: 1 });
+        }
+      }
+      return result;
+    };
+    if (ts.isJsxFragment(node)) {
+      const children = childMetrics(node.children, null);
+      return { nodes: children.reduce((sum, child) => sum + child.nodes, 0), depth: Math.max(0, ...children.map((child) => child.depth)) };
+    }
+    const { tag } = tagAndAttributes(node);
+    const component = componentScopes.get(node.getSourceFile())?.get(tag);
+    if (/^[A-Z]/.test(tag) && component && !visiting.has(component.key)) {
+      const next = new Set(visiting);
+      next.add(component.key);
+      return maximum(component.roots.map((root) => metrics(root, next)));
+    }
+    const children = ts.isJsxElement(node) ? childMetrics(node.children, tag) : [];
+    const ownDepth = isPaintedLayout(node, tag) ? 2 : 1;
+    return {
+      nodes: ownDepth + children.reduce((sum, child) => sum + child.nodes, 0),
+      depth: ownDepth + Math.max(0, ...children.map((child) => child.depth)),
+    };
+  };
+  const exportNode = project.sourceFile.statements.find(ts.isExportAssignment);
+  const component = exportNode && ts.isCallExpression(exportNode.expression) ? exportNode.expression.arguments[1] : undefined;
+  if (!component) return;
+  let roots: JsxRoot[] = [];
+  if (ts.isArrowFunction(component) || ts.isFunctionExpression(component)) roots = returnedRoots(component.body);
+  else if (ts.isIdentifier(component)) roots = componentScopes.get(project.sourceFile)?.get(component.text)?.roots ?? [];
+  else roots = expressionRoots(component);
+  if (roots.length === 0) return;
+  const lowered = maximum(roots.map((root) => metrics(root, new Set())));
+  const evidenceNode = roots[0];
+  const limitation = " The static estimate follows the exported widget through local components and one level of relative imports; runtime limits remain authoritative for dynamic collections and unresolved component output.";
+  if (lowered.nodes > nativeWidgetNodeLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); painted <row>/<column> elements add an inner layout node.${limitation}`));
+  }
+  if (lowered.depth > nativeWidgetDepthLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level.${limitation}`));
+  }
+}
+
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
   const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
@@ -917,6 +1137,7 @@ function validateSource(project: SourceProject): string[] {
   for (const provider of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) errors.push(`useProvider("${provider}") requires subscribe: ["${provider}"] in the widget config`);
   }
+  validateLoweredTreeBudgets(project, errors);
   return errors;
 }
 

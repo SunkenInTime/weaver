@@ -11,6 +11,11 @@ Design invariants (from ADRs 0001/0003/0005/0009):
   unknown utilities are check-time errors with fix-its.
 - Idle-zero: no state change → no ops → no repaint. The SDK never polls.
 - The reconciler runs in JS and emits retained-tree ops (never full frames).
+- `weaver check` estimates the exported widget's lowered Native tree through
+  local components and one level of relative imports, taking the maximum across
+  conditional JSX returns and counting statically evident implicit text nodes.
+  Dynamic collections and unresolved component output remain subject to the
+  authoritative Native runtime node/depth limits.
 
 ## Module shape
 
@@ -122,6 +127,9 @@ utility.
 | `p-N`, `p-[Npx]` | uniform padding |
 | `gap-N`, `gap-[Npx]` | flex gap |
 | `rounded`, `rounded-{md,lg,xl,2xl,3xl,full}`, `rounded-[Npx]` | corner radius |
+| `rounded-{t,r,b,l,tl,tr,br,bl}[-{md,lg,xl,2xl,3xl,full}]`, arbitrary `[Npx]` | selected corner radii; later classes win per corner |
+| `border`, `border-N`, `border-[Npx]` | border width in pixels; width-only utilities default to `#E5E7EBFF` (gray-200) |
+| `border-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | border color; color alone does not create width |
 | `bg-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | background color |
 | `text-[#…]` | text color |
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
