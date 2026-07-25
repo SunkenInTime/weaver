@@ -8,7 +8,7 @@ Last updated: 2026-07-25
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`5605dd1`) |
-| 03/05 | `media/03-transport` | layer 02 | IN PROGRESS; automated + live gates green |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`5a81a4c`) |
 | 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
 | 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
 
@@ -78,13 +78,13 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 03 duplex transport, acknowledgement demultiplexing, Windows SMTC verb
-dispatch, capability enforcement, SDK hook, static symbol gate, and
-now-playing play/pause control are implemented. Automated, production build,
-real-player verb, and binding visual gates pass. The post-live-fix full stack
-gate and draft PR remain.
+Layer 03 is committed, pushed, and open as draft PR
+`https://github.com/SunkenInTime/weaver/pull/34`. Automated, production build,
+real-player verb, and binding visual gates pass.
 
 ## Next executable task
 
-Run the complete post-live-fix layer-03 gate, commit/push the overlapped duplex
-repair and evidence, then open the layer-03 draft PR against layer 02.
+Create `media/04-macos-adapter` from layer 03 and execute the spike gate. This
+Windows run must record PR 04 as BLOCKED unless real macOS evidence proves both
+a metadata frame and a delivered command; then continue layer 05 from layer 03
+if blocked.
