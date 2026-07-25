@@ -346,8 +346,8 @@ const Host = struct {
             }
             while (endpoint.takeCommand()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
-                // The MediaRemote adapter is deliberately absent until the
-                // spike-gated layer 04. A valid declared request therefore
+                // The system-wide media adapter is deliberately absent until
+                // the spike-gated layer 04. A valid declared request therefore
                 // reaches weaverd and is honestly declined.
                 const ok = allowed and false;
                 const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;

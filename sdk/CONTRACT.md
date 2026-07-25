@@ -705,6 +705,7 @@ Runtime writes are serialized by a send mutex, and the existing single
 provider dispatcher drains both lanes on the app loop. `native.mediaCommand`
 is absent unless the runtime manifest declares `media-transport`.
 
-Windows implements the verbs through SMTC request APIs. macOS carries the
-same duplex plumbing in this layer but honestly returns `false` for valid
-commands until the separately spike-gated adapter exists.
+The proven desktop adapter implements the verbs through system media request
+APIs. The unproven adapter carries the same duplex plumbing in this layer but
+honestly returns `false` for valid commands until its separately spike-gated
+implementation exists.
