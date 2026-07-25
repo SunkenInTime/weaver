@@ -48,14 +48,33 @@ through JS.
 ## Hooks, providers, and network
 
 Available hooks: `useState`, `useRef`, `useEffect`, `useInterval`,
-`useStorage`, and `useProvider`. Providers are `time`, `cpu`, `memory`,
-`audio`, and `media`; every provider must also appear in literal
-`config.subscribe`. Audio is change/silence-aware and media data is read-only.
+`useStorage`, `useProvider`, and `useMediaTransport`. Providers are `time`,
+`cpu`, `memory`, `audio`, and `media`; every provider must also appear in
+literal `config.subscribe`. Audio is change/silence-aware.
 
-Use `wfetch` only for HTTPS hosts listed exactly in `config.origins`. Keep
-`capabilities` empty until the contract adds a widget capability. Plain TSX is
-bundled automatically; do not add external imports beyond `@weaver/sdk` and
-widget-local modules/assets.
+`useProvider("media")` returns title, artist, album, tri-state `status`,
+source-compatible `playing`, display-only `sourceApp`, optional local
+`artPath`, and position/duration milliseconds. Keep `<image>.src` required and
+render art conditionally:
+
+```tsx
+{media.artPath
+  ? <image src={media.artPath} fit="cover" />
+  : <panel class="bg-zinc-800" />}
+```
+
+Media control is separate from observation. Declare literal
+`capabilities: ["media-transport"]`, then call `useMediaTransport()` for
+`play`, `pause`, `next`, `previous`, and absolute `seek(ms)`. Every verb
+returns `Promise<boolean>`: `true` means the OS reported success, `false`
+means a valid request was declined, and channel/protocol/timeout failures
+reject. Transport-only widgets do not need `subscribe: ["media"]`.
+
+Use `wfetch` only for HTTPS hosts listed exactly in `config.origins`.
+`media-transport` is the only supported capability; keep `capabilities`
+absent unless those verbs are required. Plain TSX is bundled automatically;
+do not add external imports beyond `@weaver/sdk` and widget-local
+modules/assets.
 
 ## Styling surface
 
@@ -97,4 +116,4 @@ the boundary instead of inventing a no-op.
   Path-backed icons consume no font slot.
 - Font family stems must match `font-[stem]`; keep adjacent license files.
 - Images remain widget-local. Remote/provider image URLs are unsupported;
-  provider-supplied images must arrive as local paths when that API exists.
+  media artwork arrives only as the optional host-cache local `artPath`.
