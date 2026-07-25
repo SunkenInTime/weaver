@@ -64,6 +64,15 @@ This run will not change the submodule pointer.
 - Layer 03 `host`: `zig build test`: PASS.
 - Layer 03 production builds: runtime and host PASS.
 - Layer 03 example: `weaver check examples/now-playing`: PASS.
+- Layer 03 live gate exposed and repaired a Windows synchronous-duplex
+  deadlock. Both Windows endpoints now use overlapped I/O while preserving the
+  dedicated blocking reader and sole-host-writer contract. Runtime and host
+  Zig test/build gates pass after the repair.
+- Layer 03 real Spotify verbs: PASS. Play, pause, next, previous, and seek all
+  resolved `true`; titles changed for next/previous, and seek reached 129 s
+  for a 128 s target.
+- Layer 03 visual gate: PASS. Viewed captures and the per-element checklist
+  are in `docs/media-evidence/pr03-visual.md`.
 
 ## Blockers and unverified gates
 

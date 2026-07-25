@@ -35,6 +35,7 @@ const WindowsSlotState = struct {
     process: c.HANDLE = null,
     pid: u32 = 0,
     pipe: c.HANDLE = invalid_handle,
+    write_event: c.HANDLE = null,
     command_thread: ?std.Thread = null,
     command_queue: media_commands.Queue = .{},
     command_rate: media_commands.RateLimiter = .{},
@@ -185,7 +186,16 @@ const Host = struct {
             pipe_name = try std.fmt.bufPrint(&pipe_name_buffer, "\\\\.\\pipe\\weaver-{d}-{x}", .{ c.GetCurrentProcessId(), std.hash.Wyhash.hash(now_ms, slot.name()) });
             const pipe_name_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, pipe_name);
             defer self.allocator.free(pipe_name_w);
-            slot.platform.pipe = c.CreateNamedPipeW(pipe_name_w.ptr, c.PIPE_ACCESS_DUPLEX, c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_NOWAIT, 1, 8192, 8192, 0, null);
+            slot.platform.pipe = c.CreateNamedPipeW(
+                pipe_name_w.ptr,
+                c.PIPE_ACCESS_DUPLEX | c.FILE_FLAG_OVERLAPPED,
+                c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_WAIT,
+                1,
+                8192,
+                8192,
+                0,
+                null,
+            );
             if (slot.platform.pipe == invalid_handle) return error.CreatePipeFailed;
         }
         errdefer self.closePipe(slot);
@@ -239,6 +249,7 @@ const Host = struct {
                 _ = c.TerminateProcess(slot.platform.process, 1);
                 return error.ConnectPipeFailed;
             }
+            slot.platform.write_event = c.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
             slot.platform.command_thread = try std.Thread.spawn(
                 .{ .stack_size = 256 * 1024 },
                 commandReaderMain,
@@ -350,11 +361,13 @@ const Host = struct {
     fn closePipe(_: *Host, slot: *Slot) void {
         if (slot.platform.pipe == invalid_handle) return;
         _ = c.CancelIoEx(slot.platform.pipe, null);
+        if (slot.platform.command_thread) |thread| thread.join();
+        slot.platform.command_thread = null;
         _ = c.DisconnectNamedPipe(slot.platform.pipe);
         _ = c.CloseHandle(slot.platform.pipe);
         slot.platform.pipe = invalid_handle;
-        if (slot.platform.command_thread) |thread| thread.join();
-        slot.platform.command_thread = null;
+        if (slot.platform.write_event) |event| _ = c.CloseHandle(event);
+        slot.platform.write_event = null;
         slot.platform.command_queue = .{};
         slot.platform.command_rate = .{};
     }
@@ -410,11 +423,11 @@ const Host = struct {
         const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
         for (&self.slots) |*slot| {
             if (slot.platform.pipe == invalid_handle) continue;
-            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and writePipe(slot.platform.pipe, cpu)) {
+            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and writePipe(&slot.platform, cpu)) {
                 slot.cpu_sent = true;
                 self.system_frames += 1;
             }
-            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and writePipe(slot.platform.pipe, memory)) {
+            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and writePipe(&slot.platform, memory)) {
                 slot.memory_sent = true;
                 self.system_frames += 1;
             }
@@ -451,7 +464,7 @@ const Host = struct {
         var delivered = false;
         for (&self.slots) |*slot| {
             if (slot.platform.pipe == invalid_handle or !slot.wants_audio) continue;
-            if (writePipe(slot.platform.pipe, encoded)) delivered = true;
+            if (writePipe(&slot.platform, encoded)) delivered = true;
         }
         if (delivered) self.audio_pipe_frames += 1;
     }
@@ -470,7 +483,7 @@ const Host = struct {
         var delivered = false;
         for (&self.slots) |*slot| {
             if (slot.platform.pipe == invalid_handle or !slot.wants_media) continue;
-            if ((!slot.media_sent or changed) and writePipe(slot.platform.pipe, encoded)) {
+            if ((!slot.media_sent or changed) and writePipe(&slot.platform, encoded)) {
                 slot.media_sent = true;
                 delivered = true;
             }
@@ -486,13 +499,13 @@ const Host = struct {
             if (slot.platform.pipe == invalid_handle) continue;
             while (slot.platform.command_queue.takeNack()) |id| {
                 const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
-                _ = writePipe(slot.platform.pipe, ack);
+                _ = writePipe(&slot.platform, ack);
             }
             while (slot.platform.command_queue.take()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
                 const ok = allowed and self.media_provider.command(command.verb, command.seek_ms, now_ms);
                 const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
-                _ = writePipe(slot.platform.pipe, ack);
+                _ = writePipe(&slot.platform, ack);
             }
             if (slot.platform.command_queue.malformed.swap(false, .acq_rel)) {
                 std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
@@ -803,47 +816,76 @@ fn collectThreadCounts(host: *const Host, slot_counts: *[max_widgets]u32, render
 }
 
 fn commandReaderMain(platform: *WindowsSlotState) void {
-    var pending: [media_commands.max_line_bytes * 2]u8 = undefined;
-    var pending_len: usize = 0;
+    const event = c.CreateEventW(null, 0, 0, null) orelse return;
+    defer _ = c.CloseHandle(event);
+    var framer: media_commands.Framer = .{};
+    var chunk: [512]u8 = undefined;
     while (true) {
-        if (pending_len == pending.len) {
-            platform.command_queue.malformed.store(true, .release);
-            return;
-        }
         var read: c.DWORD = 0;
-        if (c.ReadFile(platform.pipe, pending[pending_len..].ptr, @intCast(pending.len - pending_len), &read, null) == 0 or read == 0) {
-            if (pending_len != 0) platform.command_queue.malformed.store(true, .release);
+        _ = c.ResetEvent(event);
+        var overlapped: c.OVERLAPPED = std.mem.zeroes(c.OVERLAPPED);
+        overlapped.hEvent = event;
+        if (c.ReadFile(platform.pipe, &chunk, chunk.len, &read, &overlapped) == 0) {
+            if (c.GetLastError() != c.ERROR_IO_PENDING or
+                c.WaitForSingleObject(event, c.INFINITE) != c.WAIT_OBJECT_0 or
+                c.GetOverlappedResult(platform.pipe, &overlapped, &read, 0) == 0)
+            {
+                framer.finish(&platform.command_queue);
+                return;
+            }
+        }
+        if (read == 0) {
+            framer.finish(&platform.command_queue);
             return;
         }
-        pending_len += read;
-        var start: usize = 0;
-        while (std.mem.indexOfScalarPos(u8, pending[0..pending_len], start, '\n')) |end| {
-            platform.command_queue.pushLine(pending[start..end]);
-            start = end + 1;
-        }
-        if (start > 0) {
-            std.mem.copyForwards(u8, pending[0 .. pending_len - start], pending[start..pending_len]);
-            pending_len -= start;
-        }
+        if (!framer.feed(&platform.command_queue, chunk[0..read])) return;
     }
 }
 
-fn writePipe(pipe: c.HANDLE, bytes: []const u8) bool {
+fn writePipe(platform: *WindowsSlotState, bytes: []const u8) bool {
+    const event = platform.write_event orelse return false;
+    _ = c.ResetEvent(event);
+    var overlapped: c.OVERLAPPED = std.mem.zeroes(c.OVERLAPPED);
+    overlapped.hEvent = event;
     var written: c.DWORD = 0;
-    return c.WriteFile(pipe, bytes.ptr, @intCast(bytes.len), &written, null) != 0 and written == bytes.len;
+    if (c.WriteFile(platform.pipe, bytes.ptr, @intCast(bytes.len), &written, &overlapped) == 0) {
+        if (c.GetLastError() != c.ERROR_IO_PENDING) return false;
+        if (c.WaitForSingleObject(event, 1000) != c.WAIT_OBJECT_0) {
+            _ = c.CancelIoEx(platform.pipe, &overlapped);
+            var cancelled_bytes: c.DWORD = 0;
+            _ = c.GetOverlappedResult(platform.pipe, &overlapped, &cancelled_bytes, 1);
+            return false;
+        }
+        if (c.GetOverlappedResult(platform.pipe, &overlapped, &written, 0) == 0) return false;
+    }
+    return written == bytes.len;
 }
 
 fn connectPipe(pipe: c.HANDLE, process: c.HANDLE, timeout_ms: u64) bool {
-    const deadline = c.GetTickCount64() + timeout_ms;
-    while (true) {
-        if (c.ConnectNamedPipe(pipe, null) != 0 or c.GetLastError() == c.ERROR_PIPE_CONNECTED) break;
+    const event = c.CreateEventW(null, 0, 0, null) orelse return false;
+    defer _ = c.CloseHandle(event);
+    var overlapped: c.OVERLAPPED = std.mem.zeroes(c.OVERLAPPED);
+    overlapped.hEvent = event;
+    if (c.ConnectNamedPipe(pipe, &overlapped) == 0) {
         const pipe_error = c.GetLastError();
-        if (pipe_error != c.ERROR_PIPE_LISTENING and pipe_error != c.ERROR_NO_DATA) return false;
-        if (c.WaitForSingleObject(process, 0) == c.WAIT_OBJECT_0 or c.GetTickCount64() >= deadline) return false;
-        c.Sleep(10);
+        if (pipe_error == c.ERROR_PIPE_CONNECTED) {
+            _ = c.SetEvent(event);
+        } else if (pipe_error == c.ERROR_IO_PENDING) {
+            const handles = [_]c.HANDLE{ event, process };
+            const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, @intCast(timeout_ms));
+            if (wait != c.WAIT_OBJECT_0) {
+                _ = c.CancelIoEx(pipe, &overlapped);
+                var cancelled_bytes: c.DWORD = 0;
+                _ = c.GetOverlappedResult(pipe, &overlapped, &cancelled_bytes, 1);
+                return false;
+            }
+            var transferred: c.DWORD = 0;
+            if (c.GetOverlappedResult(pipe, &overlapped, &transferred, 0) == 0) return false;
+        } else {
+            return false;
+        }
     }
-    var mode: c.DWORD = c.PIPE_READMODE_BYTE | c.PIPE_WAIT;
-    return c.SetNamedPipeHandleState(pipe, &mode, null, null) != 0;
+    return true;
 }
 
 fn closeWindowsForProcess(pid: u32) void {

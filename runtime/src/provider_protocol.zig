@@ -120,6 +120,37 @@ pub const Queues = struct {
     }
 };
 
+/// Incremental newline framing for platform readers. A disconnected partial
+/// line is a protocol failure because it could be a truncated acknowledgement.
+pub const Framer = struct {
+    pending: [frame_line_capacity * 2]u8 = undefined,
+    pending_len: usize = 0,
+
+    pub fn feed(self: *Framer, queues: *Queues, bytes: []const u8) bool {
+        if (bytes.len > self.pending.len - self.pending_len) {
+            queues.ack_protocol_failed.store(1, .release);
+            return false;
+        }
+        @memcpy(self.pending[self.pending_len..][0..bytes.len], bytes);
+        self.pending_len += bytes.len;
+        var start: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, self.pending[0..self.pending_len], start, '\n')) |end| {
+            queues.routeLine(self.pending[start..end]);
+            start = end + 1;
+        }
+        if (start > 0) {
+            std.mem.copyForwards(u8, self.pending[0 .. self.pending_len - start], self.pending[start..self.pending_len]);
+            self.pending_len -= start;
+        }
+        return true;
+    }
+
+    pub fn finish(self: *Framer, queues: *Queues) void {
+        if (self.pending_len != 0) queues.ack_protocol_failed.store(1, .release);
+        self.pending_len = 0;
+    }
+};
+
 test "interleaved frames coalesce while four acks never drop" {
     var queues: Queues = .{};
     queues.routeLine("{\"provider\":\"cpu\",\"value\":{\"percent\":1}}");
@@ -152,4 +183,17 @@ test "partial framing stays outside demux and malformed ack poisons only ack lan
     try std.testing.expect(queues.takeAck() == null);
     var output: [frame_line_capacity]u8 = undefined;
     try std.testing.expect(queues.takeFrame(&output) == null);
+}
+
+test "runtime framing demuxes interleaved lines split across reads" {
+    var queues: Queues = .{};
+    var framer: Framer = .{};
+    try std.testing.expect(framer.feed(&queues, "{\"provider\":\"media\",\"value\":{}}\n{\"ack\":"));
+    try std.testing.expect(framer.feed(&queues, "9,\"ok\":true}\n"));
+    var output: [frame_line_capacity]u8 = undefined;
+    try std.testing.expectEqualStrings("{\"provider\":\"media\",\"value\":{}}", queues.takeFrame(&output).?);
+    try std.testing.expectEqualDeep(Ack{ .id = 9, .ok = true }, queues.takeAck().?);
+    try std.testing.expect(framer.feed(&queues, "{\"ack\":10"));
+    framer.finish(&queues);
+    try std.testing.expectEqual(@as(u8, 1), queues.ack_protocol_failed.load(.acquire));
 }
