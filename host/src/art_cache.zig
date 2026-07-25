@@ -240,5 +240,22 @@ test "art cache prunes to 32 files without pruning the published hash" {
         published = (try cache.publish(&payload)).?;
     }
     try std.testing.expectEqual(@as(usize, max_files), try testImageCount(std.testing.io, root));
+
+    // Make the pinned publication the oldest file, then force a prune without
+    // changing the published hash. Age must never outrank the pin.
+    {
+        var file = try std.Io.Dir.cwd().openFile(std.testing.io, published.pathSlice(), .{ .mode = .write_only });
+        defer file.close(std.testing.io);
+        try file.setTimestamps(std.testing.io, .{
+            .access_timestamp = .{ .new = .zero },
+            .modify_timestamp = .{ .new = .zero },
+        });
+    }
+    const extra_name = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.img";
+    const extra_path = try std.fs.path.join(std.testing.allocator, &.{ root, extra_name });
+    defer std.testing.allocator.free(extra_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = extra_path, .data = "complete-extra" });
+    try cache.prune();
+    try std.testing.expectEqual(@as(usize, max_files), try testImageCount(std.testing.io, root));
     _ = try std.Io.Dir.cwd().statFile(std.testing.io, published.pathSlice(), .{});
 }

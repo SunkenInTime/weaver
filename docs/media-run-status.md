@@ -44,6 +44,10 @@ This run will not change the submodule pointer.
   `ImageTooLarge` failure with bounded host-side normalization. Viewed settled,
   track-change, and pause captures plus per-element results are in
   `docs/media-evidence/pr02-visual.md`.
+- Layer 02 static-image ReleaseFast A/B: PASS. Parent and layer 02 each used
+  0.000 ms process CPU over matched ~60.014 s windows after 41–42 s settles.
+  Private memory ended at 42.684 MiB parent / 41.570 MiB layer 02. Raw values
+  and the bounded claim are recorded with the visual evidence.
 
 ## Blockers and unverified gates
 
@@ -58,9 +62,9 @@ Layer 02 implementation is in progress. The host now consumes coalesced SMTC
 events, publishes bounded artwork through the host-owned hash cache, and emits
 optional `artPath`; the runtime has canonical art-root containment and dynamic
 same-ID image re-registration. Automated and live visual gates pass; the
-required static-image parent/head idle A/B is active.
+required static-image parent/head idle A/B also passes.
 
 ## Next executable task
 
-Measure parent/head idle CPU and private memory with the identical
-`examples/styling-images` widget, then finalize the layer-02 draft PR.
+Rerun the final layer-02 green matrix at the evidence head, open the draft PR
+against layer 01, then branch layer 03 for duplex transport.
