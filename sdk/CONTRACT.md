@@ -111,6 +111,8 @@ loud, dated refusal instead of a silent nothing.
 
 ## `class` utilities (M1 set)
 
+Utilities apply left to right; the last conflicting utility wins.
+
 Tailwind semantics and scale (1 unit = 4px). Arbitrary values in brackets.
 Anything not in this table is a check-time error naming the nearest supported
 utility.
@@ -291,3 +293,34 @@ registers a developer workspace by reference (ADR 0011).
 weaverd supervises widget processes (crash → restart with backoff, 3 strikes
 → stopped + noted in status), fans out providers over local IPC, and samples
 per-widget cost. Registrations persist across host restarts.
+
+---
+
+# Styling breadth amendment (v0.4)
+
+Everything above stands. This section grows with the numbered styling stack;
+utilities not yet listed here remain loud `weaver check` errors.
+
+## PR 01: spacing and sizing
+
+The scale remains 1 unit = 4 logical px. Bracketed pixel values are accepted
+where shown. Utilities are applied left-to-right; a later utility wins on the
+same side or axis. Negative margins are supported; padding and sizes are
+non-negative.
+
+| Utility | Maps to |
+|---|---|
+| `p-N`, `p-[Npx]` | uniform padding |
+| `px/py/pt/pr/pb/pl-N`, bracketed `Npx` forms | directional padding; side values override uniform padding |
+| `m/mx/my/mt/mr/mb/ml-N`, bracketed `Npx` forms, optional leading `-` | external per-side margin |
+| `w-N`, `h-N`, bracketed `Npx` forms | fixed width or height |
+| `w-full`, `h-full`, `w-A/B`, `h-A/B` | percentage of the parent's content box |
+| `w-auto`, `h-auto` | clear an earlier size on that axis |
+| `size-N`, `size-[Npx]`, `size-full` | set both axes together |
+| `min-w/max-w/min-h/max-h-N`, bracketed `Npx` forms | per-axis size bounds |
+| `aspect-square`, `aspect-video`, `aspect-[W/H]`, `aspect-[N]` | derive the missing axis when exactly one axis is definite |
+| `aspect-auto` | clear an earlier aspect ratio |
+
+Percentage sizes are calculated from the parent's content box before margins;
+min/max bounds then clamp the laid-out frame. `aspect-*` does nothing when both
+axes are definite or both are automatic.

@@ -46,6 +46,14 @@ pub const Node = struct {
     text: [max_text_bytes]u8 = @splat(0),
     text_len: usize = 0,
     padding: f32 = 0,
+    padding_top: f32 = -1,
+    padding_right: f32 = -1,
+    padding_bottom: f32 = -1,
+    padding_left: f32 = -1,
+    margin_top: f32 = 0,
+    margin_right: f32 = 0,
+    margin_bottom: f32 = 0,
+    margin_left: f32 = 0,
     gap: f32 = 0,
     radius: f32 = 0,
     opacity: f32 = 1,
@@ -56,8 +64,17 @@ pub const Node = struct {
     cross_align: CrossAlign = .start,
     main_align: MainAlign = .start,
     grow: f32 = 0,
-    width: f32 = 0,
-    height: f32 = 0,
+    /// -1 is unset; zero is an authored preferred size.
+    width: f32 = -1,
+    height: f32 = -1,
+    min_width: f32 = 0,
+    min_height: f32 = 0,
+    /// -1 is unbounded; zero is an authored clamp.
+    max_width: f32 = -1,
+    max_height: f32 = -1,
+    width_percent: f32 = 0,
+    height_percent: f32 = 0,
+    aspect_ratio: f32 = 0,
     truncate: bool = false,
     handles_press: bool = false,
     handles_change: bool = false,
@@ -91,6 +108,10 @@ pub const Error = error{
 
 pub const CanvasState = struct {
     owner: NodeId = 0,
+    layout_width: f32 = 0,
+    layout_height: f32 = 0,
+    command_layout_width: f32 = 0,
+    command_layout_height: f32 = 0,
     commands: [max_canvas_commands]native_sdk.canvas.ImmediateCanvasCommand = undefined,
     command_count: usize = 0,
     points: [max_canvas_points]native_sdk.geometry.PointF = undefined,
@@ -172,8 +193,65 @@ pub const Tree = struct {
 
     pub fn setNumberProp(self: *Tree, id: NodeId, key: []const u8, value: f32) Error!void {
         const target = try self.node(id);
-        const slot: *f32 = if (std.mem.eql(u8, key, "padding")) &target.padding else if (std.mem.eql(u8, key, "gap")) &target.gap else if (std.mem.eql(u8, key, "radius")) &target.radius else if (std.mem.eql(u8, key, "opacity")) &target.opacity else if (std.mem.eql(u8, key, "fontScale")) &target.font_scale else if (std.mem.eql(u8, key, "grow")) &target.grow else if (std.mem.eql(u8, key, "width")) &target.width else if (std.mem.eql(u8, key, "height")) &target.height else return error.InvalidProperty;
-        const normalized = if (std.mem.eql(u8, key, "opacity")) std.math.clamp(value, 0, 1) else @max(value, 0);
+        const slot: *f32 = if (std.mem.eql(u8, key, "padding"))
+            &target.padding
+        else if (std.mem.eql(u8, key, "paddingTop"))
+            &target.padding_top
+        else if (std.mem.eql(u8, key, "paddingRight"))
+            &target.padding_right
+        else if (std.mem.eql(u8, key, "paddingBottom"))
+            &target.padding_bottom
+        else if (std.mem.eql(u8, key, "paddingLeft"))
+            &target.padding_left
+        else if (std.mem.eql(u8, key, "marginTop"))
+            &target.margin_top
+        else if (std.mem.eql(u8, key, "marginRight"))
+            &target.margin_right
+        else if (std.mem.eql(u8, key, "marginBottom"))
+            &target.margin_bottom
+        else if (std.mem.eql(u8, key, "marginLeft"))
+            &target.margin_left
+        else if (std.mem.eql(u8, key, "gap"))
+            &target.gap
+        else if (std.mem.eql(u8, key, "radius"))
+            &target.radius
+        else if (std.mem.eql(u8, key, "opacity"))
+            &target.opacity
+        else if (std.mem.eql(u8, key, "fontScale"))
+            &target.font_scale
+        else if (std.mem.eql(u8, key, "grow"))
+            &target.grow
+        else if (std.mem.eql(u8, key, "width"))
+            &target.width
+        else if (std.mem.eql(u8, key, "height"))
+            &target.height
+        else if (std.mem.eql(u8, key, "minWidth"))
+            &target.min_width
+        else if (std.mem.eql(u8, key, "minHeight"))
+            &target.min_height
+        else if (std.mem.eql(u8, key, "maxWidth"))
+            &target.max_width
+        else if (std.mem.eql(u8, key, "maxHeight"))
+            &target.max_height
+        else if (std.mem.eql(u8, key, "widthPercent"))
+            &target.width_percent
+        else if (std.mem.eql(u8, key, "heightPercent"))
+            &target.height_percent
+        else if (std.mem.eql(u8, key, "aspectRatio"))
+            &target.aspect_ratio
+        else
+            return error.InvalidProperty;
+        const normalized = if (std.mem.eql(u8, key, "opacity"))
+            std.math.clamp(value, 0, 1)
+        else if (std.mem.startsWith(u8, key, "margin"))
+            value
+        else if (std.mem.startsWith(u8, key, "padding") and !std.mem.eql(u8, key, "padding"))
+            @max(value, -1)
+        else if (std.mem.eql(u8, key, "width") or std.mem.eql(u8, key, "height") or
+            std.mem.eql(u8, key, "maxWidth") or std.mem.eql(u8, key, "maxHeight"))
+            @max(value, -1)
+        else
+            @max(value, 0);
         if (slot.* == normalized) return;
         slot.* = normalized;
         self.changed();
@@ -262,6 +340,19 @@ pub const Tree = struct {
         return &self.canvases[target.canvas_slot - 1];
     }
 
+    /// Layout feedback is runtime metadata, not an authored tree mutation.
+    /// Keep it in the canvas side table so responsive canvases receive their
+    /// actual content-box dimensions without growing every retained node.
+    pub fn setCanvasLayout(self: *Tree, id: NodeId, width: f32, height: f32) Error!bool {
+        const canvas = try self.canvasState(id);
+        const next_width = @max(width, 0);
+        const next_height = @max(height, 0);
+        if (canvas.layout_width == next_width and canvas.layout_height == next_height) return false;
+        canvas.layout_width = next_width;
+        canvas.layout_height = next_height;
+        return true;
+    }
+
     /// Decode the SDK's bounded Float64 wire batch into fork-native drawing
     /// commands. Colors arrive as exact packed RGBA integers; geometry is
     /// narrowed once here, so the frame renderer never parses JS values.
@@ -269,7 +360,8 @@ pub const Tree = struct {
         if (wire.len > max_canvas_wire_values) return error.InvalidCanvasBatch;
         const fingerprint = std.hash.Wyhash.hash(0x6361_6e76_6173, std.mem.sliceAsBytes(wire));
         const canvas = try self.canvasState(id);
-        if (canvas.fingerprint == fingerprint and canvas.command_count > 0) return;
+        if (canvas.fingerprint == fingerprint and canvas.command_count > 0 and
+            canvas.command_layout_width == canvas.layout_width and canvas.command_layout_height == canvas.layout_height) return;
         canvas.command_count = 0;
         canvas.point_count = 0;
         var cursor: usize = 0;
@@ -282,7 +374,12 @@ pub const Tree = struct {
                     if (color.a > 0) {
                         const node_value = try self.nodeConst(id);
                         try appendCanvasCommand(canvas, .{ .fill_rect = .{
-                            .rect = native_sdk.geometry.RectF.init(0, 0, node_value.width, node_value.height),
+                            .rect = native_sdk.geometry.RectF.init(
+                                0,
+                                0,
+                                if (canvas.layout_width > 0) canvas.layout_width else @max(node_value.width, 0),
+                                if (canvas.layout_height > 0) canvas.layout_height else @max(node_value.height, 0),
+                            ),
                             .color = color,
                         } });
                     }
@@ -324,6 +421,8 @@ pub const Tree = struct {
             }
         }
         canvas.fingerprint = fingerprint;
+        canvas.command_layout_width = canvas.layout_width;
+        canvas.command_layout_height = canvas.layout_height;
         self.changed();
     }
 
@@ -482,20 +581,60 @@ test "tree owns a bounded hierarchy" {
     try std.testing.expectError(error.InvalidNode, tree.node(label));
 }
 
+test "tree stores styling breadth layout wire properties" {
+    var tree: Tree = .{};
+    const id = try tree.createNode(.panel);
+    try tree.setNumberProp(id, "paddingTop", 0);
+    try tree.setNumberProp(id, "paddingRight", 12);
+    try tree.setNumberProp(id, "marginLeft", -8);
+    try tree.setNumberProp(id, "minWidth", 40);
+    try tree.setNumberProp(id, "maxHeight", 120);
+    try tree.setNumberProp(id, "widthPercent", 50);
+    try tree.setNumberProp(id, "aspectRatio", 4.0 / 3.0);
+    try tree.setNumberProp(id, "width", 0);
+    try tree.setNumberProp(id, "maxWidth", 0);
+    const node = try tree.nodeConst(id);
+    try std.testing.expectEqual(@as(f32, 0), node.padding_top);
+    try std.testing.expectEqual(@as(f32, 12), node.padding_right);
+    try std.testing.expectEqual(@as(f32, -8), node.margin_left);
+    try std.testing.expectEqual(@as(f32, 40), node.min_width);
+    try std.testing.expectEqual(@as(f32, 120), node.max_height);
+    try std.testing.expectEqual(@as(f32, 50), node.width_percent);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0 / 3.0), node.aspect_ratio, 0.0001);
+    try std.testing.expectEqual(@as(f32, 0), node.width);
+    try std.testing.expectEqual(@as(f32, 0), node.max_width);
+    try tree.setNumberProp(id, "paddingTop", -1);
+    try std.testing.expectEqual(@as(f32, -1), (try tree.nodeConst(id)).padding_top);
+}
+
 test "canvas wire decodes packed colors and polyline points" {
     var tree: Tree = .{};
     const id = try tree.createNode(.canvas);
     try tree.setNumberProp(id, "width", 64);
     try tree.setNumberProp(id, "height", 32);
-    try tree.setCanvasCommands(id, &.{
-        0, 0x11223344,
-        1, 1, 2, 3, 4, 0xff00ffff,
-        5, 2, 0xffffffff, 3, 0, 0, 4, 8, 9, 3,
-    });
+    const wire = [_]f64{
+        0,          0x11223344,
+        1,          1,
+        2,          3,
+        4,          0xff00ffff,
+        5,          2,
+        0xffffffff, 3,
+        0,          0,
+        4,          8,
+        9,          3,
+    };
+    try tree.setCanvasCommands(id, &wire);
     const canvas = try tree.canvasStateConst(id);
     try std.testing.expectEqual(@as(usize, 3), canvas.command_count);
     try std.testing.expectEqual(@as(usize, 3), canvas.point_count);
     try std.testing.expectEqual(@as(f32, 64), canvas.commands[0].fill_rect.rect.width);
     try std.testing.expectApproxEqAbs(@as(f32, 0x11) / 255, canvas.commands[0].fill_rect.color.r, 0.0001);
     try std.testing.expectEqual(@as(usize, 3), canvas.commands[2].polyline.points.len);
+    try std.testing.expect(try tree.setCanvasLayout(id, 96, 48));
+    try std.testing.expect(!(try tree.setCanvasLayout(id, 96, 48)));
+    try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).layout_width);
+    try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).layout_height);
+    try tree.setCanvasCommands(id, &wire);
+    try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.width);
+    try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.height);
 }

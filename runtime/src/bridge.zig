@@ -15,6 +15,7 @@ pub const State = struct {
     next_timer_id: u64 = 1,
     event_callback: c.JSValue = qjs.undefinedValue(),
     provider_callback: c.JSValue = qjs.undefinedValue(),
+    canvas_resize_callback: c.JSValue = qjs.undefinedValue(),
     canvas_frames: [max_canvas_frames]CanvasFrameSlot = [_]CanvasFrameSlot{.{}} ** max_canvas_frames,
     fetches: [max_fetches]FetchSlot = [_]FetchSlot{.{}} ** max_fetches,
 };
@@ -72,6 +73,7 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "clearInterval", clearInterval, 1);
     try setFunction(ctx, native, "onTimer", onTimer, 2);
     try setFunction(ctx, native, "setCanvasCommands", setCanvasCommands, 2);
+    try setFunction(ctx, native, "onCanvasResize", onCanvasResize, 1);
     try setFunction(ctx, native, "onCanvasFrame", onCanvasFrame, 2);
     try setFunction(ctx, native, "clearCanvasFrame", clearCanvasFrame, 1);
     try setFunction(ctx, native, "fetch", fetch, 4);
@@ -99,6 +101,7 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
     }
     c.JS_FreeValue(ctx, bridge_state.event_callback);
     c.JS_FreeValue(ctx, bridge_state.provider_callback);
+    c.JS_FreeValue(ctx, bridge_state.canvas_resize_callback);
     for (&bridge_state.fetches) |*slot| {
         if (slot.thread != null) slot.cancelled.store(1, .release);
     }
@@ -418,6 +421,15 @@ fn onCanvasFrame(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c
     return qjs.undefinedValue();
 }
 
+fn onCanvasResize(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 1 or !c.JS_IsFunction(js, argv[0])) return fail(js, "onCanvasResize expects one function");
+    const bridge_state = state(js);
+    c.JS_FreeValue(js, bridge_state.canvas_resize_callback);
+    bridge_state.canvas_resize_callback = c.JS_DupValue(js, argv[0]);
+    return qjs.undefinedValue();
+}
+
 fn clearCanvasFrame(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 1) return fail(js, "clearCanvasFrame expects one id");
@@ -448,6 +460,20 @@ pub fn dispatchCanvasFrames(ctx: *c.JSContext, bridge_state: *State, timestamp_n
         if (!succeeded) return false;
     }
     return true;
+}
+
+pub fn dispatchCanvasResize(ctx: *c.JSContext, bridge_state: *State, node_id: tree_mod.NodeId, width: f32, height: f32) bool {
+    if (!c.JS_IsFunction(ctx, bridge_state.canvas_resize_callback)) return true;
+    var arguments = [_]c.JSValue{
+        c.JS_NewUint32(ctx, node_id),
+        c.JS_NewFloat64(ctx, width),
+        c.JS_NewFloat64(ctx, height),
+    };
+    defer for (&arguments) |argument| c.JS_FreeValue(ctx, argument);
+    const result = c.JS_Call(ctx, bridge_state.canvas_resize_callback, qjs.undefinedValue(), arguments.len, &arguments);
+    const succeeded = !c.JS_IsException(result);
+    c.JS_FreeValue(ctx, result);
+    return succeeded;
 }
 
 /// `wfetch` uses WinHTTP on Windows and ephemeral NSURLSession on macOS. The

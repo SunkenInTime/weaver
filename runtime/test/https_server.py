@@ -79,7 +79,10 @@ def main() -> None:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(args.cert, args.key)
     server = TLSServer(("127.0.0.1", 0), Handler, context)
-    Path(args.port_file).write_text(str(server.server_port), encoding="ascii")
+    port_file = Path(args.port_file)
+    port_file_tmp = port_file.with_suffix(".tmp")
+    port_file_tmp.write_text(str(server.server_port), encoding="ascii")
+    port_file_tmp.replace(port_file)
     server.serve_forever(poll_interval=0.05)
 
 

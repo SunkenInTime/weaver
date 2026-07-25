@@ -133,6 +133,13 @@ pub const Engine = struct {
         try self.pumpJobs();
     }
 
+    pub fn fireCanvasResize(self: *Engine, node_id: tree_mod.NodeId, width: f32, height: f32) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        if (!bridge.dispatchCanvasResize(self.context, &self.bridge_state, node_id, width, height)) return self.reportException();
+        try self.pumpJobs();
+    }
+
     pub fn hasActiveFetches(self: *const Engine) bool {
         return bridge.hasActiveFetches(&self.bridge_state);
     }
