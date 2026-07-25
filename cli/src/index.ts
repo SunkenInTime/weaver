@@ -503,9 +503,9 @@ function showLogs(name: string, follow: boolean): Promise<void> | void {
   const oldPath = `${path}.old`;
   const text = [oldPath, path].filter(existsSync).map((file) => readFileSync(file, "utf8")).join("");
   const lines = text.split(/\r?\n/).filter((line) => line.length > 0).slice(-200);
+  const follower = follow ? followLogFile(name, true) : undefined;
   if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
-  if (!follow) return;
-  const follower = followLogFile(name, true);
+  if (!follower) return;
   return new Promise<void>((resolvePromise) => {
     const stop = (): void => { follower.stop(); resolvePromise(); };
     process.once("SIGINT", stop);
