@@ -4,6 +4,7 @@ const art_cache = @import("art_cache.zig");
 const audio = @import("audio.zig");
 const backoff = @import("backoff.zig");
 const media = @import("media.zig");
+const media_commands = @import("media_commands.zig");
 const providers = @import("providers.zig");
 const provider_protocol = @import("provider_protocol.zig");
 const registry = @import("registry.zig");
@@ -34,6 +35,9 @@ const WindowsSlotState = struct {
     process: c.HANDLE = null,
     pid: u32 = 0,
     pipe: c.HANDLE = invalid_handle,
+    command_thread: ?std.Thread = null,
+    command_queue: media_commands.Queue = .{},
+    command_rate: media_commands.RateLimiter = .{},
     previous_process_ticks: u64 = 0,
     previous_sample_ms: u64 = 0,
     private_samples: [15]u64 = [_]u64{0} ** 15,
@@ -168,19 +172,20 @@ const Host = struct {
         defer self.allocator.free(manifest_bytes);
         const Manifest = struct {
             subscribe: []const []const u8 = &.{},
+            capabilities: []const []const u8 = &.{},
             renderBackend: []const u8 = "software",
         };
         const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
         defer manifest.deinit();
-        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.renderBackend, self.force_software);
+        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.capabilities, manifest.value.renderBackend, self.force_software);
         if (slot.wants_gpu) self.ensureRenderer(now_ms) catch {};
         var pipe_name_buffer: [256]u8 = undefined;
         var pipe_name: []const u8 = &.{};
-        if (slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media) {
+        if (slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media or slot.wants_media_transport) {
             pipe_name = try std.fmt.bufPrint(&pipe_name_buffer, "\\\\.\\pipe\\weaver-{d}-{x}", .{ c.GetCurrentProcessId(), std.hash.Wyhash.hash(now_ms, slot.name()) });
             const pipe_name_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, pipe_name);
             defer self.allocator.free(pipe_name_w);
-            slot.platform.pipe = c.CreateNamedPipeW(pipe_name_w.ptr, c.PIPE_ACCESS_OUTBOUND, c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_NOWAIT, 1, 8192, 8192, 0, null);
+            slot.platform.pipe = c.CreateNamedPipeW(pipe_name_w.ptr, c.PIPE_ACCESS_DUPLEX, c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_NOWAIT, 1, 8192, 8192, 0, null);
             if (slot.platform.pipe == invalid_handle) return error.CreatePipeFailed;
         }
         errdefer self.closePipe(slot);
@@ -234,6 +239,11 @@ const Host = struct {
                 _ = c.TerminateProcess(slot.platform.process, 1);
                 return error.ConnectPipeFailed;
             }
+            slot.platform.command_thread = try std.Thread.spawn(
+                .{ .stack_size = 256 * 1024 },
+                commandReaderMain,
+                .{&slot.platform},
+            );
         }
         supervisor.markRunning(slot, now_ms, self.artifactMtime(slot.source()));
         slot.platform.previous_process_ticks = processTicks(slot.platform.process);
@@ -339,10 +349,14 @@ const Host = struct {
 
     fn closePipe(_: *Host, slot: *Slot) void {
         if (slot.platform.pipe == invalid_handle) return;
-        _ = c.FlushFileBuffers(slot.platform.pipe);
+        _ = c.CancelIoEx(slot.platform.pipe, null);
         _ = c.DisconnectNamedPipe(slot.platform.pipe);
         _ = c.CloseHandle(slot.platform.pipe);
         slot.platform.pipe = invalid_handle;
+        if (slot.platform.command_thread) |thread| thread.join();
+        slot.platform.command_thread = null;
+        slot.platform.command_queue = .{};
+        slot.platform.command_rate = .{};
     }
 
     fn sampleCosts(self: *Host, now_ms: u64) void {
@@ -419,6 +433,14 @@ const Host = struct {
         return supervisor.hasSubscription(&self.slots, .media, self);
     }
 
+    fn hasMediaActivity(self: *const Host) bool {
+        if (self.hasMediaSubscribers()) return true;
+        for (self.slots) |slot| {
+            if (slot.used and slot.enabled and slot.wants_media_transport) return true;
+        }
+        return false;
+    }
+
     fn sampleAudio(self: *Host, now_ms: u64) void {
         const active = self.hasAudioSubscribers();
         self.audio_provider.setActive(active, now_ms);
@@ -435,7 +457,7 @@ const Host = struct {
     }
 
     fn sampleMedia(self: *Host, now_ms: u64) void {
-        const active = self.hasMediaSubscribers();
+        const active = self.hasMediaActivity();
         self.media_provider.setActive(active, now_ms);
         if (!active) return;
         const frame = self.media_provider.poll(now_ms) orelse return;
@@ -456,6 +478,26 @@ const Host = struct {
         if (delivered) self.media_pipe_frames += 1;
         @memcpy(self.previous_media[0..encoded.len], encoded);
         self.previous_media_len = encoded.len;
+    }
+
+    fn drainMediaCommands(self: *Host, now_ms: u64) void {
+        var ack_buffer: [64]u8 = undefined;
+        for (&self.slots) |*slot| {
+            if (slot.platform.pipe == invalid_handle) continue;
+            while (slot.platform.command_queue.takeNack()) |id| {
+                const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
+                _ = writePipe(slot.platform.pipe, ack);
+            }
+            while (slot.platform.command_queue.take()) |command| {
+                const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
+                const ok = allowed and self.media_provider.command(command.verb, command.seek_ms, now_ms);
+                const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
+                _ = writePipe(slot.platform.pipe, ack);
+            }
+            if (slot.platform.command_queue.malformed.swap(false, .acq_rel)) {
+                std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
+            }
+        }
     }
 
     fn writeStatus(self: *Host, now_ms: u64) void {
@@ -666,6 +708,7 @@ fn run(init: std.process.Init) !void {
         }
         const now = c.GetTickCount64();
         host.supervise(now);
+        host.drainMediaCommands(now);
         host.sampleAudio(now);
         host.sampleMedia(now);
         if (now >= next_provider_ms) {
@@ -756,6 +799,32 @@ fn collectThreadCounts(host: *const Host, slot_counts: *[max_widgets]u32, render
             if (slot.platform.pid != 0 and entry.th32OwnerProcessID == slot.platform.pid) slot_counts[index] += 1;
         }
         if (c.Thread32Next(snapshot, &entry) == 0) break;
+    }
+}
+
+fn commandReaderMain(platform: *WindowsSlotState) void {
+    var pending: [media_commands.max_line_bytes * 2]u8 = undefined;
+    var pending_len: usize = 0;
+    while (true) {
+        if (pending_len == pending.len) {
+            platform.command_queue.malformed.store(true, .release);
+            return;
+        }
+        var read: c.DWORD = 0;
+        if (c.ReadFile(platform.pipe, pending[pending_len..].ptr, @intCast(pending.len - pending_len), &read, null) == 0 or read == 0) {
+            if (pending_len != 0) platform.command_queue.malformed.store(true, .release);
+            return;
+        }
+        pending_len += read;
+        var start: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, pending[0..pending_len], start, '\n')) |end| {
+            platform.command_queue.pushLine(pending[start..end]);
+            start = end + 1;
+        }
+        if (start > 0) {
+            std.mem.copyForwards(u8, pending[0 .. pending_len - start], pending[start..pending_len]);
+            pending_len -= start;
+        }
     }
 }
 

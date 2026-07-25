@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const media_protocol = @import("media_protocol.zig");
+const provider_protocol = @import("provider_protocol.zig");
 
 const implementation = switch (builtin.os.tag) {
     .windows => @import("provider_windows.zig"),
@@ -8,6 +9,7 @@ const implementation = switch (builtin.os.tag) {
 };
 
 pub const Client = implementation.Client;
+pub const Ack = provider_protocol.Ack;
 pub const max_line_bytes = media_protocol.max_media_frame_bytes;
 
 test "provider client is inert only without an endpoint" {
@@ -15,5 +17,9 @@ test "provider client is inert only without an endpoint" {
     var client: Client = .{};
     try client.init(std.testing.io, null);
     defer client.deinit();
-    try std.testing.expect(!client.available);
+    try std.testing.expect(!client.isAvailable());
+}
+
+test {
+    _ = provider_protocol;
 }

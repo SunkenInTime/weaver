@@ -17,7 +17,7 @@ export interface WidgetConfig {
   clickThrough?: boolean;
   subscribe?: ProviderName[];
   origins?: string[];
-  capabilities?: never[];
+  capabilities?: ("media-transport")[];
 }
 
 export interface WidgetModule {
@@ -48,6 +48,13 @@ export interface MediaData {
   artPath?: string;
   positionMs: number;
   durationMs: number;
+}
+export interface MediaTransport {
+  play(): Promise<boolean>;
+  pause(): Promise<boolean>;
+  next(): Promise<boolean>;
+  previous(): Promise<boolean>;
+  seek(ms: number): Promise<boolean>;
 }
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
@@ -317,6 +324,42 @@ export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData
   }));
   useEffect(() => hostProviders.subscribeMedia(setValue), []);
   return value;
+}
+
+let nextMediaCommandId = 1;
+
+function sendMediaCommand(verb: "play" | "pause" | "next" | "previous" | "seek", seekMs?: number): Promise<boolean> {
+  if (!native.mediaCommand) return Promise.reject(new Error("MediaChannelUnavailable"));
+  if (nextMediaCommandId > Number.MAX_SAFE_INTEGER) return Promise.reject(new Error("MediaCommandIdExhausted"));
+  const id = nextMediaCommandId++;
+  const command = seekMs === undefined
+    ? { command: "media", verb, id }
+    : { command: "media", verb, seekMs, id };
+  return new Promise<boolean>((resolve, reject) => {
+    native.mediaCommand!(JSON.stringify(command), (ok, error) => {
+      if (error) reject(new Error(error));
+      else resolve(ok === true);
+    });
+  });
+}
+
+const mediaTransport: MediaTransport = {
+  play: () => sendMediaCommand("play"),
+  pause: () => sendMediaCommand("pause"),
+  next: () => sendMediaCommand("next"),
+  previous: () => sendMediaCommand("previous"),
+  seek: (ms) => Number.isFinite(ms) && Number.isInteger(ms) && ms >= 0
+    ? sendMediaCommand("seek", ms)
+    : Promise.reject(new Error("seekMs must be a finite non-negative integer")),
+};
+
+export function useMediaTransport(): MediaTransport {
+  currentComponent("useMediaTransport");
+  if (!activeConfig?.capabilities?.includes("media-transport")) {
+    throw new Error('useMediaTransport() requires capabilities: ["media-transport"] in the widget config');
+  }
+  if (!native.mediaCommand) throw new Error("MediaChannelUnavailable");
+  return mediaTransport;
 }
 
 let storageValues: Record<string, unknown> | null = null;
@@ -815,7 +858,9 @@ function validateRuntimeConfig(config: WidgetConfig, component: Component): void
     throw new Error("widget config.size must contain two positive numbers");
   }
   if (typeof component !== "function") throw new Error("widget component must be a function");
-  if (config.capabilities && config.capabilities.length > 0) throw new Error("Widget capabilities are not exposed in M2a; capabilities must be empty");
+  if (config.capabilities && config.capabilities.some((capability) => capability !== "media-transport")) {
+    throw new Error('Widget capabilities support only "media-transport"');
+  }
 }
 
 function parseHotSwapSeed(value: unknown): HotSwapSlot[] | null {

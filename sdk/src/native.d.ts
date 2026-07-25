@@ -15,6 +15,7 @@ interface WeaverNativeBridge {
   onEvent(callback: (id: number, kind: "press" | "doublepress" | "rightpress" | "change", payload: number | NativePressPayload | null) => void): void;
   hostAvailable(): boolean;
   onProvider(callback: (jsonLine: string) => void): void;
+  mediaCommand?(json: string, callback: (ok: boolean | null, error: string | null) => void): void;
   setInterval(ms: number): number;
   clearInterval(id: number): void;
   onTimer(id: number, callback: (timestampSeconds?: number) => void): void;

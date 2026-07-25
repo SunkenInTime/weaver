@@ -7,8 +7,8 @@ Last updated: 2026-07-25
 | Layer | Branch | Parent | State |
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`bffe5c2`) |
-| 03/05 | `media/03-transport` | layer 02 | NOT STARTED |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`5605dd1`) |
+| 03/05 | `media/03-transport` | layer 02 | IN PROGRESS; automated gates green |
 | 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
 | 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
 
@@ -49,6 +49,17 @@ This run will not change the submodule pointer.
   Private memory ended at 42.684 MiB parent / 41.570 MiB layer 02. Raw values
   and the bounded claim are recorded with the visual evidence.
 
+- Layer 03 focused SDK/CLI tests: PASS after fixing two recovered-work
+  integration defects (missing SDK export and a misplaced test fixture).
+- Layer 03 `npm test`: PASS, 63/63 tests.
+- Layer 03 `npm run typecheck`: PASS.
+- Layer 03 `runtime`: `zig build test -Dweb-layer=exclude -Dtrace=off`: PASS.
+  A capability-wall test forces the conditional native bridge path to compile
+  and proves undeclared runtimes receive no `native.mediaCommand`.
+- Layer 03 `host`: `zig build test`: PASS.
+- Layer 03 production builds: runtime and host PASS.
+- Layer 03 example: `weaver check examples/now-playing`: PASS.
+
 ## Blockers and unverified gates
 
 - None for the Windows stack.
@@ -58,12 +69,13 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 02 is committed, pushed, and open as draft PR
-`https://github.com/SunkenInTime/weaver/pull/33`. Automated, live visual, and
-static-image idle A/B gates pass.
+Layer 03 duplex transport, acknowledgement demultiplexing, Windows SMTC verb
+dispatch, capability enforcement, SDK hook, static symbol gate, and
+now-playing play/pause control are implemented. All automated and production
+build gates pass; live command and visual verification remain.
 
 ## Next executable task
 
-Create `media/03-transport` from layer 02 and implement the frozen duplex
-channel, ack demultiplexing, verb semantics, capability gate, SDK transport
-hook, and Windows live controls.
+Commit and push the coherent layer-03 implementation checkpoint, then run the
+real-player command checks and binding visual gate. Fix any live defect before
+opening the layer-03 draft PR.

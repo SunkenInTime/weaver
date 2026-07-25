@@ -1,6 +1,7 @@
 const std = @import("std");
 const tree_mod = @import("tree.zig");
 const network = @import("network.zig");
+const media_pending = @import("media_pending.zig");
 const provider_mod = @import("provider.zig");
 const qjs = @import("qjs.zig");
 const storage_mod = @import("storage.zig");
@@ -11,6 +12,9 @@ pub const State = struct {
     storage: *storage_mod.Store,
     provider: *provider_mod.Client,
     origins: []const []const u8,
+    media_transport_enabled: bool = false,
+    media_tracker: media_pending.Tracker = .{},
+    media_callbacks: [max_media_pending]c.JSValue = [_]c.JSValue{qjs.undefinedValue()} ** max_media_pending,
     timers: [max_timers]TimerSlot = [_]TimerSlot{.{}} ** max_timers,
     next_timer_id: u64 = 1,
     event_callback: c.JSValue = qjs.undefinedValue(),
@@ -23,6 +27,8 @@ pub const State = struct {
 pub const max_timers: usize = 16;
 pub const max_fetches: usize = 4;
 pub const max_canvas_frames: usize = tree_mod.max_canvases;
+pub const max_media_pending: usize = media_pending.capacity;
+pub const media_ack_timeout_ms: u64 = media_pending.timeout_ms;
 
 pub const TimerSlot = struct {
     id: u64 = 0,
@@ -69,6 +75,7 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "onEvent", onEvent, 1);
     try setFunction(ctx, native, "hostAvailable", hostAvailable, 0);
     try setFunction(ctx, native, "onProvider", onProvider, 1);
+    if (bridge_state.media_transport_enabled) try setFunction(ctx, native, "mediaCommand", mediaCommand, 2);
     try setFunction(ctx, native, "setInterval", setInterval, 1);
     try setFunction(ctx, native, "clearInterval", clearInterval, 1);
     try setFunction(ctx, native, "onTimer", onTimer, 2);
@@ -91,6 +98,7 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
 }
 
 pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
+    settleAllMedia(ctx, bridge_state, "MediaCommandShutdown");
     for (&bridge_state.timers) |*timer| {
         c.JS_FreeValue(ctx, timer.callback);
         timer.* = .{};
@@ -234,7 +242,7 @@ fn onEvent(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
 fn hostAvailable(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 0) return fail(js, "hostAvailable expects no arguments");
-    return c.JS_NewBool(js, state(js).provider.available);
+    return c.JS_NewBool(js, state(js).provider.isAvailable());
 }
 
 /// One string callback is the complete host-provider capability. Keeping the
@@ -246,6 +254,63 @@ fn onProvider(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JS
     const bridge_state = state(js);
     c.JS_FreeValue(js, bridge_state.provider_callback);
     bridge_state.provider_callback = c.JS_DupValue(js, argv[0]);
+    return qjs.undefinedValue();
+}
+
+const MediaWireCommand = struct {
+    command: []const u8,
+    verb: []const u8,
+    seekMs: ?u64 = null,
+    id: u64,
+};
+
+fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 2 or !c.JS_IsFunction(js, argv[1])) return fail(js, "mediaCommand expects JSON and a callback");
+    const bridge_state = state(js);
+    if (!bridge_state.media_transport_enabled) return fail(js, "MediaTransportCapabilityRequired");
+    if (!bridge_state.provider.isAvailable()) return fail(js, "MediaChannelUnavailable");
+    const value = stringArg(js, argv[0]) catch return fail(js, "mediaCommand expects JSON and a callback");
+    defer c.JS_FreeCString(js, value.raw);
+    const parsed = std.json.parseFromSlice(MediaWireCommand, std.heap.page_allocator, value.bytes, .{
+        .ignore_unknown_fields = false,
+    }) catch return fail(js, "MalformedMediaCommand");
+    defer parsed.deinit();
+    const wire = parsed.value;
+    if (!std.mem.eql(u8, wire.command, "media") or wire.id == 0 or wire.id > 9_007_199_254_740_991) return fail(js, "MalformedMediaCommand");
+    const known_verb = std.mem.eql(u8, wire.verb, "play") or std.mem.eql(u8, wire.verb, "pause") or
+        std.mem.eql(u8, wire.verb, "next") or std.mem.eql(u8, wire.verb, "previous") or std.mem.eql(u8, wire.verb, "seek");
+    if (!known_verb or (std.mem.eql(u8, wire.verb, "seek") != (wire.seekMs != null))) return fail(js, "MalformedMediaCommand");
+    const id = bridge_state.provider.nextCommandId() catch return fail(js, "MediaCommandIdExhausted");
+    const now_ms = bridge_state.provider.nowMilliseconds();
+    const index = bridge_state.media_tracker.add(id, now_ms) catch |err| return switch (err) {
+        error.PendingLimit => fail(js, "MediaCommandPendingLimit"),
+        else => fail(js, "MalformedMediaCommand"),
+    };
+    var command_buffer: [256]u8 = undefined;
+    const command = if (wire.seekMs) |seek_ms|
+        std.fmt.bufPrint(
+            &command_buffer,
+            "{{\"command\":\"media\",\"verb\":\"{s}\",\"seekMs\":{d},\"id\":{d}}}",
+            .{ wire.verb, seek_ms, id },
+        ) catch {
+            bridge_state.media_tracker.remove(index);
+            return fail(js, "MalformedMediaCommand");
+        }
+    else
+        std.fmt.bufPrint(
+            &command_buffer,
+            "{{\"command\":\"media\",\"verb\":\"{s}\",\"id\":{d}}}",
+            .{ wire.verb, id },
+        ) catch {
+            bridge_state.media_tracker.remove(index);
+            return fail(js, "MalformedMediaCommand");
+        };
+    bridge_state.provider.send(command) catch {
+        bridge_state.media_tracker.remove(index);
+        return fail(js, "MediaChannelUnavailable");
+    };
+    bridge_state.media_callbacks[index] = c.JS_DupValue(js, argv[1]);
     return qjs.undefinedValue();
 }
 
@@ -738,6 +803,50 @@ pub fn dispatchProvider(ctx: *c.JSContext, bridge_state: *State, line: []const u
     return succeeded;
 }
 
+fn settleMedia(ctx: *c.JSContext, bridge_state: *State, index: usize, ok: ?bool, error_name: ?[]const u8) bool {
+    if (bridge_state.media_tracker.slots[index].id == 0) return true;
+    bridge_state.media_tracker.remove(index);
+    const callback = bridge_state.media_callbacks[index];
+    bridge_state.media_callbacks[index] = qjs.undefinedValue();
+    defer c.JS_FreeValue(ctx, callback);
+    const ok_value = if (ok) |value| c.JS_NewBool(ctx, value) else qjs.nullValue();
+    defer c.JS_FreeValue(ctx, ok_value);
+    const error_value = if (error_name) |name| c.JS_NewStringLen(ctx, name.ptr, name.len) else qjs.nullValue();
+    defer c.JS_FreeValue(ctx, error_value);
+    var arguments = [_]c.JSValue{ ok_value, error_value };
+    const result = c.JS_Call(ctx, callback, qjs.undefinedValue(), arguments.len, &arguments);
+    const succeeded = !c.JS_IsException(result);
+    c.JS_FreeValue(ctx, result);
+    return succeeded;
+}
+
+fn settleAllMedia(ctx: *c.JSContext, bridge_state: *State, error_name: []const u8) void {
+    for (0..max_media_pending) |index| _ = settleMedia(ctx, bridge_state, index, null, error_name);
+}
+
+/// Ack delivery shares the provider app-loop turn but never shares the
+/// provider frame queue or installs another JS dispatcher.
+pub fn dispatchMediaAcks(ctx: *c.JSContext, bridge_state: *State) bool {
+    if (bridge_state.provider.protocolFailed()) {
+        settleAllMedia(ctx, bridge_state, "MalformedMediaAck");
+        return true;
+    }
+    while (bridge_state.provider.takeAck()) |ack| {
+        const index = bridge_state.media_tracker.indexOf(ack.id) orelse continue;
+        if (!settleMedia(ctx, bridge_state, index, ack.ok, null)) return false;
+    }
+    if (bridge_state.provider.isDisconnected()) {
+        settleAllMedia(ctx, bridge_state, "MediaChannelDisconnected");
+        return true;
+    }
+    const now_ms = bridge_state.provider.nowMilliseconds();
+    for (0..max_media_pending) |index| {
+        if (bridge_state.media_tracker.expired(index, now_ms) and
+            !settleMedia(ctx, bridge_state, index, null, "MediaCommandTimeout")) return false;
+    }
+    return true;
+}
+
 fn log(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 1) return fail(js, "log expects one string");
@@ -806,4 +915,34 @@ test "packed shadow properties accept bounded tuples and reject malformed values
     try std.testing.expect(parseBoxShadow("0 2 -4 0 #000000FF") == null);
     try std.testing.expect(parseBoxShadow("0 2 4 #000000FF") == null);
     try std.testing.expect(parseTextShadow("0 2 4 1 #000000FF") == null);
+}
+
+test "native mediaCommand exists only for a declared runtime capability" {
+    const Probe = struct {
+        fn hasMediaCommand(enabled: bool) !bool {
+            const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
+            defer c.JS_FreeRuntime(runtime);
+            const context = c.JS_NewContext(runtime) orelse return error.OutOfMemory;
+            defer c.JS_FreeContext(context);
+            var bridge_state: State = .{
+                .tree = undefined,
+                .storage = undefined,
+                .provider = undefined,
+                .origins = &.{},
+                .media_transport_enabled = enabled,
+            };
+            try install(context, &bridge_state);
+            defer deinit(context, &bridge_state);
+            const global = c.JS_GetGlobalObject(context);
+            defer c.JS_FreeValue(context, global);
+            const native = c.JS_GetPropertyStr(context, global, "native");
+            defer c.JS_FreeValue(context, native);
+            const command = c.JS_GetPropertyStr(context, native, "mediaCommand");
+            defer c.JS_FreeValue(context, command);
+            return c.JS_IsFunction(context, command);
+        }
+    };
+
+    try std.testing.expect(!try Probe.hasMediaCommand(false));
+    try std.testing.expect(try Probe.hasMediaCommand(true));
 }

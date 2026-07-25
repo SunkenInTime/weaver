@@ -52,6 +52,7 @@ pub const Model = struct {
     image_tree_generation: u64 = 0,
     image_epoch: u64 = 1,
     image_resolver: ?*const image_paths.Resolver = null,
+    media_transport_enabled: bool = false,
     geometry: ?*const geometry_mod.Store = null,
     fonts: []const manifest_mod.Font = &.{},
     /// Last origin we consider settled (launch placement or the last
@@ -334,7 +335,14 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
 
 fn evaluateCandidate(model: *Model, tree: *tree_mod.Tree, source: []const u8, seed: ?[]const u8) !*js_engine.Engine {
     const storage = model.storage orelse return error.MissingStorage;
-    const candidate = try js_engine.Engine.create(std.heap.page_allocator, tree, storage, model.origins, &model.provider);
+    const candidate = try js_engine.Engine.create(
+        std.heap.page_allocator,
+        tree,
+        storage,
+        model.origins,
+        &model.provider,
+        model.media_transport_enabled,
+    );
     errdefer candidate.destroy(std.heap.page_allocator);
     if (seed) |value| try candidate.setHotSwapSeed(value);
     try candidate.evaluate(source, "bundle.js");
@@ -1057,7 +1065,17 @@ pub fn main(init: std.process.Init) !void {
         init.environ_map.get("WEAVER_HOST_ENDPOINT"),
     ));
     defer app_state.model.provider.deinit();
-    const engine = try js_engine.Engine.create(std.heap.page_allocator, &app_state.model.tree, &storage, loaded.manifest.origins, &app_state.model.provider);
+    app_state.model.media_transport_enabled = for (loaded.manifest.capabilities) |capability| {
+        if (std.mem.eql(u8, capability, "media-transport")) break true;
+    } else false;
+    const engine = try js_engine.Engine.create(
+        std.heap.page_allocator,
+        &app_state.model.tree,
+        &storage,
+        loaded.manifest.origins,
+        &app_state.model.provider,
+        app_state.model.media_transport_enabled,
+    );
     app_state.model.engine = engine;
     defer if (app_state.model.engine) |current| current.destroy(std.heap.page_allocator);
     app_state.model.io = init.io;

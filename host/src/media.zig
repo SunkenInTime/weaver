@@ -1,5 +1,6 @@
 const std = @import("std");
 const art_cache = @import("art_cache.zig");
+const media_commands = @import("media_commands.zig");
 
 const native = @cImport({
     @cInclude("windows_providers.h");
@@ -143,6 +144,19 @@ pub const Provider = struct {
         copyText(&frame.source_app, &frame.source_app_len, std.mem.sliceTo(&source.source_app, 0));
         copyText(&frame.art_path, &frame.art_path_len, self.current_art_path[0..self.current_art_path_len]);
         return frame;
+    }
+
+    pub fn command(self: *Provider, verb: media_commands.Verb, seek_ms: ?u64, now_ms: u64) bool {
+        if (self.session == null and now_ms >= self.next_open_ms) self.open(now_ms);
+        const session = self.session orelse return false;
+        const native_verb: c_int = switch (verb) {
+            .play => native.WEAVER_MEDIA_COMMAND_PLAY,
+            .pause => native.WEAVER_MEDIA_COMMAND_PAUSE,
+            .next => native.WEAVER_MEDIA_COMMAND_NEXT,
+            .previous => native.WEAVER_MEDIA_COMMAND_PREVIOUS,
+            .seek => native.WEAVER_MEDIA_COMMAND_SEEK,
+        };
+        return native.weaver_media_command(session, native_verb, seek_ms orelse 0) != 0;
     }
 
     fn open(self: *Provider, now_ms: u64) void {

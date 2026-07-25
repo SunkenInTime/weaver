@@ -187,6 +187,61 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
   }
 });
 
+test("media transport capability gate follows SDK symbols through aliases namespaces and helper modules", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-media-capability-"));
+  const widget = join(root, "transport");
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    mkdirSync(widget, { recursive: true });
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["**/*.ts", "**/*.tsx"],
+    }));
+    const rejected = [
+      `import { useMediaTransport as t, widget } from "@weaver/sdk";
+export default widget({ name: "Alias", size: [160, 80] }, () => { const media = t(); return <button onPress={() => void media.play()}><text>Play</text></button>; });
+`,
+      `import { widget } from "@weaver/sdk";
+import * as Weaver from "@weaver/sdk";
+export default widget({ name: "Namespace", size: [160, 80] }, () => { const media = Weaver.useMediaTransport(); return <button onPress={() => void media.pause()}><text>Pause</text></button>; });
+`,
+    ];
+    for (const source of rejected) {
+      writeFileSync(join(widget, "widget.tsx"), source);
+      rmSync(join(widget, "controls.ts"), { force: true });
+      const result = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /useMediaTransport\(\) requires capabilities: \["media-transport"\]/);
+    }
+
+    writeFileSync(join(widget, "controls.ts"), `import { useMediaTransport } from "@weaver/sdk";
+export function controls() { return useMediaTransport(); }
+`);
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+import { controls } from "./controls";
+export default widget({ name: "Helper", size: [160, 80] }, () => { const media = controls(); return <button onPress={() => void media.next()}><text>Next</text></button>; });
+`);
+    const helper = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(helper.status, 1);
+    assert.match(helper.stderr, /controls\.ts:\d+:\d+: useMediaTransport\(\) requires capabilities/);
+
+    writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
+import { controls } from "./controls";
+export default widget({ name: "Declared", size: [160, 80], capabilities: ["media-transport"] }, () => { const media = controls(); return <button onPress={() => void media.previous()}><text>Previous</text></button>; });
+`);
+    const bundle = spawnSync(process.execPath, [cli, "bundle", widget], { encoding: "utf8" });
+    assert.equal(bundle.status, 0, bundle.stderr);
+    const manifest = JSON.parse(readFileSync(join(widget, "dist", "widget.json"), "utf8"));
+    assert.deepEqual(manifest.capabilities, ["media-transport"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("styling 07 discovers, validates, bundles, and names TrueType faces", () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-font-bundle-"));
   try {

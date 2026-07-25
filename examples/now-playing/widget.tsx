@@ -1,4 +1,4 @@
-import { useProvider, widget } from "@weaver/sdk";
+import { useMediaTransport, useProvider, widget } from "@weaver/sdk";
 
 const segmentCount = 24;
 
@@ -8,8 +8,10 @@ export default widget({
   anchor: { corner: "bottom-left", offset: [24, 24] },
   layer: "desktop",
   subscribe: ["media"],
+  capabilities: ["media-transport"],
 }, () => {
   const media = useProvider("media");
+  const transport = useMediaTransport();
   const progress = media.durationMs > 0 ? Math.max(0, Math.min(1, media.positionMs / media.durationMs)) : 0;
   const filled = Math.round(progress * segmentCount);
   return (
@@ -27,7 +29,12 @@ export default widget({
           />
           <text class="text-xs text-[#8b5cf6] font-semibold">NOW PLAYING</text>
         </row>
-        <text class="text-xs text-[#94a3b8]">{media.status.toUpperCase()}</text>
+        <button
+          class="w-[104px] h-[22px] bg-[#273244] hover:bg-[#334155] pressed:bg-[#1e293b] rounded-full"
+          onPress={() => { void (media.playing ? transport.pause() : transport.play()); }}
+        >
+          <text class="text-xs text-[#cbd5e1]">{media.status.toUpperCase()} · {media.playing ? "PAUSE" : "PLAY"}</text>
+        </button>
       </row>
       <row class="w-[408px] h-[72px] gap-3 items-center">
         {media.artPath
