@@ -982,6 +982,15 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
         if (roots.length > 0) defaultDefinitions.set(sourceFile, definition("default", roots));
       }
     }
+    for (const statement of sourceFile.statements) {
+      if (!ts.isExportDeclaration(statement) || statement.moduleSpecifier || !statement.exportClause ||
+        !ts.isNamedExports(statement.exportClause)) continue;
+      for (const specifier of statement.exportClause.elements) {
+        if (specifier.name.text !== "default") continue;
+        const exported = local.get(specifier.propertyName?.text ?? specifier.name.text);
+        if (exported) defaultDefinitions.set(sourceFile, exported);
+      }
+    }
   }
   const componentScopes = new Map<ts.SourceFile, Map<string, ComponentDefinition>>();
   for (const [sourceFile, local] of definitions) componentScopes.set(sourceFile, new Map(local));
