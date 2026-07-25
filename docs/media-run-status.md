@@ -6,7 +6,7 @@ Last updated: 2026-07-25
 
 | Layer | Branch | Parent | State |
 |---|---|---|---|
-| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | VERIFYING / NOT YET PUSHED |
+| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`ce7e60b`) |
 | 02/05 | `media/02-album-art` | layer 01 | NOT STARTED |
 | 03/05 | `media/03-transport` | layer 02 | NOT STARTED |
 | 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
@@ -43,10 +43,11 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 01 implementation and local verification are complete. Commit, push, and
-draft PR creation remain.
+Layer 01 is committed, pushed, and open as draft PR
+`https://github.com/SunkenInTime/weaver/pull/32`.
 
 ## Next executable task
 
-Review the layer 01 diff, commit only intentional files, push the branch, and
-open its draft stacked PR targeting `master`.
+Create `media/02-album-art` from layer 01 and trace SMTC thumbnail ownership,
+host cache lifecycle, runtime path containment, and dynamic image
+re-registration before editing.
