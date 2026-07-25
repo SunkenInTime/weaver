@@ -63,6 +63,113 @@ const AdapterCommand = struct {
     }
 };
 
+pub const CommandResult = struct {
+    id: u64,
+    ok: bool,
+};
+
+/// One executor belongs to one transport-capable Widget. Its single worker
+/// preserves that Widget's FIFO order while the host loop remains the sole UDS
+/// writer and never waits for a helper process.
+pub const MediaCommandExecutor = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    provider: *MediaProvider,
+    thread: std.Thread,
+    mutex: std.Io.Mutex = .init,
+    condition: std.Io.Condition = .init,
+    commands: [media_commands.queue_capacity]media_commands.Command = undefined,
+    command_head: usize = 0,
+    command_count: usize = 0,
+    results: [media_commands.queue_capacity]CommandResult = undefined,
+    result_head: usize = 0,
+    result_count: usize = 0,
+    stopping: bool = false,
+
+    pub fn start(
+        io: std.Io,
+        allocator: std.mem.Allocator,
+        provider: *MediaProvider,
+    ) !*MediaCommandExecutor {
+        const self = try allocator.create(MediaCommandExecutor);
+        errdefer allocator.destroy(self);
+        self.* = .{
+            .io = io,
+            .allocator = allocator,
+            .provider = provider,
+            .thread = undefined,
+        };
+        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, threadMain, .{self});
+        return self;
+    }
+
+    pub fn deinit(self: *MediaCommandExecutor) void {
+        self.mutex.lockUncancelable(self.io);
+        self.stopping = true;
+        self.condition.broadcast(self.io);
+        self.mutex.unlock(self.io);
+        self.thread.join();
+        const allocator = self.allocator;
+        allocator.destroy(self);
+    }
+
+    pub fn submit(self: *MediaCommandExecutor, command: media_commands.Command) bool {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (self.stopping or self.command_count == self.commands.len) return false;
+        const index = (self.command_head + self.command_count) % self.commands.len;
+        self.commands[index] = command;
+        self.command_count += 1;
+        self.condition.signal(self.io);
+        return true;
+    }
+
+    pub fn takeResult(self: *MediaCommandExecutor) ?CommandResult {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (self.result_count == 0) return null;
+        const result = self.results[self.result_head];
+        self.result_head = (self.result_head + 1) % self.results.len;
+        self.result_count -= 1;
+        self.condition.signal(self.io);
+        return result;
+    }
+
+    fn threadMain(self: *MediaCommandExecutor) void {
+        while (true) {
+            self.mutex.lockUncancelable(self.io);
+            while (self.command_count == 0 and !self.stopping) {
+                self.condition.waitUncancelable(self.io, &self.mutex);
+            }
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                return;
+            }
+            const command = self.commands[self.command_head];
+            self.command_head = (self.command_head + 1) % self.commands.len;
+            self.command_count -= 1;
+            self.mutex.unlock(self.io);
+
+            const result: CommandResult = .{
+                .id = command.id,
+                .ok = self.provider.command(command),
+            };
+            self.mutex.lockUncancelable(self.io);
+            while (self.result_count == self.results.len and !self.stopping) {
+                self.condition.waitUncancelable(self.io, &self.mutex);
+            }
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                return;
+            }
+            const index = (self.result_head + self.result_count) % self.results.len;
+            self.results[index] = result;
+            self.result_count += 1;
+            self.mutex.unlock(self.io);
+        }
+    }
+};
+
 /// Owns the exact adapter boundary established by the attended-Mac spike:
 /// one long-lived stdout metadata stream and separate bounded command
 /// processes. Widget-visible traffic remains on macos_host's per-widget UDS.
@@ -492,7 +599,26 @@ test "macOS adapter process failures produce one loss frame and false ack" {
     };
     defer provider.deinit();
 
-    try std.testing.expect(!provider.command(.{ .id = 1, .verb = .play }));
+    var executor = try MediaCommandExecutor.start(std.testing.io, std.testing.allocator, &provider);
+    defer executor.deinit();
+    try std.testing.expect(executor.submit(.{ .id = 1, .verb = .play }));
+    try std.testing.expect(executor.submit(.{ .id = 2, .verb = .pause }));
+    var results: [2]CommandResult = undefined;
+    var result_count: usize = 0;
+    for (0..100) |_| {
+        while (executor.takeResult()) |result| {
+            results[result_count] = result;
+            result_count += 1;
+        }
+        if (result_count == results.len) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(20), .awake);
+    }
+    try std.testing.expectEqual(@as(usize, 2), result_count);
+    try std.testing.expectEqual(@as(u64, 1), results[0].id);
+    try std.testing.expect(!results[0].ok);
+    try std.testing.expectEqual(@as(u64, 2), results[1].id);
+    try std.testing.expect(!results[1].ok);
+
     provider.setActive(true);
     for (0..100) |_| {
         if (std.mem.eql(u8, provider.availabilityLabel(), "unavailable")) break;

@@ -1,5 +1,7 @@
 const std = @import("std");
+const art_cache = @import("art_cache.zig");
 const audio = @import("audio.zig");
+const media = @import("media.zig");
 const media_commands = @import("media_commands.zig");
 const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
@@ -9,14 +11,12 @@ const system_providers = @import("providers_macos.zig");
 const posix = std.posix;
 const c = @cImport({
     @cInclude("macos_system.h");
-    @cInclude("poll.h");
-    @cInclude("sys/socket.h");
-    @cInclude("sys/un.h");
 });
 
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes = supervisor.max_path_bytes;
 const provider_environment = "WEAVER_HOST_ENDPOINT";
+const art_cache_environment = "WEAVER_ART_CACHE";
 const backend_environment = "WEAVER_BACKEND_FILE";
 
 const ControlCommand = enum { reload, down };
@@ -140,8 +140,7 @@ const ProviderEndpoint = struct {
     allocator: std.mem.Allocator,
     path: []u8,
     listener: std.Io.net.Server,
-    thread: ?std.Thread = null,
-    expected_pid: posix.pid_t = 0,
+    thread: std.Thread,
     mutex: std.Io.Mutex = .init,
     stream: ?std.Io.net.Stream = null,
     command_queue: media_commands.Queue = .{},
@@ -156,24 +155,19 @@ const ProviderEndpoint = struct {
         errdefer listener.deinit(io);
         const self = try allocator.create(ProviderEndpoint);
         errdefer allocator.destroy(self);
-        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener };
-        return self;
-    }
-
-    fn bind(self: *ProviderEndpoint, expected_pid: posix.pid_t) !void {
-        self.expected_pid = expected_pid;
+        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener, .thread = undefined };
         self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, acceptMain, .{self});
+        return self;
     }
 
     fn deinit(self: *ProviderEndpoint) void {
         self.mutex.lockUncancelable(self.io);
         self.stopping = true;
-        self.command_queue.stop();
-        if (self.stream) |stream| _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
+        if (self.stream) |stream| stream.close(self.io);
         self.stream = null;
         self.mutex.unlock(self.io);
         self.listener.deinit(self.io);
-        if (self.thread) |thread| thread.join();
+        self.thread.join();
         std.Io.Dir.cwd().deleteFile(self.io, self.path) catch {};
         const allocator = self.allocator;
         allocator.free(self.path);
@@ -181,73 +175,22 @@ const ProviderEndpoint = struct {
     }
 
     fn acceptMain(self: *ProviderEndpoint) void {
-        while (true) {
-            self.mutex.lockUncancelable(self.io);
-            const stopping = self.stopping;
+        const stream = self.listener.accept(self.io) catch return;
+        self.mutex.lockUncancelable(self.io);
+        if (self.stopping) {
             self.mutex.unlock(self.io);
-            if (stopping) return;
-            const stream = self.listener.accept(self.io) catch return;
-            if (peerPid(stream) != self.expected_pid) {
-                std.log.warn(
-                    "rejecting provider socket client pid={?}; expected widget pid={d}",
-                    .{ peerPid(stream), self.expected_pid },
-                );
-                stream.close(self.io);
-                continue;
-            }
-            self.mutex.lockUncancelable(self.io);
-            if (self.stopping) {
-                self.mutex.unlock(self.io);
-                stream.close(self.io);
-                return;
-            }
-            self.stream = stream;
-            self.mutex.unlock(self.io);
-
-            var framer: media_commands.Framer = .{};
-            var chunk: [512]u8 = undefined;
-            while (true) {
-                var descriptor: c.struct_pollfd = .{
-                    .fd = stream.socket.handle,
-                    .events = c.POLLIN | c.POLLHUP,
-                    .revents = 0,
-                };
-                const ready = c.poll(&descriptor, 1, -1);
-                if (ready < 0) {
-                    if (posix.errno(ready) == .INTR) continue;
-                    framer.finish(&self.command_queue);
-                    break;
-                }
-                if (ready == 0) continue;
-                // The provider socket stays open for the widget lifetime.
-                // poll(2) blocks without idle work and proves that a short
-                // command or EOF is ready. A bare nonblocking read after a
-                // command can otherwise report EAGAIN and falsely sever the
-                // healthy per-widget channel.
-                const read = posix.read(stream.socket.handle, &chunk) catch |err| switch (err) {
-                    error.WouldBlock => continue,
-                    else => {
-                        framer.finish(&self.command_queue);
-                        break;
-                    },
-                };
-                if (read == 0) {
-                    framer.finish(&self.command_queue);
-                    break;
-                }
-                if (!framer.feed(&self.command_queue, chunk[0..read])) break;
-            }
-            self.mutex.lockUncancelable(self.io);
-            if (self.stream) |active| {
-                if (active.socket.handle == stream.socket.handle) self.stream = null;
-            }
-            const should_stop = self.stopping;
-            self.mutex.unlock(self.io);
-            // The reader thread owns the accepted descriptor. Writers only
-            // shut it down to wake this loop, avoiding close-vs-read races.
             stream.close(self.io);
-            if (should_stop) return;
+            return;
         }
+        self.stream = stream;
+        self.mutex.unlock(self.io);
+
+        var read_buffer: [media_commands.max_line_bytes * 2]u8 = undefined;
+        var reader = stream.reader(self.io, &read_buffer);
+        while (reader.interface.takeDelimiter('\n') catch {
+            self.command_queue.malformed.store(true, .release);
+            return;
+        }) |line| self.command_queue.pushLine(line);
     }
 
     fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
@@ -335,6 +278,7 @@ const MacSlotState = struct {
     process: ?posix.pid_t = null,
     exit_code: ?u32 = null,
     endpoint: ?*ProviderEndpoint = null,
+    media_command_executor: ?*system_providers.MediaCommandExecutor = null,
     command_rate: media_commands.RateLimiter = .{},
     costs: CostSamples = .{},
     threads: u32 = 0,
@@ -364,11 +308,16 @@ const Host = struct {
     previous_cpu_len: usize = 0,
     previous_memory: [512]u8 = undefined,
     previous_memory_len: usize = 0,
+    previous_media: [media.max_media_frame_bytes]u8 = undefined,
+    previous_media_len: usize = 0,
     system_frames: u64 = 0,
     audio_provider: audio.Provider = .{},
     audio_authorization_marker: []const u8,
     audio_authorization_mtime: i128 = 0,
     audio_pipe_frames: u64 = 0,
+    media_provider: *system_providers.MediaProvider,
+    media_pipe_frames: u64 = 0,
+    art_cache_root: []const u8,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -431,6 +380,19 @@ const Host = struct {
         for (&self.slots) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
             var channel_failed = false;
+            if (slot.platform.media_command_executor) |executor| {
+                while (executor.takeResult()) |result| {
+                    const ack = media_commands.formatAck(result.id, result.ok, &ack_buffer) catch continue;
+                    if (!endpoint.write(ack)) {
+                        channel_failed = true;
+                        break;
+                    }
+                }
+            }
+            if (channel_failed) {
+                self.restartAfterMediaChannelFailure(slot, now_ms);
+                continue;
+            }
             while (endpoint.takeNack()) |id| {
                 const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
                 if (!endpoint.write(ack)) {
@@ -444,14 +406,16 @@ const Host = struct {
             }
             while (endpoint.takeCommand()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
-                // The system-wide media adapter is deliberately absent until
-                // the spike-gated layer 04. A valid declared request therefore
-                // reaches weaverd and is honestly declined.
-                const ok = allowed and false;
-                const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
-                if (!endpoint.write(ack)) {
-                    channel_failed = true;
-                    break;
+                const queued = allowed and if (slot.platform.media_command_executor) |executor|
+                    executor.submit(command)
+                else
+                    false;
+                if (!queued) {
+                    const ack = media_commands.formatAck(command.id, false, &ack_buffer) catch continue;
+                    if (!endpoint.write(ack)) {
+                        channel_failed = true;
+                        break;
+                    }
                 }
             }
             if (channel_failed) {
@@ -487,10 +451,7 @@ const Host = struct {
         defer manifest.deinit();
         supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.capabilities, manifest.value.renderBackend, false);
 
-        // ADR 0015 makes media explicitly unavailable on macOS. A media-only
-        // Widget keeps its no-data state without a socket, reader thread, or
-        // provider timer; supported providers still share one endpoint.
-        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media_transport;
+        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media or slot.wants_media_transport;
         var endpoint_path: ?[]u8 = null;
         defer if (endpoint_path) |path| self.allocator.free(path);
         if (needs_endpoint) {
@@ -504,6 +465,17 @@ const Host = struct {
             endpoint.deinit();
             slot.platform.endpoint = null;
         };
+        if (slot.wants_media_transport) {
+            slot.platform.media_command_executor = try system_providers.MediaCommandExecutor.start(
+                self.io,
+                self.allocator,
+                self.media_provider,
+            );
+        }
+        errdefer if (slot.platform.media_command_executor) |executor| {
+            executor.deinit();
+            slot.platform.media_command_executor = null;
+        };
 
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.platform.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
@@ -514,6 +486,7 @@ const Host = struct {
         defer environment.deinit();
         try environment.put(backend_environment, backend_path);
         if (endpoint_path) |path| try environment.put(provider_environment, path);
+        if (slot.wants_media) try environment.put(art_cache_environment, self.art_cache_root);
         const dev_argv = [_][]const u8{ self.runtime_exe, "--dev", dist };
         const run_argv = [_][]const u8{ self.runtime_exe, dist };
         const argv: []const []const u8 = if (slot.dev) &dev_argv else &run_argv;
@@ -526,7 +499,6 @@ const Host = struct {
             .pgid = 0,
         });
         slot.platform.process = child.id.?;
-        if (slot.platform.endpoint) |endpoint| try endpoint.bind(slot.platform.process.?);
         errdefer self.stopSlot(slot, false);
         try self.writeChildMarker(slot.platform.process.?);
         slot.platform.exit_code = null;
@@ -582,6 +554,8 @@ const Host = struct {
 
     fn closeProcess(self: *Host, slot: *Slot) void {
         if (slot.platform.process) |pid| self.removeChildMarker(pid);
+        if (slot.platform.media_command_executor) |executor| executor.deinit();
+        slot.platform.media_command_executor = null;
         if (slot.platform.endpoint) |endpoint| endpoint.deinit();
         slot.platform.endpoint = null;
         slot.platform.process = null;
@@ -687,6 +661,10 @@ const Host = struct {
         return supervisor.hasSubscription(&self.slots, .audio, self);
     }
 
+    fn hasMediaSubscribers(self: *const Host) bool {
+        return supervisor.hasSubscription(&self.slots, .media, self);
+    }
+
     fn sampleAudio(self: *Host, now_ms: u64) void {
         const active = self.hasAudioSubscribers();
         self.audio_provider.setActive(active, now_ms);
@@ -700,6 +678,45 @@ const Host = struct {
             if (slot.wants_audio and endpoint.write(encoded)) delivered = true;
         }
         if (delivered) self.audio_pipe_frames += 1;
+    }
+
+    fn sampleMedia(self: *Host) void {
+        const active = self.hasMediaSubscribers();
+        self.media_provider.setActive(active);
+        if (!active) {
+            self.previous_media_len = 0;
+            return;
+        }
+        const queued = self.media_provider.takeFrame();
+        var encoded: []const u8 = self.previous_media[0..self.previous_media_len];
+        var changed = false;
+        var force = false;
+        var frame_buffer: [media.max_media_frame_bytes]u8 = undefined;
+        if (queued) |item| {
+            encoded = media.formatFrame(&item.frame, &frame_buffer) catch |err| {
+                std.log.err("macOS media frame exceeded protocol bound or failed to encode: {s}", .{@errorName(err)});
+                return;
+            };
+            changed = !std.mem.eql(u8, encoded, self.previous_media[0..self.previous_media_len]);
+            force = item.force;
+        } else if (encoded.len == 0) {
+            return;
+        }
+
+        var delivered = false;
+        for (&self.slots) |*slot| {
+            const endpoint = slot.platform.endpoint orelse continue;
+            if (!slot.wants_media) continue;
+            if ((!slot.media_sent or changed or force) and endpoint.write(encoded)) {
+                slot.media_sent = true;
+                delivered = true;
+            }
+        }
+        if (delivered) self.media_pipe_frames += 1;
+        if (queued != null) {
+            @memcpy(self.previous_media[0..encoded.len], encoded);
+            self.previous_media_len = encoded.len;
+        }
     }
 
     fn writeStatus(self: *Host, now_ms: u64) void {
@@ -737,8 +754,8 @@ const Host = struct {
             .audio_capture_active = self.audio_provider.availability == .live,
             .audio_silent = self.audio_provider.silent,
             .audio_pipe_frames = self.audio_pipe_frames,
-            .media_pipe_frames = 0,
-            .media_availability = "unavailable",
+            .media_pipe_frames = self.media_pipe_frames,
+            .media_availability = self.media_provider.availabilityLabel(),
             .media_subscribers = supervisor.subscriptionCount(&self.slots, .media, self),
             .audio_availability = self.audio_provider.availability.label(),
             .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
@@ -751,19 +768,6 @@ const Host = struct {
         cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
     }
 };
-
-fn peerPid(stream: std.Io.net.Stream) ?posix.pid_t {
-    var pid: c.pid_t = 0;
-    var length: c.socklen_t = @sizeOf(c.pid_t);
-    if (c.getsockopt(
-        stream.socket.handle,
-        c.SOL_LOCAL,
-        c.LOCAL_PEERPID,
-        &pid,
-        &length,
-    ) != 0) return null;
-    return pid;
-}
 
 pub fn main(init: std.process.Init) void {
     run(init) catch |err| {
@@ -780,6 +784,8 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(data_root);
     const audio_authorization_marker = try std.fs.path.join(allocator, &.{ data_root, "audio-authorization" });
     defer allocator.free(audio_authorization_marker);
+    const art_cache_root = try std.fs.path.join(allocator, &.{ home, "Library", "Caches", "weaver", "art" });
+    defer allocator.free(art_cache_root);
     if (args.len == 2 and std.mem.eql(u8, args[1], "--authorize-audio")) {
         try std.Io.Dir.cwd().createDirPath(init.io, data_root);
         return authorizeAudio(init.io, audio_authorization_marker);
@@ -818,6 +824,22 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(runtime_exe);
     const cli_script = try std.fs.path.join(allocator, &.{ repo_root, "cli", "dist", "index.js" });
     defer allocator.free(cli_script);
+    const adapter_paths = try mediaAdapterPaths(init.io, allocator, repo_root);
+    defer adapter_paths.deinit(allocator);
+    try std.Io.Dir.cwd().createDirPath(init.io, art_cache_root);
+    const art_cache_root_z = try allocator.dupeZ(u8, art_cache_root);
+    defer allocator.free(art_cache_root_z);
+    if (c.weaver_secure_private_dir(art_cache_root_z.ptr) != 0) return error.InsecureArtCacheRoot;
+    var media_art_cache = try art_cache.Cache.init(init.io, allocator, art_cache_root);
+    defer media_art_cache.deinit();
+    var media_provider: system_providers.MediaProvider = .{
+        .io = init.io,
+        .allocator = allocator,
+        .script_path = adapter_paths.script,
+        .framework_path = adapter_paths.framework,
+        .cache = &media_art_cache,
+    };
+    defer media_provider.deinit();
     cleanupStaleChildren(init.io, allocator, runtime_root, runtime_exe);
     std.Io.Dir.cwd().deleteTree(init.io, runtime_root) catch {};
     try std.Io.Dir.cwd().createDirPath(init.io, runtime_root);
@@ -849,6 +871,8 @@ fn run(init: std.process.Init) !void {
         .cli_script = cli_script,
         .runtime_root = runtime_root,
         .audio_authorization_marker = audio_authorization_marker,
+        .media_provider = &media_provider,
+        .art_cache_root = art_cache_root,
     };
     defer host.audio_provider.deinit();
     try host.loadRegistry();
@@ -859,6 +883,7 @@ fn run(init: std.process.Init) !void {
     var next_cost_ms: u64 = 0;
     var next_provider_ms: u64 = 0;
     var audio_availability = host.audio_provider.availability;
+    var media_availability = host.media_provider.availabilityLabel();
     while (!stopping) {
         if (c.weaver_termination_requested() != 0) break;
         var acknowledge_reload = false;
@@ -879,13 +904,17 @@ fn run(init: std.process.Init) !void {
         host.supervise(now);
         host.drainMediaCommands(now);
         host.sampleAudio(now);
+        host.sampleMedia();
         const audio_availability_changed = audio_availability != host.audio_provider.availability;
         audio_availability = host.audio_provider.availability;
+        const current_media_availability = host.media_provider.availabilityLabel();
+        const media_availability_changed = !std.mem.eql(u8, media_availability, current_media_availability);
+        media_availability = current_media_availability;
         if (now >= next_provider_ms) {
             host.sampleProviders();
             next_provider_ms = now + 1000;
         }
-        if (acknowledge_reload or audio_availability_changed or now >= next_cost_ms) {
+        if (acknowledge_reload or audio_availability_changed or media_availability_changed or now >= next_cost_ms) {
             host.sampleCosts(now);
             host.writeStatus(now);
             next_cost_ms = now + 2000;
@@ -895,7 +924,33 @@ fn run(init: std.process.Init) !void {
     }
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
     host.audio_provider.setActive(false, monotonicMilliseconds());
+    host.media_provider.setActive(false);
     host.writeStatus(monotonicMilliseconds());
+}
+
+const MediaAdapterPaths = struct {
+    script: []u8,
+    framework: []u8,
+
+    fn deinit(self: MediaAdapterPaths, allocator: std.mem.Allocator) void {
+        allocator.free(self.script);
+        allocator.free(self.framework);
+    }
+};
+
+fn mediaAdapterPaths(io: std.Io, allocator: std.mem.Allocator, repo_root: []const u8) !MediaAdapterPaths {
+    const executable_dir = try std.process.executableDirPathAlloc(io, allocator);
+    defer allocator.free(executable_dir);
+    const app_macos_dir = std.mem.endsWith(u8, executable_dir, "/Weaverd.app/Contents/MacOS");
+    const root = if (app_macos_dir)
+        try std.fs.path.join(allocator, &.{ executable_dir, "..", "Resources", "mediaremote-adapter" })
+    else
+        try std.fs.path.join(allocator, &.{ repo_root, "host", "zig-out", "share", "weaver", "mediaremote-adapter" });
+    defer allocator.free(root);
+    return .{
+        .script = try std.fs.path.join(allocator, &.{ root, "mediaremote-adapter.pl" }),
+        .framework = try std.fs.path.join(allocator, &.{ root, "MediaRemoteAdapter.framework" }),
+    };
 }
 
 fn authorizeAudio(io: std.Io, marker_path: []const u8) !void {
@@ -1006,7 +1061,6 @@ test "runtime socket root is short, per-user, and data-root-specific" {
     try std.testing.expect(first.len + "/widget-ffffffffffffffffffffffffffffffff.sock".len <= std.Io.net.UnixAddress.max_len);
     try std.testing.expect(!std.mem.eql(u8, first, second));
 }
-
 test "provider socket peer pid rejects a same-user hijacker pid" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-peer-test-{d}.sock", .{posix.system.getpid()});
