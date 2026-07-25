@@ -137,3 +137,42 @@ export default widget({ name: "Imported Budget", size: [320, 200] }, () => <Tree
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("check resolves a directly imported default function component", () => {
+  const importedTree = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const widgetSource = `import { widget } from "@weaver/sdk";
+import Tree from "./tree";
+export default widget({ name: "Default Import Budget", size: [320, 200] }, () => <Tree />);
+`;
+  const { root, widget } = fixture(widgetSource, {
+    "tree.tsx": `export default function Tree() { return (${importedTree}); }\n`,
+  });
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check resolves nested helpers in their declaring module", () => {
+  const oversized = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const widgetSource = `import { widget } from "@weaver/sdk";
+import { SmallTree } from "./small";
+import { LargeTree } from "./large";
+void SmallTree;
+export default widget({ name: "Module Scope Budget", size: [320, 200] }, () => <LargeTree />);
+`;
+  const { root, widget } = fixture(widgetSource, {
+    "small.tsx": `function Helper() { return <text>small</text>; }\nexport function SmallTree() { return <Helper />; }\n`,
+    "large.tsx": `function Helper() { return (${oversized}); }\nexport function LargeTree() { return <Helper />; }\n`,
+  });
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

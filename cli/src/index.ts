@@ -915,7 +915,10 @@ interface LoweredTreeMetrics { nodes: number; depth: number }
 
 function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
   type JsxRoot = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
-  const components = new Map<string, JsxRoot[]>();
+  interface ComponentDefinition {
+    key: string;
+    roots: JsxRoot[];
+  }
   const unwrapJsx = (expression: ts.Expression): JsxRoot | null => {
     let current = expression;
     while (ts.isParenthesizedExpression(current)) current = current.expression;
@@ -943,44 +946,62 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
     findReturn(body);
     return results;
   };
-  const definitions = new Map<ts.SourceFile, Map<string, JsxRoot[]>>();
+  const definitions = new Map<ts.SourceFile, Map<string, ComponentDefinition>>();
+  const defaultDefinitions = new Map<ts.SourceFile, ComponentDefinition>();
   for (const sourceFile of project.sourceFiles) {
-    const local = new Map<string, JsxRoot[]>();
+    const local = new Map<string, ComponentDefinition>();
+    const definition = (name: string, roots: JsxRoot[]): ComponentDefinition => ({
+      key: `${resolve(sourceFile.fileName)}#${name}`,
+      roots,
+    });
     for (const statement of sourceFile.statements) {
-      if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+      if (ts.isFunctionDeclaration(statement) && statement.body) {
         const roots = returnedRoots(statement.body);
-        if (roots.length > 0) local.set(statement.name.text, roots);
+        if (roots.length === 0) continue;
+        if (statement.name) local.set(statement.name.text, definition(statement.name.text, roots));
+        if (statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)) {
+          defaultDefinitions.set(sourceFile, definition("default", roots));
+        }
       } else if (ts.isVariableStatement(statement)) {
         for (const declaration of statement.declarationList.declarations) {
           if (!ts.isIdentifier(declaration.name) || !declaration.initializer ||
             (!ts.isArrowFunction(declaration.initializer) && !ts.isFunctionExpression(declaration.initializer))) continue;
           const roots = returnedRoots(declaration.initializer.body);
-          if (roots.length > 0) local.set(declaration.name.text, roots);
+          if (roots.length > 0) local.set(declaration.name.text, definition(declaration.name.text, roots));
         }
       }
     }
     definitions.set(sourceFile, local);
-    for (const [name, roots] of local) if (!components.has(name)) components.set(name, roots);
+    const exportAssignment = sourceFile.statements.find(ts.isExportAssignment);
+    if (exportAssignment) {
+      if (ts.isIdentifier(exportAssignment.expression)) {
+        const exported = local.get(exportAssignment.expression.text);
+        if (exported) defaultDefinitions.set(sourceFile, exported);
+      } else if (ts.isArrowFunction(exportAssignment.expression) || ts.isFunctionExpression(exportAssignment.expression)) {
+        const roots = returnedRoots(exportAssignment.expression.body);
+        if (roots.length > 0) defaultDefinitions.set(sourceFile, definition("default", roots));
+      }
+    }
   }
+  const componentScopes = new Map<ts.SourceFile, Map<string, ComponentDefinition>>();
+  for (const [sourceFile, local] of definitions) componentScopes.set(sourceFile, new Map(local));
   for (const statement of project.sourceFile.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !statement.importClause) continue;
     const path = localImportPath(project.directory, project.sourceFile, statement.moduleSpecifier.text);
     const importedFile = path ? project.sourceFiles.find((file) => pathsEqual(file.fileName, path)) : undefined;
     const imported = importedFile ? definitions.get(importedFile) : undefined;
     if (!imported) continue;
+    const entryScope = componentScopes.get(project.sourceFile)!;
     const bindings = statement.importClause.namedBindings;
     if (bindings && ts.isNamedImports(bindings)) {
       for (const binding of bindings.elements) {
-        const roots = imported.get(binding.propertyName?.text ?? binding.name.text);
-        if (roots) components.set(binding.name.text, roots);
+        const component = imported.get(binding.propertyName?.text ?? binding.name.text);
+        if (component) entryScope.set(binding.name.text, component);
       }
     }
     if (statement.importClause.name) {
-      const exportAssignment = importedFile!.statements.find(ts.isExportAssignment);
-      if (exportAssignment && ts.isIdentifier(exportAssignment.expression)) {
-        const roots = imported.get(exportAssignment.expression.text);
-        if (roots) components.set(statement.importClause.name.text, roots);
-      }
+      const component = defaultDefinitions.get(importedFile!);
+      if (component) entryScope.set(statement.importClause.name.text, component);
     }
   }
 
@@ -1034,10 +1055,11 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       return { nodes: children.reduce((sum, child) => sum + child.nodes, 0), depth: Math.max(0, ...children.map((child) => child.depth)) };
     }
     const { tag } = tagAndAttributes(node);
-    if (/^[A-Z]/.test(tag) && components.has(tag) && !visiting.has(tag)) {
+    const component = componentScopes.get(node.getSourceFile())?.get(tag);
+    if (/^[A-Z]/.test(tag) && component && !visiting.has(component.key)) {
       const next = new Set(visiting);
-      next.add(tag);
-      return maximum(components.get(tag)!.map((root) => metrics(root, next)));
+      next.add(component.key);
+      return maximum(component.roots.map((root) => metrics(root, next)));
     }
     const children = ts.isJsxElement(node) ? childMetrics(node.children, tag) : [];
     const ownDepth = isPaintedLayout(node, tag) ? 2 : 1;
@@ -1051,7 +1073,7 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   if (!component) return;
   let roots: JsxRoot[] = [];
   if (ts.isArrowFunction(component) || ts.isFunctionExpression(component)) roots = returnedRoots(component.body);
-  else if (ts.isIdentifier(component)) roots = components.get(component.text) ?? [];
+  else if (ts.isIdentifier(component)) roots = componentScopes.get(project.sourceFile)?.get(component.text)?.roots ?? [];
   else roots = expressionRoots(component);
   if (roots.length === 0) return;
   const lowered = maximum(roots.map((root) => metrics(root, new Set())));
