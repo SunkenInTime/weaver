@@ -79,6 +79,9 @@ test("widget renders one native generation and providers use native timers", asy
       sdk.h("text", null, audio.bands[0].toFixed(2)),
       sdk.h("text", null, media.title),
       sdk.h("text", null, `${media.status}:${media.sourceApp}`),
+      media.artPath
+        ? sdk.h("image", { src: media.artPath, fit: "cover", class: "w-6 h-6" })
+        : sdk.h("panel", { class: "w-6 h-6 bg-zinc-800" }),
       sdk.h("icon", {
         iconPath: "M 5 5 L 19 12 L 5 19 Z",
         iconViewBox: "0 0 24 24",
@@ -205,12 +208,13 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(typeof providerCallback, "function");
   providerCallback('{"provider":"cpu","value":{"percent":37.5,"perCore":[30,45]}}');
   providerCallback('{"provider":"audio","value":{"rms":0.25,"bands":[0.75]}}');
-  providerCallback('{"provider":"media","value":{"title":"Test Song","artist":"Artist","album":"Album","playing":true,"status":"playing","sourceApp":"Test Player","positionMs":10,"durationMs":20}}');
+  providerCallback('{"provider":"media","value":{"title":"Test Song","artist":"Artist","album":"Album","playing":true,"status":"playing","sourceApp":"Test Player","artPath":"C:\\\\Users\\\\test\\\\AppData\\\\Local\\\\weaver\\\\artcache\\\\abc.img","positionMs":10,"durationMs":20}}');
   await Promise.resolve();
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "37.5"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "0.75"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "Test Song"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "playing:Test Player"));
+  assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[2] === "source" && operation[3] === "C:\\Users\\test\\AppData\\Local\\weaver\\artcache\\abc.img"));
   const canvasNodes = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas");
   const pausedCanvasNode = canvasNodes[0][2];
   const canvasNode = canvasNodes[1][2];

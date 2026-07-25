@@ -1,5 +1,6 @@
 const std = @import("std");
 const supervisor = @import("supervisor.zig");
+const art_cache = @import("art_cache.zig");
 const audio = @import("audio.zig");
 const backoff = @import("backoff.zig");
 const media = @import("media.zig");
@@ -24,6 +25,7 @@ const env_pipe_name = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_HOST_PIPE")
 const env_backend_file = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_BACKEND_FILE");
 const env_renderer_pipe = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_PIPE");
 const env_renderer_log = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER_LOG");
+const env_art_cache = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_ART_CACHE");
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes: usize = 2048;
 const invalid_handle = c.INVALID_HANDLE_VALUE;
@@ -97,6 +99,7 @@ const Host = struct {
     renderer_pipe_name: []const u8,
     renderer_log_path: []const u8,
     cli_script: []const u8,
+    art_cache_root: []const u8,
     force_software: bool,
     renderer: RendererState = .{},
     slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
@@ -200,6 +203,11 @@ const Host = struct {
             defer self.allocator.free(renderer_pipe_w);
             if (c.SetEnvironmentVariableW(env_renderer_pipe, renderer_pipe_w.ptr) == 0) return error.SetEnvironmentFailed;
         }
+        if (slot.wants_media) {
+            const art_cache_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, self.art_cache_root);
+            defer self.allocator.free(art_cache_w);
+            if (c.SetEnvironmentVariableW(env_art_cache, art_cache_w.ptr) == 0) return error.SetEnvironmentFailed;
+        }
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.platform.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
         slot.platform.backend_path_len = backend_path.len;
@@ -210,6 +218,7 @@ const Host = struct {
         defer {
             if (pipe_name.len > 0) _ = c.SetEnvironmentVariableW(env_pipe_name, null);
             if (slot.wants_gpu) _ = c.SetEnvironmentVariableW(env_renderer_pipe, null);
+            if (slot.wants_media) _ = c.SetEnvironmentVariableW(env_art_cache, null);
             _ = c.SetEnvironmentVariableW(env_backend_file, null);
         }
         var startup: c.STARTUPINFOW = std.mem.zeroes(c.STARTUPINFOW);
@@ -605,6 +614,10 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(status_path);
     const status_temp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{status_path});
     defer allocator.free(status_temp_path);
+    const art_cache_root = try std.fs.path.join(allocator, &.{ directory, "artcache" });
+    defer allocator.free(art_cache_root);
+    var media_art_cache = try art_cache.Cache.init(init.io, allocator, art_cache_root);
+    defer media_art_cache.deinit();
     const repo_root = try repositoryRoot(allocator);
     defer allocator.free(repo_root);
     const runtime_exe = try std.fs.path.join(allocator, &.{ repo_root, "runtime", "zig-out", "bin", "weaver-widget.exe" });
@@ -630,8 +643,10 @@ fn run(init: std.process.Init) !void {
         .renderer_pipe_name = renderer_pipe_name,
         .renderer_log_path = renderer_log_path,
         .cli_script = cli_script,
+        .art_cache_root = art_cache_root,
         .force_software = if (init.environ_map.get("WEAVER_FORCE_SOFTWARE")) |value| std.mem.eql(u8, value, "1") else false,
     };
+    host.media_provider.cache = &media_art_cache;
     defer host.audio_provider.deinit();
     defer host.media_provider.deinit();
     try host.loadRegistry();

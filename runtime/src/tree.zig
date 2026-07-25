@@ -66,6 +66,7 @@ pub const InteractionStyle = struct {
 /// cannot silently turn bridge traffic into an unbounded native heap.
 pub const Node = struct {
     alive: bool = false,
+    lifetime: u64 = 0,
     kind: Kind = .column,
     parent: ?NodeId = null,
     children: [max_children]NodeId = @splat(0),
@@ -200,6 +201,7 @@ pub const Tree = struct {
     canvases: [max_canvases]CanvasState = [_]CanvasState{.{}} ** max_canvases,
     root: ?NodeId = null,
     generation: u64 = 0,
+    next_node_lifetime: u64 = 1,
     batch_depth: u8 = 0,
     batch_changed: bool = false,
 
@@ -233,7 +235,9 @@ pub const Tree = struct {
                     if (canvas.owner == 0) break candidate;
                 } else return error.CanvasLimit;
             }
-            slot.* = .{ .alive = true, .kind = kind };
+            slot.* = .{ .alive = true, .lifetime = self.next_node_lifetime, .kind = kind };
+            self.next_node_lifetime +%= 1;
+            if (self.next_node_lifetime == 0) self.next_node_lifetime = 1;
             if (canvas_index) |canvas_slot| {
                 const id: NodeId = @intCast(index + 1);
                 self.canvases[canvas_slot] = .{ .owner = id };
@@ -818,6 +822,16 @@ pub const Tree = struct {
         }
     }
 };
+
+test "node lifetime changes when a removed image id is reused" {
+    var tree: Tree = .{};
+    const first = try tree.createNode(.image);
+    const first_lifetime = (try tree.nodeConst(first)).lifetime;
+    try tree.removeNode(first);
+    const second = try tree.createNode(.image);
+    try std.testing.expectEqual(first, second);
+    try std.testing.expect((try tree.nodeConst(second)).lifetime != first_lifetime);
+}
 
 fn appendCanvasCommand(canvas: *CanvasState, command: native_sdk.canvas.ImmediateCanvasCommand) Error!void {
     if (canvas.command_count == max_canvas_commands) return error.CanvasCommandLimit;

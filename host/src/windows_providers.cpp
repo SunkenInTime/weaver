@@ -10,12 +10,15 @@
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
+#include <winrt/Windows.Storage.Streams.h>
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
 
 struct WeaverAudioCapture {
@@ -152,11 +155,58 @@ extern "C" int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t 
     return 0;
 }
 
+constexpr size_t max_artwork_bytes = 1024 * 1024;
+
+struct WeaverMediaDirtyFlags {
+    std::atomic<bool> session{true};
+    std::atomic<bool> properties{true};
+
+    void mark_session() {
+        session.store(true, std::memory_order_release);
+    }
+
+    void mark_properties() {
+        properties.store(true, std::memory_order_release);
+    }
+
+    bool take_session() {
+        return session.exchange(false, std::memory_order_acq_rel);
+    }
+
+    bool take_properties() {
+        return properties.exchange(false, std::memory_order_acq_rel);
+    }
+};
+
 struct WeaverMediaSession {
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession current{nullptr};
+    winrt::event_token manager_token{};
+    winrt::event_token properties_token{};
+    bool manager_subscribed = false;
+    bool properties_subscribed = false;
+    std::atomic<bool> shutting_down{false};
+    WeaverMediaDirtyFlags dirty;
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string source_app;
+    bool refresh_failed = false;
     bool apartment_initialized = false;
 
     ~WeaverMediaSession() {
+        shutting_down.store(true, std::memory_order_release);
+        try {
+            if (properties_subscribed && current) current.MediaPropertiesChanged(properties_token);
+        } catch (...) {
+        }
+        try {
+            if (manager_subscribed && manager) manager.CurrentSessionChanged(manager_token);
+        } catch (...) {
+        }
+        properties_subscribed = false;
+        manager_subscribed = false;
+        current = nullptr;
         manager = nullptr;
         if (apartment_initialized) winrt::uninit_apartment();
     }
@@ -190,6 +240,60 @@ static std::string source_app_name(const winrt::hstring &source_id) {
     }
 }
 
+static void clear_cached_properties(WeaverMediaSession *state) {
+    state->title.clear();
+    state->artist.clear();
+    state->album.clear();
+    state->source_app.clear();
+}
+
+static void rebind_current_session(WeaverMediaSession *state) {
+    if (state->properties_subscribed && state->current) {
+        state->current.MediaPropertiesChanged(state->properties_token);
+    }
+    state->properties_subscribed = false;
+    state->current = nullptr;
+    clear_cached_properties(state);
+    state->current = state->manager.GetCurrentSession();
+    if (state->current) {
+        state->source_app = source_app_name(state->current.SourceAppUserModelId());
+        state->properties_token = state->current.MediaPropertiesChanged(
+            [state](const auto &, const auto &) {
+                if (!state->shutting_down.load(std::memory_order_acquire)) state->dirty.mark_properties();
+            });
+        state->properties_subscribed = true;
+    }
+    state->dirty.mark_properties();
+}
+
+static bool read_thumbnail(
+    const winrt::Windows::Storage::Streams::IRandomAccessStreamReference &reference,
+    WeaverMediaArtwork *artwork) {
+    artwork->changed = 1;
+    if (!reference) return true;
+    try {
+        const auto stream = reference.OpenReadAsync().get();
+        const uint64_t size = stream.Size();
+        if (size > max_artwork_bytes) {
+            artwork->too_large = 1;
+            return true;
+        }
+        if (size == 0) return true;
+        const auto input = stream.GetInputStreamAt(0);
+        winrt::Windows::Storage::Streams::DataReader reader(input);
+        const uint32_t loaded = reader.LoadAsync(static_cast<uint32_t>(size)).get();
+        if (loaded != size) return false;
+        auto bytes = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[loaded]);
+        if (!bytes) return false;
+        reader.ReadBytes(winrt::array_view<uint8_t>(bytes.get(), bytes.get() + loaded));
+        artwork->bytes = bytes.release();
+        artwork->length = loaded;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 extern "C" void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]) {
     if (!output) return;
     const std::string selected = select_source_app(raw_id ? raw_id : "", resolved_name ? resolved_name : "");
@@ -204,6 +308,11 @@ extern "C" WeaverMediaSession *weaver_media_create(void) {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         state->apartment_initialized = true;
         state->manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        state->manager_token = state->manager.CurrentSessionChanged(
+            [raw = state.get()](const auto &, const auto &) {
+                if (!raw->shutting_down.load(std::memory_order_acquire)) raw->dirty.mark_session();
+            });
+        state->manager_subscribed = true;
         return state.release();
     } catch (...) {
         return nullptr;
@@ -212,17 +321,34 @@ extern "C" WeaverMediaSession *weaver_media_create(void) {
 
 extern "C" void weaver_media_destroy(WeaverMediaSession *session) { delete session; }
 
-extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *output) {
-    if (!state || !output) return -1;
+extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *output, WeaverMediaArtwork *artwork) {
+    if (!state || !output || !artwork) return -1;
     std::memset(output, 0, sizeof(*output));
+    std::memset(artwork, 0, sizeof(*artwork));
     try {
-        const auto session = state->manager.GetCurrentSession();
+        const bool session_changed = state->dirty.take_session();
+        if (session_changed) {
+            rebind_current_session(state);
+            artwork->changed = 1;
+        }
+        const auto session = state->current;
         if (!session) return 0;
-        const auto properties = session.TryGetMediaPropertiesAsync().get();
-        copy_text(output->title, properties.Title());
-        copy_text(output->artist, properties.Artist());
-        copy_text(output->album, properties.AlbumTitle());
-        copy_text(output->source_app, source_app_name(session.SourceAppUserModelId()));
+        if (state->dirty.take_properties()) {
+            try {
+                const auto properties = session.TryGetMediaPropertiesAsync().get();
+                state->title = winrt::to_string(properties.Title());
+                state->artist = winrt::to_string(properties.Artist());
+                state->album = winrt::to_string(properties.AlbumTitle());
+                state->refresh_failed = !read_thumbnail(properties.Thumbnail(), artwork);
+            } catch (...) {
+                state->refresh_failed = true;
+            }
+        }
+        artwork->refresh_failed = state->refresh_failed ? 1 : 0;
+        copy_text(output->title, state->title);
+        copy_text(output->artist, state->artist);
+        copy_text(output->album, state->album);
+        copy_text(output->source_app, state->source_app);
         const auto playback = session.GetPlaybackInfo();
         switch (playback.PlaybackStatus()) {
             case winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing:
@@ -245,4 +371,19 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
     } catch (...) {
         return -2;
     }
+}
+
+extern "C" void weaver_media_artwork_release(WeaverMediaArtwork *artwork) {
+    if (!artwork) return;
+    delete[] artwork->bytes;
+    std::memset(artwork, 0, sizeof(*artwork));
+}
+
+extern "C" int weaver_media_test_dirty_coalescing(void) {
+    WeaverMediaDirtyFlags dirty;
+    if (!dirty.take_session() || dirty.take_session()) return 0;
+    if (!dirty.take_properties() || dirty.take_properties()) return 0;
+    dirty.mark_properties();
+    dirty.mark_properties();
+    return dirty.take_properties() && !dirty.take_properties();
 }
