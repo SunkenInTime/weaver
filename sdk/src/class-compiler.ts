@@ -52,6 +52,7 @@ export interface ClassProps {
   heightPercent?: number;
   aspectRatio?: number;
   truncate?: boolean;
+  overflowHidden?: boolean;
 }
 
 export class UtilityError extends Error {
@@ -182,6 +183,7 @@ const exampleUtilities = [
   "h-12", "h-[48px]", "h-full", "size-12", "min-w-12", "max-w-[160px]",
   "min-h-12", "max-h-[160px]", "aspect-square", "aspect-video", "aspect-[4/3]",
   "truncate",
+  "overflow-hidden",
 ] as const;
 
 export function compileClass(className: string): ClassProps {
@@ -553,6 +555,10 @@ function applyUtility(output: CompileOutput, utility: string): void {
   }
   if (utility === "truncate") {
     output.truncate = true;
+    return;
+  }
+  if (utility === "overflow-hidden") {
+    output.overflowHidden = true;
     return;
   }
   throw unknownUtility(utility);

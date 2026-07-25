@@ -1,7 +1,7 @@
 interface WeaverNativeFetchResponse { status: number; body: string }
 
 interface WeaverNativeBridge {
-  createNode(type: "column" | "row" | "text" | "icon" | "panel" | "button" | "slider" | "image" | "canvas"): number;
+  createNode(type: "column" | "row" | "stack" | "text" | "icon" | "panel" | "button" | "slider" | "image" | "canvas"): number;
   setProp(id: number, key: string, value: string | number | boolean): void;
   setText(id: number, text: string): void;
   appendChild(parentId: number, childId: number): void;
