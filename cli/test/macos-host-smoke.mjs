@@ -144,7 +144,11 @@ try {
   assert.ok(mediaRuntimeRoot, "macOS media test could not find the host runtime root");
   const mediaProviderSockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
     .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
-  assert.equal(mediaProviderSockets.length, 0, "unavailable media allocated a provider socket or reader thread");
+  assert.equal(
+    mediaProviderSockets.length,
+    1,
+    "transport-capable unavailable media did not allocate its duplex command endpoint",
+  );
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
   assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
   run(["uninstall", "Now Playing"]);
