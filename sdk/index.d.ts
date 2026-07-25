@@ -34,7 +34,16 @@ export interface TimeData {
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
 export interface AudioData { rms: number; bands: number[] }
-export interface MediaData { title: string; artist: string; album: string; playing: boolean; positionMs: number; durationMs: number }
+export interface MediaData {
+  title: string;
+  artist: string;
+  album: string;
+  status: "playing" | "paused" | "stopped";
+  playing: boolean;
+  sourceApp: string;
+  positionMs: number;
+  durationMs: number;
+}
 
 export interface WFetchInit {
   method?: "GET" | "POST";

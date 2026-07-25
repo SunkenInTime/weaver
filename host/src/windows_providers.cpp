@@ -7,6 +7,7 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
+#include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/base.h>
@@ -161,11 +162,40 @@ struct WeaverMediaSession {
     }
 };
 
-static void copy_text(char (&destination)[512], const winrt::hstring &source) {
-    const std::string utf8 = winrt::to_string(source);
-    const size_t length = std::min(utf8.size(), sizeof(destination) - 1);
-    std::memcpy(destination, utf8.data(), length);
+template <size_t Capacity>
+static void copy_text(char (&destination)[Capacity], const std::string &source) {
+    const size_t length = std::min(source.size(), sizeof(destination) - 1);
+    std::memcpy(destination, source.data(), length);
     destination[length] = '\0';
+}
+
+template <size_t Capacity>
+static void copy_text(char (&destination)[Capacity], const winrt::hstring &source) {
+    copy_text(destination, winrt::to_string(source));
+}
+
+static std::string select_source_app(const std::string &raw_id, const std::string &resolved_name) {
+    return resolved_name.empty() ? raw_id : resolved_name;
+}
+
+static std::string source_app_name(const winrt::hstring &source_id) {
+    const std::string raw_id = winrt::to_string(source_id);
+    if (raw_id.empty()) return {};
+    try {
+        const auto app_info = winrt::Windows::ApplicationModel::AppInfo::GetFromAppUserModelId(source_id);
+        if (!app_info || !app_info.Package()) return raw_id;
+        return select_source_app(raw_id, winrt::to_string(app_info.DisplayInfo().DisplayName()));
+    } catch (...) {
+        return raw_id;
+    }
+}
+
+extern "C" void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]) {
+    if (!output) return;
+    const std::string selected = select_source_app(raw_id ? raw_id : "", resolved_name ? resolved_name : "");
+    const size_t length = std::min<size_t>(selected.size(), 256);
+    std::memcpy(output, selected.data(), length);
+    output[length] = '\0';
 }
 
 extern "C" WeaverMediaSession *weaver_media_create(void) {
@@ -192,8 +222,20 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         copy_text(output->title, properties.Title());
         copy_text(output->artist, properties.Artist());
         copy_text(output->album, properties.AlbumTitle());
+        copy_text(output->source_app, source_app_name(session.SourceAppUserModelId()));
         const auto playback = session.GetPlaybackInfo();
-        output->playing = playback.PlaybackStatus() == winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        switch (playback.PlaybackStatus()) {
+            case winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing:
+                output->status = WEAVER_MEDIA_STATUS_PLAYING;
+                break;
+            case winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused:
+                output->status = WEAVER_MEDIA_STATUS_PAUSED;
+                break;
+            default:
+                output->status = WEAVER_MEDIA_STATUS_STOPPED;
+                break;
+        }
+        output->playing = output->status == WEAVER_MEDIA_STATUS_PLAYING;
         const auto timeline = session.GetTimelineProperties();
         output->position_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.Position()).count();
         output->duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeline.EndTime() - timeline.StartTime()).count();

@@ -1,6 +1,7 @@
 const std = @import("std");
+const media_protocol = @import("media_protocol.zig");
 
-const line_capacity: usize = 8192;
+const line_capacity: usize = media_protocol.max_media_frame_bytes;
 const queue_capacity: usize = 4;
 const reader_stack_bytes: usize = 256 * 1024;
 

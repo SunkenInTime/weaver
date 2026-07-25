@@ -27,11 +27,12 @@ export default widget({
           />
           <text class="text-xs text-[#8b5cf6] font-semibold">NOW PLAYING</text>
         </row>
-        <text class="text-xs text-[#94a3b8]">{media.playing ? "PLAYING" : "PAUSED"}</text>
+        <text class="text-xs text-[#94a3b8]">{media.status.toUpperCase()}</text>
       </row>
       <column class="w-[328px] gap-1">
         <text class="text-xl text-[#f8fafc] font-medium truncate">{media.title || "Nothing playing"}</text>
         <text class="text-sm text-[#94a3b8] truncate">{media.artist || media.album || (media.title ? "Unknown artist" : "Open a media app to begin")}</text>
+        <text class="text-xs text-[#64748b] truncate">{media.sourceApp || "Unknown source"}</text>
       </column>
       <row class="w-[328px] h-[4px] gap-1">
         {Array.from({ length: segmentCount }, (_, index) => (

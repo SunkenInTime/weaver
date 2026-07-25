@@ -538,3 +538,50 @@ The contract-table unit test freezes both row sets and compiles a representative
 for every syntax branch. Gradients, transitions, positioned layout, arbitrary
 state prefixes, and every utility absent from these tables remain loud
 `UtilityError` failures with a fix-it.
+
+---
+
+# Media v2 amendment (v0.5)
+
+This amendment supersedes the M3 media frame's boolean-only playback state.
+Everything else above stands.
+
+## PR 01: playback status and source application
+
+```ts
+interface MediaData {
+  title: string;
+  artist: string;
+  album: string;
+  status: "playing" | "paused" | "stopped";
+  playing: boolean;
+  sourceApp: string;
+  positionMs: number;
+  durationMs: number;
+}
+```
+
+`playing` remains on the wire and in the SDK for source and installed-bundle
+compatibility. It is always exactly `status === "playing"`. Windows maps SMTC
+`Playing` to `"playing"`, `Paused` to `"paused"`, and every other playback
+state to `"stopped"`.
+
+`sourceApp` is display-only. Windows uses the installed package's display name
+when SMTC's source AUMID resolves to a package without prompting, otherwise the
+raw AUMID is returned verbatim. It is `""` only when SMTC supplies no source
+identifier. Widget logic must not branch on this display string.
+
+No observable media session has one canonical frame: empty title, artist,
+album, and source; zero position and duration; `status: "stopped"`;
+`playing: false`.
+
+The newline-terminated provider frame has a protocol maximum of 12,502 bytes.
+That bound covers worst-case six-byte JSON escaping for each byte of three
+512-byte metadata fields, the 256-byte source field, and the reserved 259-byte
+host art-cache path, plus the longest fixed fields and two 20-digit unsigned
+timeline values. Host formatting, host dedupe storage, and runtime line
+accumulators use this same bound. Encoding failure is logged and never silently
+dropped.
+
+Album art and media transport are deliberately absent at this layer; they land
+in subsequent v0.5 stack amendments.
