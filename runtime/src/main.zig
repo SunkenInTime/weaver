@@ -456,7 +456,6 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
             }
         }
     }
-    if (dev_reload_pending.swap(false, .acq_rel)) return .dev_reload;
     const engine = model.engine orelse return null;
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
@@ -471,6 +470,19 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         std.log.info("widget present: {d} rendered frames in {d} ms", .{ rendered_presents, elapsed_ns / std.time.ns_per_ms });
     }
     return Msg{ .canvas_frame = frame.timestamp_ns };
+}
+
+/// The dev bundle listener runs off-thread. It only publishes the atomic
+/// pending bit and requests a platform frame; this loop-thread hook turns
+/// that frame boundary into the ordinary update/rebuild path. Static widgets
+/// therefore hot-swap without borrowing a GPU completion from animation,
+/// input, or resize.
+fn onFrameRequested(_: *const Model) ?Msg {
+    return takePendingDevReload();
+}
+
+fn takePendingDevReload() ?Msg {
+    return if (dev_reload_pending.swap(false, .acq_rel)) .dev_reload else null;
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
@@ -871,6 +883,7 @@ pub fn main(init: std.process.Init) !void {
         .view = view,
         .sync = syncNativeState,
         .on_frame = onFrame,
+        .on_frame_requested = onFrameRequested,
         .on_window_frame = onWindowFrame,
     });
     defer app_state.destroy();
@@ -1038,6 +1051,51 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "dev reload crosses requestFrame into the frame-requested hook exactly once" {
+    const TestApp = struct {
+        model: Model = .{},
+        reloads: usize = 0,
+
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-dev-reload-wake",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+                .frame_requested_fn = frameRequested,
+            };
+        }
+
+        fn frameRequested(context: *anyopaque, _: *native_sdk.Runtime) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(context));
+            if (onFrameRequested(&self.model)) |msg| {
+                if (msg == .dev_reload) self.reloads += 1;
+            }
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    var app_state: TestApp = .{};
+    const app = app_state.app();
+    try harness.start(app);
+
+    dev_reload_pending.store(false, .release);
+    dev_reload_runtime.store(@intFromPtr(&harness.runtime), .release);
+    defer {
+        dev_reload_runtime.store(0, .release);
+        dev_reload_pending.store(false, .release);
+    }
+    const notifier = try std.Thread.spawn(.{}, notifyDevReload, .{});
+    notifier.join();
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.pendingFrameRequestCount());
+
+    const frame_event = harness.null_platform.takeFrameRequest().?;
+    try std.testing.expect(frame_event == .frame_requested);
+    try harness.runtime.dispatchPlatformEvent(app, frame_event);
+    try std.testing.expectEqual(@as(usize, 1), app_state.reloads);
+    try std.testing.expect(onFrameRequested(&app_state.model) == null);
 }
 
 test "corner radius projection preserves authored values and maps retained unset in-band" {
