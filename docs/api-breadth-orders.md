@@ -91,8 +91,10 @@ surprised it fails."
       file, provider exposes `artPath` — rides the existing local-path
       `<image>` with zero new transport.
     - Transport: `media.play/pause/next/previous/seek(ms)` command channel
-      back through weaverd. Capability call (Dara to confirm): declared-but-
-      quiet under ADR 0002 — Rainmeter-parity, but named in the surface.
+      back through weaverd. Capability call (Dara confirmed 2026-07-25):
+      declared-but-quiet under ADR 0002 — `capabilities: ["media-transport"]`
+      named in the surface, no consent prompt. Rainmeter-parity with a paper
+      trail. Plan: `docs/media-v2-brief.md`.
     - `status: "playing" | "paused" | "stopped"` replacing the bare bool;
       `sourceApp` so widgets can show which player it is.
 12. **Media provider (macOS) — MediaRemote adapter route** (Dara,
