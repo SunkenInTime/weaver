@@ -158,7 +158,7 @@ pub const Engine = struct {
     pub fn drainProviders(self: *Engine) Error!usize {
         self.beginTurn();
         defer self.endTurn();
-        var line_buffer: [8192]u8 = undefined;
+        var line_buffer: [provider_mod.max_line_bytes]u8 = undefined;
         var count: usize = 0;
         while (self.provider.take(&line_buffer)) |line| {
             if (!bridge.dispatchProvider(self.context, &self.bridge_state, line)) return self.reportException();
