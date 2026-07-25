@@ -19,6 +19,20 @@ Updated: 2026-07-24 (Greptile merge-bar loop in progress)
   one level of relative imports; Native runtime limits remain authoritative
   beyond that documented AST estimate.
 - No Native fork change was required in iteration 1.
+- Iteration 1 current-head reviews completed at PR19=4/5, PR21=4/5,
+  and PR20/22-31=5/5. Thread-aware reads found two new P1s and no current
+  P2s.
+- PR19 fix `5f4f864` feeds the Native layout result for each canvas back
+  through the Weaver runtime bridge. Responsive/fractional/aspect canvases now
+  rebuild their stable context and redraw once with the actual frame; colored
+  canvas clears use the same resolved dimensions. The dimensions live in the
+  existing canvas side table, so common retained nodes do not grow and idle
+  canvases do not poll.
+- PR21 fix `05c1ba4` registers the tractable local alias form
+  `export { Tree as default }` in the one-level static budget estimator, with
+  an oversized-tree rejection regression.
+- Iteration 2 restacks all thirteen Weaver PR heads because the lowest fix is
+  in PR19. The Native fork remains unchanged.
 
 ## 2026-07-24 Greptile review sweep
 
