@@ -28,6 +28,10 @@ run; they show the matching `Satellites` track playing at 0:37 and paused at
   unavailable diagnostics, bounded restart state, idle teardown, recovery,
   command IDs, seek microseconds, duration clamping, and false ack on process
   failure.
+- Each transport-capable widget owns one FIFO command worker. The host
+  supervision loop only authorizes/enqueues and later writes completed acks,
+  so a helper timeout cannot stall provider delivery, supervision, reload, or
+  shutdown handling.
 - The release audit passes and the Native SDK submodule remains pinned.
 
 Final local commands:
