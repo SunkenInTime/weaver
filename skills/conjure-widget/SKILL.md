@@ -5,92 +5,96 @@ description: Create or remix a Weaver desktop widget from a natural-language req
 
 # Conjure a Weaver widget
 
-Turn the request into one checked `widget.tsx`, then launch the real desktop
-surface. Preserve the user's visual intent; ask only when a missing choice would
-materially change the widget.
+Turn a natural-language request into one checked `widget.tsx`, then launch the
+real desktop surface. Preserve visual intent and keep unsupported requests
+loud. Read `sdk/CONTRACT.md` when exact props, provider shapes, security rules,
+or the complete utility table matter; it is authoritative.
 
 ## Workflow
 
 1. From the Weaver repository root, scaffold with
-   `npx --no-install weaver init <name>` unless the widget directory exists.
-2. Edit `<name>/widget.tsx`. Keep one default export in the literal form
+   `npx --no-install weaver init <name>` unless the directory exists.
+2. Edit `<name>/widget.tsx`. Keep one literal default export:
    `export default widget({ ... }, () => <... />);`. Do not compute config.
-3. Run `npx --no-install weaver check <name>` and fix every error. Treat its
-   messages as the contract; never bypass a dated M2/M3 refusal.
-4. Run `npx --no-install weaver dev <name>`. Leave it running so the user can
-   inspect the widget. Saving `widget.tsx` checks, bundles, and restarts it.
-5. Report what appeared and any M1 boundary that constrained the request.
+3. Keep local images/fonts/licenses inside the widget source root. Reference
+   images with relative paths and fonts as `font-[file-stem]`.
+4. Run `npx --no-install weaver check <name>` and fix every error. Never
+   suppress an unknown utility, undeclared provider/origin, or asset failure.
+5. Run `npx --no-install weaver dev <name>`. Leave it running for inspection;
+   saving `widget.tsx` validates and hot-swaps when window config is unchanged.
+6. Report the visible result, interaction behavior, and any explicit boundary.
 
-## Authoring contract
+## Elements and events
 
-Import from `@weaver/sdk`. Available hooks are `useState`, `useRef`,
-`useEffect`, `useInterval`, and `useProvider("time")`. Calling
-`useProvider("time")` requires `subscribe: ["time"]` in the literal config.
+Import from `@weaver/sdk`.
 
-Config fields:
-
-```ts
-{
-  name: string,
-  size: [number, number],
-  anchor?: {
-    monitor?: "primary",
-    corner: "top-left" | "top-right" | "bottom-left" | "bottom-right",
-    offset?: [number, number]
-  },
-  layer?: "desktop" | "normal" | "topmost",
-  clickThrough?: boolean,
-  subscribe?: ["time"],
-  origins?: string[],
-  capabilities?: []
-}
-```
-
-Render with `<column>`, `<row>`, `<panel>`, `<text>`, and path-backed
-`<icon>`. Text children must be strings or numbers. Icons take no children.
-Use a literal full-catalog Lucide name (`<icon name="play" />`) or literal
-custom SVG path data (`<icon d="M 9 5 L 21 12 L 9 19 Z" />`); custom paths
-may add `viewBox` and positive numeric `stroke`. Size icons geometrically with
-`w-*`/`h-*` and color them with `text-*`. `<image>`, `<button>`, and
-`<slider>` are available; `<canvas>` remains a later surface.
-
-## Class utilities
-
-One scale unit is 4 px. Use only:
-
-| Utility | Meaning |
+| Element | Purpose and special props |
 |---|---|
-| `p-N`, `p-[Npx]` | Uniform padding |
-| `gap-N`, `gap-[Npx]` | Flex gap |
-| `rounded`, `rounded-{md,lg,xl,2xl,3xl,full}`, `rounded-[Npx]` | Radius |
-| `bg-[#rgb]`, `bg-[#rrggbb]`, `bg-[#rrggbbaa]`, optional `/NN` | Background and alpha |
-| `text-[#rgb/#rrggbb/#rrggbbaa]` | Text color |
-| `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | Text size |
-| `font-{light,normal,medium,semibold,bold}` | Text weight |
-| `opacity-NN` | Node opacity percent |
-| `items-{start,center,end,baseline}` | Cross-axis alignment |
-| `justify-{start,center,end,between}` | Main-axis alignment |
-| `grow` | Flex grow 1 |
-| `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | Fixed size |
-| `truncate` | Single-line ellipsis on text |
-| `shadow-*`, `shadow-inner`, `shadow-[x_y_blur_spread_#hex]` | Box shadow |
-| `hover:` / `pressed:` + `bg-*`, `text-*`, `opacity-*`, `border-*`, or `shadow-*` | Native interaction-state override |
+| `<column>`, `<row>` | flex flow containers |
+| `<stack>` | overlay children in paint order; use full-size children for layers |
+| `<panel>` | painted box with column children |
+| `<text>` | string/number children only |
+| `<icon name="…">` / `<icon d="…">` | full-catalog Lucide name or custom SVG path; no children; size with `w-*`/`h-*`, color with `text-*` |
+| `<image src="…">` | local source; `fit="cover|contain|stretch"`, optional `tile` |
+| `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress` |
+| `<slider>` | `value`, positive `max`, `onChange` |
+| `<canvas>` | `onFrame(ctx, frame)`, optional `fps`; use only for drawing that primitives cannot express |
 
-Unknown utilities are errors. Gradients, transitions, and animations outside
-the documented surface remain errors.
+Press callbacks receive `{x,y,u,v}`: local logical pixels plus normalized
+0–1 coordinates. A zero-argument `onPress` remains valid. Prefer native
+`hover:`/`pressed:` classes for visual feedback; do not round-trip state
+through JS.
+
+## Hooks, providers, and network
+
+Available hooks: `useState`, `useRef`, `useEffect`, `useInterval`,
+`useStorage`, and `useProvider`. Providers are `time`, `cpu`, `memory`,
+`audio`, and `media`; every provider must also appear in literal
+`config.subscribe`. Audio is change/silence-aware and media data is read-only.
+
+Use `wfetch` only for HTTPS hosts listed exactly in `config.origins`. Keep
+`capabilities` empty until the contract adds a widget capability. Plain TSX is
+bundled automatically; do not add external imports beyond `@weaver/sdk` and
+widget-local modules/assets.
+
+## Styling surface
+
+Tailwind semantics apply left-to-right; one scale unit is 4 logical px.
+Arbitrary lengths use bracketed pixel forms. Named colors use the Tailwind v4
+palette and accept `/NN` alpha.
+
+- Spacing: `p/px/py/pt/pr/pb/pl-*`, `m/mx/my/mt/mr/mb/ml-*` (negative margins
+  allowed), `gap-*`.
+- Sizing: `w-*`, `h-*`, `size-*`, full/fractions/auto, min/max bounds, and
+  `aspect-square|video|[W/H]|auto`.
+- Flex: `items-*`, `justify-start|center|end|between|around|evenly`, numeric
+  `grow-*`, `shrink|shrink-0`, `self-*`, `flex-wrap|flex-nowrap`.
+- Surfaces: uniform/directional/per-corner `rounded-*`, `border` widths/colors,
+  `bg-*`, `opacity-*`, outset/inset/arbitrary `shadow-*`, and `overflow-hidden`.
+- Text: named/arbitrary sizes, five `font-*` weights, `font-sans|mono|[stem]`,
+  alignment, `leading-*`, `tracking-*`, `line-clamp-*`, `truncate`,
+  `tabular-nums`, and `text-shadow-*`.
+- Interaction: only `hover:` and `pressed:` + `bg-<color>`, `text-<color>`,
+  `opacity-N`, `border-<color>`, or `shadow-*`. Pressed wins over hover.
 
 For a non-pressable child inside a `<button>` or `<slider>`, `hover:` and
 `pressed:` automatically follow the nearest pressable ancestor; do not add a
 `group` class. A state variant outside any pressable ancestor fails
 `weaver check` with `NearestPressableAncestor`.
 
-## M1 boundaries
+Use `<stack>` plus ordinary size/alignment classes for overlays. Apply
+`rounded-*` directly to images for masks; `tile` repeats at natural size and
+overrides fit geometry. Pair `overflow-hidden` with radii to clip descendants.
 
-- Use only the `time` provider. It supplies `hh`, `mm`, `ss`, `weekday`,
-  `month`, `day`, `year`, and `epochMs` once per second while subscribed.
-- Use `<button>`/`<slider>` for interaction; do not fake controls with inert
-  panels.
-- Do not fetch. `origins` is validated now, but network access arrives in M2.
-- Keep `capabilities` empty. The capability ladder arrives in M2.
-- Plain TSX is bundled automatically; do not add dependencies or external
-  imports beyond `@weaver/sdk`.
+Unknown utilities are errors. Gradients, transforms, transitions, animations,
+blur/backdrop blur, absolute positioning, grid, scrolling, and responsive
+variants are not in this surface; redesign with supported primitives or state
+the boundary instead of inventing a no-op.
+
+## Asset bounds
+
+- Bundle at most two parseable TrueType-outline faces, each at most 512 KiB.
+  Path-backed icons consume no font slot.
+- Font family stems must match `font-[stem]`; keep adjacent license files.
+- Images remain widget-local. Remote/provider image URLs are unsupported;
+  provider-supplied images must arrive as local paths when that API exists.
