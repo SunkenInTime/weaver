@@ -108,6 +108,10 @@ pub const Error = error{
 
 pub const CanvasState = struct {
     owner: NodeId = 0,
+    layout_width: f32 = 0,
+    layout_height: f32 = 0,
+    command_layout_width: f32 = 0,
+    command_layout_height: f32 = 0,
     commands: [max_canvas_commands]native_sdk.canvas.ImmediateCanvasCommand = undefined,
     command_count: usize = 0,
     points: [max_canvas_points]native_sdk.geometry.PointF = undefined,
@@ -336,6 +340,19 @@ pub const Tree = struct {
         return &self.canvases[target.canvas_slot - 1];
     }
 
+    /// Layout feedback is runtime metadata, not an authored tree mutation.
+    /// Keep it in the canvas side table so responsive canvases receive their
+    /// actual content-box dimensions without growing every retained node.
+    pub fn setCanvasLayout(self: *Tree, id: NodeId, width: f32, height: f32) Error!bool {
+        const canvas = try self.canvasState(id);
+        const next_width = @max(width, 0);
+        const next_height = @max(height, 0);
+        if (canvas.layout_width == next_width and canvas.layout_height == next_height) return false;
+        canvas.layout_width = next_width;
+        canvas.layout_height = next_height;
+        return true;
+    }
+
     /// Decode the SDK's bounded Float64 wire batch into fork-native drawing
     /// commands. Colors arrive as exact packed RGBA integers; geometry is
     /// narrowed once here, so the frame renderer never parses JS values.
@@ -343,7 +360,8 @@ pub const Tree = struct {
         if (wire.len > max_canvas_wire_values) return error.InvalidCanvasBatch;
         const fingerprint = std.hash.Wyhash.hash(0x6361_6e76_6173, std.mem.sliceAsBytes(wire));
         const canvas = try self.canvasState(id);
-        if (canvas.fingerprint == fingerprint and canvas.command_count > 0) return;
+        if (canvas.fingerprint == fingerprint and canvas.command_count > 0 and
+            canvas.command_layout_width == canvas.layout_width and canvas.command_layout_height == canvas.layout_height) return;
         canvas.command_count = 0;
         canvas.point_count = 0;
         var cursor: usize = 0;
@@ -356,7 +374,12 @@ pub const Tree = struct {
                     if (color.a > 0) {
                         const node_value = try self.nodeConst(id);
                         try appendCanvasCommand(canvas, .{ .fill_rect = .{
-                            .rect = native_sdk.geometry.RectF.init(0, 0, node_value.width, node_value.height),
+                            .rect = native_sdk.geometry.RectF.init(
+                                0,
+                                0,
+                                if (canvas.layout_width > 0) canvas.layout_width else @max(node_value.width, 0),
+                                if (canvas.layout_height > 0) canvas.layout_height else @max(node_value.height, 0),
+                            ),
                             .color = color,
                         } });
                     }
@@ -398,6 +421,8 @@ pub const Tree = struct {
             }
         }
         canvas.fingerprint = fingerprint;
+        canvas.command_layout_width = canvas.layout_width;
+        canvas.command_layout_height = canvas.layout_height;
         self.changed();
     }
 
@@ -587,7 +612,7 @@ test "canvas wire decodes packed colors and polyline points" {
     const id = try tree.createNode(.canvas);
     try tree.setNumberProp(id, "width", 64);
     try tree.setNumberProp(id, "height", 32);
-    try tree.setCanvasCommands(id, &.{
+    const wire = [_]f64{
         0,          0x11223344,
         1,          1,
         2,          3,
@@ -597,11 +622,19 @@ test "canvas wire decodes packed colors and polyline points" {
         0,          0,
         4,          8,
         9,          3,
-    });
+    };
+    try tree.setCanvasCommands(id, &wire);
     const canvas = try tree.canvasStateConst(id);
     try std.testing.expectEqual(@as(usize, 3), canvas.command_count);
     try std.testing.expectEqual(@as(usize, 3), canvas.point_count);
     try std.testing.expectEqual(@as(f32, 64), canvas.commands[0].fill_rect.rect.width);
     try std.testing.expectApproxEqAbs(@as(f32, 0x11) / 255, canvas.commands[0].fill_rect.color.r, 0.0001);
     try std.testing.expectEqual(@as(usize, 3), canvas.commands[2].polyline.points.len);
+    try std.testing.expect(try tree.setCanvasLayout(id, 96, 48));
+    try std.testing.expect(!(try tree.setCanvasLayout(id, 96, 48)));
+    try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).layout_width);
+    try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).layout_height);
+    try tree.setCanvasCommands(id, &wire);
+    try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.width);
+    try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.height);
 }

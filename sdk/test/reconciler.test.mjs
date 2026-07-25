@@ -10,6 +10,7 @@ let nextNode = 1;
 let nextTimer = 1;
 let eventCallback;
 let providerCallback;
+let canvasResizeCallback;
 const canvasFrameCallbacks = new Map();
 let hostAvailable = true;
 let storageDocument = null;
@@ -31,6 +32,7 @@ globalThis.native = {
   clearInterval(id) { operations.push(["clearInterval", id]); callbacks.delete(id); },
   onTimer(id, callback) { operations.push(["onTimer", id]); callbacks.set(id, callback); },
   setCanvasCommands(id, commands) { operations.push(["setCanvasCommands", id, [...commands]]); },
+  onCanvasResize(callback) { canvasResizeCallback = callback; },
   onCanvasFrame(id, callback) { operations.push(["onCanvasFrame", id]); canvasFrameCallbacks.set(id, callback); },
   clearCanvasFrame(id) { operations.push(["clearCanvasFrame", id]); canvasFrameCallbacks.delete(id); },
   fetch: async () => ({ status: 200, body: '{"ok":true}' }),
@@ -94,6 +96,14 @@ test("widget renders one native generation and providers use native timers", asy
           ctx.polyline([0, 0, 4, 5], 2, "#ffffff");
         },
       }),
+      sdk.h("canvas", {
+        class: "size-full",
+        fps: 0,
+        onFrame(ctx) {
+          operations.push(["responsiveCanvasSize", ctx.width, ctx.height]);
+          ctx.clear();
+        },
+      }),
       ...(reversed ? keyed.reverse() : keyed));
   });
   assert.equal(operations.filter(([name]) => name === "beginBatch").length, 1);
@@ -136,8 +146,13 @@ test("widget renders one native generation and providers use native timers", asy
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "37.5"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "0.75"));
   assert.ok(operations.some((operation) => operation[0] === "setText" && operation[2] === "Test Song"));
-  const canvasNode = operations.findLast((operation) => operation[0] === "createNode" && operation[1] === "canvas")[2];
-  const pausedCanvasNode = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas")[0][2];
+  const canvasNodes = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas");
+  const pausedCanvasNode = canvasNodes[0][2];
+  const canvasNode = canvasNodes[1][2];
+  const responsiveCanvasNode = canvasNodes[2][2];
+  assert.deepEqual(operations.filter(([name]) => name === "responsiveCanvasSize").at(-1), ["responsiveCanvasSize", 0, 0]);
+  canvasResizeCallback(responsiveCanvasNode, 96, 48);
+  assert.deepEqual(operations.filter(([name]) => name === "responsiveCanvasSize").at(-1), ["responsiveCanvasSize", 96, 48]);
   assert.ok(operations.some((operation) => operation[0] === "setCanvasCommands" && operation[1] === pausedCanvasNode));
   assert.ok(!operations.some((operation) => operation[0] === "onCanvasFrame" && operation[1] === pausedCanvasNode));
   const submit = operations.findLast((operation) => operation[0] === "setCanvasCommands" && operation[1] === canvasNode);
@@ -152,7 +167,7 @@ function isolatedNative() {
   return {
     createNode() { return ++id; }, setProp() {}, setText() {}, appendChild() {}, insertBefore() {}, removeNode() {}, setRoot() {},
     beginBatch() {}, endBatch() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, onProvider() {},
-    setInterval() { return 1; }, clearInterval() {}, onTimer() {}, setCanvasCommands() {}, onCanvasFrame() {}, clearCanvasFrame() {},
+    setInterval() { return 1; }, clearInterval() {}, onTimer() {}, setCanvasCommands() {}, onCanvasResize() {}, onCanvasFrame() {}, clearCanvasFrame() {},
     fetch: async () => ({ status: 200, body: "{}" }), storageRead() { return null; }, storageWrite() {}, log() {},
   };
 }

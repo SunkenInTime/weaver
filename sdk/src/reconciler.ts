@@ -137,6 +137,16 @@ interface CanvasBinding {
 const canvases = new Map<number, CanvasBinding>();
 const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
+native.onCanvasResize((id, width, height) => {
+  const binding = canvases.get(id);
+  if (!binding || !Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height < 0) return;
+  if (binding.width === width && binding.height === height) return;
+  binding.width = width;
+  binding.height = height;
+  binding.ctx = createCanvasContext(binding);
+  drawCanvasFrame(id, Date.now() / 1000);
+});
+
 export function h(type: VNode["type"], props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
   const propChildren = source.children as WidgetChild | WidgetChild[] | undefined;

@@ -18,6 +18,7 @@ interface WeaverNativeBridge {
   clearInterval(id: number): void;
   onTimer(id: number, callback: (timestampSeconds?: number) => void): void;
   setCanvasCommands(id: number, commands: Float64Array): void;
+  onCanvasResize(callback: (id: number, width: number, height: number) => void): void;
   onCanvasFrame(id: number, callback: (timestampSeconds: number) => void): void;
   clearCanvasFrame(id: number): void;
   fetch(url: string, method: "GET" | "POST", headersJson: string, body: string): Promise<WeaverNativeFetchResponse>;

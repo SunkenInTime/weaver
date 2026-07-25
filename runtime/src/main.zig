@@ -344,19 +344,36 @@ fn syncTimers(model: *Model, effects: *Effects) void {
     }
 }
 
-/// The fork owns a slider's optimistic drag value until dispatch. Stable
-/// global keys make its layout id computable from the retained node id, so the
-/// sync hook maps every concurrent slider back without closures or fork code.
+/// Stable global keys map runtime layout feedback back to retained nodes:
+/// sliders keep their optimistic drag value, while canvases publish their
+/// resolved content-box dimensions to JS only when layout actually changes.
 fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) void {
+    const CanvasResize = struct { id: tree_mod.NodeId, width: f32, height: f32 };
+    var canvas_resizes: [tree_mod.max_canvases]CanvasResize = undefined;
+    var canvas_resize_count: usize = 0;
     for (&model.tree.nodes, 0..) |*node, index| {
-        if (!node.alive or node.kind != .slider) continue;
+        if (!node.alive or (node.kind != .slider and node.kind != .canvas)) continue;
         const id: tree_mod.NodeId = @intCast(index + 1);
-        const widget_id = native_sdk.canvas.globalWidgetId(.slider, .{ .int = id });
+        const widget_id = native_sdk.canvas.globalWidgetId(if (node.kind == .slider) .slider else .stack, .{ .int = id });
         for (layout.nodes) |layout_node| {
             if (layout_node.widget.id != widget_id) continue;
-            model.slider_values[index] = layout_node.widget.value * node.max;
+            if (node.kind == .slider) {
+                model.slider_values[index] = layout_node.widget.value * node.max;
+            } else {
+                const frame = layout_node.frame.normalized();
+                if ((model.tree.setCanvasLayout(id, frame.width, frame.height) catch false) and canvas_resize_count < canvas_resizes.len) {
+                    canvas_resizes[canvas_resize_count] = .{ .id = id, .width = frame.width, .height = frame.height };
+                    canvas_resize_count += 1;
+                }
+            }
             break;
         }
+    }
+    const engine = model.engine orelse return;
+    for (canvas_resizes[0..canvas_resize_count]) |resize| {
+        engine.fireCanvasResize(resize.id, resize.width, resize.height) catch |err| {
+            std.log.err("widget canvas resize callback failed: {s}", .{@errorName(err)});
+        };
     }
 }
 
