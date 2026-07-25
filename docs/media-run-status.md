@@ -8,8 +8,8 @@ Last updated: 2026-07-25
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`5605dd1`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`5a81a4c`) |
-| 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`edd821d`) |
+| 04/05 | `media/04-macos-adapter` | layer 03 | BLOCKED; no PR 04 |
 | 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
@@ -72,19 +72,19 @@ This run will not change the submodule pointer.
 ## Blockers and unverified gates
 
 - None for the Windows stack.
-- PR 04 remains spike-gated. This Windows run cannot claim the required real
-  macOS metadata frame or delivered command without recorded external Mac/CI
-  execution evidence.
+- PR 04 is BLOCKED. Existing attended-Mac evidence proves public publication
+  APIs do not observe another process, while this Windows run cannot produce
+  the newly required real metadata frame or delivered command. The exact
+  failed gate and reproducible macOS static audit are recorded in
+  `docs/media-evidence/pr04-blocked.md`.
 
 ## Current work
 
-Layer 03 is committed, pushed, and open as draft PR
-`https://github.com/SunkenInTime/weaver/pull/34`. Automated, production build,
-real-player verb, and binding visual gates pass.
+Layer 04's spike gate is BLOCKED with evidence. No adapter implementation or
+draft PR is claimed. The Windows slice remains complete through layer 03.
 
 ## Next executable task
 
-Create `media/04-macos-adapter` from layer 03 and execute the spike gate. This
-Windows run must record PR 04 as BLOCKED unless real macOS evidence proves both
-a metadata frame and a delivered command; then continue layer 05 from layer 03
-if blocked.
+Commit and push the blocked layer-04 record. Then create `media/05-noro-gate`
+from layer 03, carry the blocked record forward, and complete the Windows noro
+acceptance gate.
