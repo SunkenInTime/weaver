@@ -1,7 +1,9 @@
 # Media PR 02 visual and live evidence
 
-Date: 2026-07-25  
-Machine: Windows 11, 2560×1440 primary display, Spotify Premium  
+Date: 2026-07-25
+
+Machine: Windows 11, 2560×1440 primary display, Spotify Premium
+
 Artifact: `node cli/bin/weaver.js dev examples/now-playing`
 
 The widget was allowed to settle on the real desktop layer. Other windows were
@@ -72,3 +74,20 @@ the provider was allowed two seconds to poll.
 | Progress | yes | bottom row | purple/slate segments | retained paused position | PASS |
 
 Overall: **PASS**.
+
+## Static-image idle A/B
+
+The identical `examples/styling-images` source ran from ReleaseFast host and
+runtime builds on the stack parent and layer-02 head. Each process settled for
+at least 40 seconds before a 60-second `TotalProcessorTime` sample. No source
+change occurred during either window.
+
+| Head | Settle | Sample | CPU start→end | CPU delta | Private start→end |
+|---|---:|---:|---:|---:|---:|
+| `media/01-status-sourceapp@2feb700` | 41 s | 60,014.772 ms | 125.000→125.000 ms | 0.000 ms | 42.719→42.684 MiB |
+| `media/02-album-art@8f66767` | 42 s | 60,013.804 ms | 109.375→109.375 ms | 0.000 ms | 42.758→41.570 MiB |
+
+Claim: **no observed static-image idle CPU regression**. Both heads advanced
+by zero Windows CPU accounting quanta over matched 60-second windows. The
+layer-02 end-of-window private working allocation was 1.114 MiB lower in this
+sample; this is recorded as an observation, not a generalized memory claim.
