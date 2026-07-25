@@ -29,6 +29,7 @@ export interface ClassProps {
   textColor?: string;
   fontScale?: number;
   fontWeight?: "light" | "normal" | "medium" | "semibold" | "bold";
+  fontFamily?: string;
   textAlign?: "start" | "center" | "end";
   lineHeight?: number;
   letterSpacing?: number;
@@ -170,7 +171,7 @@ const exampleUtilities = [
   "text-4xl", "font-light", "font-normal", "font-medium", "font-semibold",
   "font-bold", "opacity-70", "items-start", "items-center", "items-end",
   "items-baseline", "items-stretch", "justify-start", "justify-center", "justify-end",
-  "font-bold", "text-left", "text-center", "text-right", "text-[13px]",
+  "font-bold", "font-sans", "font-mono", "font-[CozetteVector]", "text-left", "text-center", "text-right", "text-[13px]",
   "leading-tight", "tracking-wide", "line-clamp-2", "tabular-nums",
   "shadow", "shadow-sm", "shadow-md", "shadow-lg", "shadow-xl", "shadow-inner",
   "shadow-red-500", "shadow-[0_4px_12px_-2px_#00000066]",
@@ -369,6 +370,14 @@ function applyUtility(output: CompileOutput, utility: string): void {
   }
   if (utility === "grow") {
     output.grow = 1;
+    return;
+  }
+  if (utility === "font-sans" || utility === "font-mono") {
+    output.fontFamily = utility.slice("font-".length);
+    return;
+  }
+  if ((match = /^font-\[([A-Za-z0-9][A-Za-z0-9_-]{0,62})\]$/.exec(utility))) {
+    output.fontFamily = match[1];
     return;
   }
   if ((match = /^text-(left|center|right)$/.exec(utility))) {
