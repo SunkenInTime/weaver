@@ -113,6 +113,37 @@ pub const Queue = struct {
     }
 };
 
+/// Incremental newline framing shared by blocking command readers. A partial
+/// final line is malformed; complete lines are parsed before entering Queue.
+pub const Framer = struct {
+    pending: [max_line_bytes * 2]u8 = undefined,
+    pending_len: usize = 0,
+
+    pub fn feed(self: *Framer, queue: *Queue, bytes: []const u8) bool {
+        if (bytes.len > self.pending.len - self.pending_len) {
+            queue.malformed.store(true, .release);
+            return false;
+        }
+        @memcpy(self.pending[self.pending_len..][0..bytes.len], bytes);
+        self.pending_len += bytes.len;
+        var start: usize = 0;
+        while (std.mem.indexOfScalarPos(u8, self.pending[0..self.pending_len], start, '\n')) |end| {
+            queue.pushLine(self.pending[start..end]);
+            start = end + 1;
+        }
+        if (start > 0) {
+            std.mem.copyForwards(u8, self.pending[0 .. self.pending_len - start], self.pending[start..self.pending_len]);
+            self.pending_len -= start;
+        }
+        return true;
+    }
+
+    pub fn finish(self: *Framer, queue: *Queue) void {
+        if (self.pending_len != 0) queue.malformed.store(true, .release);
+        self.pending_len = 0;
+    }
+};
+
 /// A fixed sliding window implements "at most 5 accepted verbs in the prior
 /// second" without a timer or heap allocation.
 pub const RateLimiter = struct {
@@ -175,6 +206,22 @@ test "command queue keeps FIFO and overflow IDs enter the nack lane" {
     for (1..queue_capacity + 1) |id| try std.testing.expectEqual(id, queue.take().?.id);
     try std.testing.expect(queue.take() == null);
     try std.testing.expectEqual(@as(u64, queue_capacity + 1), queue.takeNack().?);
+}
+
+test "host command framing preserves partial and adjacent lines" {
+    var queue: Queue = .{};
+    var framer: Framer = .{};
+    try std.testing.expect(framer.feed(&queue, "{\"command\":\"media\",\"verb\":\"pl"));
+    try std.testing.expect(queue.take() == null);
+    try std.testing.expect(framer.feed(
+        &queue,
+        "ay\",\"id\":1}\n{\"command\":\"media\",\"verb\":\"pause\",\"id\":2}\n",
+    ));
+    try std.testing.expectEqual(@as(u64, 1), queue.take().?.id);
+    try std.testing.expectEqual(@as(u64, 2), queue.take().?.id);
+    try std.testing.expect(framer.feed(&queue, "{\"command\":\"media\""));
+    framer.finish(&queue);
+    try std.testing.expect(queue.malformed.load(.acquire));
 }
 
 test "rate limiter permits five verbs in a sliding second" {
