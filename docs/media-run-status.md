@@ -7,7 +7,7 @@ Last updated: 2026-07-25
 | Layer | Branch | Parent | State |
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | IN PROGRESS |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`bffe5c2`) |
 | 03/05 | `media/03-transport` | layer 02 | NOT STARTED |
 | 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
 | 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
@@ -58,13 +58,12 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 02 implementation is in progress. The host now consumes coalesced SMTC
-events, publishes bounded artwork through the host-owned hash cache, and emits
-optional `artPath`; the runtime has canonical art-root containment and dynamic
-same-ID image re-registration. Automated and live visual gates pass; the
-required static-image parent/head idle A/B also passes.
+Layer 02 is committed, pushed, and open as draft PR
+`https://github.com/SunkenInTime/weaver/pull/33`. Automated, live visual, and
+static-image idle A/B gates pass.
 
 ## Next executable task
 
-Rerun the final layer-02 green matrix at the evidence head, open the draft PR
-against layer 01, then branch layer 03 for duplex transport.
+Create `media/03-transport` from layer 02 and implement the frozen duplex
+channel, ack demultiplexing, verb semantics, capability gate, SDK transport
+hook, and Windows live controls.
