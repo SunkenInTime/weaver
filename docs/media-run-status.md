@@ -84,6 +84,13 @@ This run will not change the submodule pointer.
   hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
   transport-only idle-zero, forced SDK resolution despite a hostile widget
   tsconfig, and local hook aliases.
+- Layer 03 round-2 gate: `npm test` PASS 63/63, `npm run typecheck` PASS,
+  runtime and host `zig build test` PASS, and
+  `weaver check examples/now-playing` PASS. Direct aarch64-macos no-emit
+  compilation of the runtime provider passes. New tests cover a stalled
+  connected Unix host, deterministic host/runtime cancel-before-read
+  shutdown, fatal-channel crash/restart, and SDK calls through destructuring,
+  deferred assignment, object properties, and a re-export chain.
 - Layer 04 adversarial local gate: `npm test` PASS 63/63,
   `npm run typecheck` PASS, release audit PASS, every example directory with
   `widget.tsx` passed `weaver check`, runtime test/build PASS, and Windows host
@@ -156,6 +163,12 @@ This run will not change the submodule pointer.
   failures; metadata frames retain their 1 Hz/fast-audio timer drain.
   Runtime tests and direct aarch64 semantic compilation pass; the final
   hosted-session result is pending.
+- Layer 05 round-2 local gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, all 18 examples passed `weaver check`, runtime and
+  Windows-host `zig build test` PASS, and both macOS no-emit semantic compiles
+  PASS. The Noro seek handler now uses normalized `event.u`; a viewed live
+  Spotify recheck moved the visible position from `03:24` to `04:09` within
+  2.2 seconds after a 75% strip press, with unchanged shell rendering.
 
 ## Blockers and unverified gates
 
@@ -164,18 +177,22 @@ This run will not change the submodule pointer.
   `docs/media-evidence/pr04-mac-spike.md`; it does not prove the remediated
   Weaver implementation.
 - The remediated macOS implementation remains **UNVERIFIED (needs attended
-  Mac)** for: real metadata and 1 Hz timeline advancement; 300×300+ art and
-  malformed-art loss/recovery; all five verbs and ±2000 ms verified seek;
-  no-session seek false; helper/framework/timeout/signal rejection; residual
-  EOF, crash, quit/relaunch, exponential backoff, and TERM-to-KILL teardown;
-  Developer-ID signing, timestamp, notarization, quarantine, and Gatekeeper.
+  Mac)** for: real metadata and playback-rate-aware 1 Hz advancement at
+  non-1×; 300×300+ art and malformed-art loss/recovery; all five verbs,
+  delayed seek convergence and ±2000 ms verified seek at non-1×; no-session
+  seek false; helper/framework/timeout/signal rejection; a silent first-frame
+  watchdog; fatal shared-channel widget restart with resumed frames and
+  transport; residual EOF, crash, quit/relaunch, exponential backoff, and
+  TERM-to-KILL teardown; Developer-ID signing, timestamp, notarization,
+  quarantine, and Gatekeeper.
 - Exact macOS 15.4-floor execution is separately **UNVERIFIED (needs attended
   Mac running 15.4)**. The runtime ProcessInfo gate is implemented and tested
   statically; no helper is spawned below the floor.
 
 ## Current work
 
-The 15-finding adversarial remediation is implemented through layer 05:
+The original 15-finding remediation remains implemented. Round 2 additionally
+fixes the three partial/new P1s and four P2s through layer 05:
 
 | Finding | Owning layer | Accepted state |
 |---|---|---|
@@ -184,16 +201,27 @@ The 15-finding adversarial remediation is implemented through layer 05:
 | F3 | 03 | Fixed: host-backed subscription-only polling (time excluded), reader wake, exact one-shot 3 s deadline. |
 | F4 | 03 | Fixed: nine-entry proven nack lane plus keyed four-pending ack slots and late-ack test. |
 | F5 | 04 | Fixed: helper/channel failures reject; only exit 2 OS decline resolves false. |
-| F6 | 04 | Fixed: seek requires bounded read-back within ±2000 ms accounting for advance. |
-| F7 | 04 | Fixed: blank title is a session, unknown is stopped, timestamped position advances at 1 Hz. |
+| F6 | 04 | Fixed: seek polls to a two-second deadline and requires read-back within ±2000 ms at the reported rate. |
+| F7 | 04 | Fixed: blank title is a session, unknown is stopped, and validated-rate position advances at 1 Hz. |
 | F8 | 04 | Fixed: decode/downsample/PNG/cache path; malformed art causes adapter loss. |
 | F9 | 02 | Fixed: failed refresh retains the prior Windows art snapshot and pin. |
-| F10 | 03 | Fixed: forced SDK mapping and alias/re-export symbol tracing with bypass tests. |
-| F11 | 03/04 | Fixed: bounded endpoint writes and bounded TERM-to-KILL helper teardown. |
+| F10 | 03 | Fixed: forced SDK mapping, binding/assignment tracing, and SDK-signature backstop with bypass tests. |
+| F11 | 03/04 | Fixed: both UDS directions use bounded writes and helper teardown escalates TERM-to-KILL. |
 | F12 | 03/04 | Fixed: platform calls run on bounded per-widget workers; macOS slot teardown never joins them on supervision. |
 | F13 | 04 | Fixed: restart reset requires a frame plus 30 s stable streaming. |
 | F14 | 04 | Fixed: ProcessInfo 15.4 runtime gate; exact-floor behavior remains unverified. |
 | F15 | 04/05 | Fixed: static audit, blocked record, spike row, results, and run status now tell the same dated story. |
+
+| Round-2 item | Owning layer | Accepted state |
+|---|---|---|
+| macOS runtime send | 03 | Fixed: nonblocking one-second deadline; the send-error path unregisters the pending slot and rejects. |
+| Windows shutdown race | 03 | Fixed: persistent manual-reset shutdown events, stopping checks before every read, and deterministic barrier tests in both readers. |
+| CLI binding bypasses | 03 | Fixed: binding/assignment tracing plus the resolved-signature declaration backstop and all four named bypass tests. |
+| fatal shared channel | 03/04 | Fixed: both hosts kill and crash-restart the slot rather than strand it. |
+| first-frame watchdog | 04 | Fixed: 10-second silent-helper kill, one loss frame, bounded backoff; hosted execution pending. |
+| seek convergence | 04 | Fixed: repeated observations through the two-second deadline with delayed/no-session/timeout/out-of-tolerance verifier tests. |
+| playback rate | 04 | Fixed: parsed/validated and used in timestamp, synthetic advancement, and seek verification. |
+| Noro normalized seek | 05 | Fixed: `event.u` replaces the hardcoded width division; live Windows recheck passed. |
 
 | Round-3 item | Owning layer | Accepted state |
 |---|---|---|
