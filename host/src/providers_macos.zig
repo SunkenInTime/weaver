@@ -234,6 +234,11 @@ pub const MediaProvider = struct {
     stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
     child_pid: std.atomic.Value(i32) = std.atomic.Value(i32).init(0),
+    attempt_started_ms: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    // 0 = not watching, 1 = awaiting the first frame, 2 = expired.
+    // The first frame and the supervision watchdog race through one CAS, so
+    // an expired attempt can never publish late data after its loss frame.
+    attempt_state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     command_worker_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     mutex: std.Io.Mutex = .init,
     availability: MediaAvailability = .idle,
@@ -279,6 +284,7 @@ pub const MediaProvider = struct {
     }
 
     pub fn takeFrame(self: *MediaProvider, now_ms: u64) ?QueuedFrame {
+        self.enforceFirstFrameDeadline(now_ms);
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         if (self.loss_pending) {
@@ -367,6 +373,8 @@ pub const MediaProvider = struct {
         var backoff_ms = media_restart_initial_ms;
         while (!self.stopping.load(.acquire)) {
             const started_ms = awakeMilliseconds(self.io);
+            self.attempt_state.store(1, .release);
+            self.attempt_started_ms.store(started_ms, .release);
             var child = std.process.spawn(self.io, .{
                 .argv = &.{
                     "/usr/bin/perl",
@@ -381,12 +389,17 @@ pub const MediaProvider = struct {
                 .stdout = .pipe,
                 .stderr = .ignore,
             }) catch {
+                self.attempt_state.store(0, .release);
+                self.attempt_started_ms.store(0, .release);
                 self.recordLoss();
                 self.sleepBackoff(backoff_ms);
                 backoff_ms = @min(backoff_ms * 2, media_restart_max_ms);
                 continue;
             };
             self.child_pid.store(child.id.?, .release);
+            if (self.attempt_state.load(.acquire) == 2) {
+                child.kill(self.io);
+            }
             var malformed = false;
             var saw_frame = false;
             var reader_buffer: [64 * 1024]u8 = undefined;
@@ -398,6 +411,7 @@ pub const MediaProvider = struct {
                 const now_ms = awakeMilliseconds(self.io);
                 const poll_timeout_ms = firstFramePollTimeoutMs(started_ms, now_ms, saw_frame);
                 if (!saw_frame and poll_timeout_ms == 0) {
+                    _ = self.attempt_state.cmpxchgStrong(1, 2, .acq_rel, .acquire);
                     malformed = true;
                     break;
                 }
@@ -438,6 +452,13 @@ pub const MediaProvider = struct {
                         malformed = true;
                         break;
                     };
+                    if (!saw_frame) {
+                        if (self.attempt_state.cmpxchgStrong(1, 0, .acq_rel, .acquire) != null) {
+                            malformed = true;
+                            break;
+                        }
+                        self.attempt_started_ms.store(0, .release);
+                    }
                     saw_frame = true;
                     self.publishFrameAtRate(frame.frame, frame.playback_rate, frame_now_ms);
                     start = end + 1;
@@ -451,12 +472,27 @@ pub const MediaProvider = struct {
             if (malformed and child.id != null) child.kill(self.io);
             if (child.id != null) _ = child.wait(self.io) catch {};
             self.child_pid.store(0, .release);
+            self.attempt_state.store(0, .release);
+            self.attempt_started_ms.store(0, .release);
             if (self.stopping.load(.acquire)) break;
             self.recordLoss();
             backoff_ms = restartBackoff(backoff_ms, awakeMilliseconds(self.io) -| started_ms, saw_frame);
             self.sleepBackoff(backoff_ms);
             backoff_ms = @min(backoff_ms * 2, media_restart_max_ms);
         }
+    }
+
+    fn enforceFirstFrameDeadline(self: *MediaProvider, now_ms: u64) void {
+        if (self.attempt_state.load(.acquire) != 1) return;
+        const started_ms = self.attempt_started_ms.load(.acquire);
+        if (started_ms == 0 or now_ms -| started_ms < media_first_frame_deadline_ms) return;
+        if (self.attempt_state.cmpxchgStrong(1, 2, .acq_rel, .acquire) != null) return;
+        // This runs on the existing 1 Hz host provider supervision tick, so it
+        // remains effective even if the stream worker is stuck in spawn,
+        // poll, or read. The loss frame is published immediately; killing the
+        // child releases the worker into the existing bounded backoff path.
+        self.signalChild(.KILL);
+        self.recordLoss();
     }
 
     fn parseFrameAt(
@@ -981,6 +1017,15 @@ test "macOS adapter validates playback rate and bounds its first-frame watchdog"
     try std.testing.expectEqual(@as(u64, 1), firstFramePollTimeoutMs(1000, 10_999, false));
     try std.testing.expectEqual(@as(u64, 0), firstFramePollTimeoutMs(1000, 11_000, false));
     try std.testing.expectEqual(@as(u64, 100), firstFramePollTimeoutMs(1000, 99_000, true));
+
+    provider.setAvailability(.starting);
+    provider.attempt_state.store(1, .release);
+    provider.attempt_started_ms.store(1000, .release);
+    try std.testing.expect(provider.takeFrame(10_999) == null);
+    const watchdog_loss = provider.takeFrame(11_000).?;
+    try std.testing.expect(watchdog_loss.force);
+    try std.testing.expectEqual(@as(u8, 2), provider.attempt_state.load(.acquire));
+    try std.testing.expectEqualStrings("unavailable", provider.availabilityLabel());
 }
 
 test "macOS adapter freezes command IDs seek units clamp and restart bounds" {
