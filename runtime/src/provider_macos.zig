@@ -287,13 +287,29 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     defer client.deinit();
     defer endpoint.stopping.store(true, .release);
     const stream = client.stream.?;
+    var send_buffer_bytes: c_int = 1024;
+    try std.testing.expect(c.setsockopt(
+        stream.socket.handle,
+        c.SOL_SOCKET,
+        c.SO_SNDBUF,
+        &send_buffer_bytes,
+        @sizeOf(c_int),
+    ) == 0);
     var fill = [_]u8{0xaa} ** 4096;
+    const fill_started = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
     while (true) {
         const sent = c.send(stream.socket.handle, &fill, fill.len, c.MSG_DONTWAIT | c.MSG_NOSIGNAL);
-        if (sent > 0) continue;
-        if (posix.errno(sent) == .INTR) continue;
-        try std.testing.expectEqual(posix.E.AGAIN, posix.errno(sent));
-        break;
+        if (sent <= 0) {
+            if (posix.errno(sent) == .INTR) continue;
+            try std.testing.expectEqual(posix.E.AGAIN, posix.errno(sent));
+            break;
+        }
+        // The explicit SO_SNDBUF makes this immediate on supported macOS
+        // kernels; retain a hard fixture bound so a kernel policy change can
+        // fail the test rather than hang CI.
+        if (std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - fill_started >= std.time.ns_per_s) {
+            return error.TestSocketDidNotSaturate;
+        }
     }
     const started = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
     try std.testing.expectError(error.HostEndpointWriteFailed, client.send("{\"command\":\"media\",\"verb\":\"pause\",\"id\":1}"));
