@@ -38,6 +38,7 @@ typedef struct WeaverMediaArtwork {
     int changed;
     int too_large;
     int refresh_failed;
+    int session_changed;
 } WeaverMediaArtwork;
 
 WeaverMediaSession *weaver_media_create(void);

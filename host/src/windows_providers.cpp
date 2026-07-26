@@ -429,6 +429,7 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         if (session_changed) {
             rebind_current_session(state);
             artwork->changed = 1;
+            artwork->session_changed = 1;
         }
         const auto session = state->current;
         if (!session) return 0;
