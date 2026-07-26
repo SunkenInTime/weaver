@@ -1345,5 +1345,5 @@ test "hosted automation ack crosses the authenticated provider socket" {
             else => return error.TestUnexpectedResult,
         }
     }
-    try std.testing.expectEqualStrings("{\"type\":\"media-ack\",\"id\":7,\"ok\":false}\n", received[0..ack_len]);
+    try std.testing.expectEqualStrings("{\"ack\":7,\"ok\":false}\n", received[0..ack_len]);
 }
