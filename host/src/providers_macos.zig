@@ -230,6 +230,9 @@ pub const MediaProvider = struct {
     framework_path: []const u8,
     cache: *art_cache.Cache,
     platform_supported: bool,
+    /// Compile-gated automation override for the hosted supervision test.
+    /// Shipping builds always leave this null.
+    command_test_outcome: ?CommandOutcome = null,
     thread: ?std.Thread = null,
     stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
@@ -314,6 +317,7 @@ pub const MediaProvider = struct {
     }
 
     pub fn command(self: *MediaProvider, command_value: media_commands.Command) CommandOutcome {
+        if (self.command_test_outcome) |outcome| return outcome;
         self.mutex.lockUncancelable(self.io);
         const duration_ms = self.current_duration_ms;
         self.mutex.unlock(self.io);

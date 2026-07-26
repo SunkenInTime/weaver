@@ -7,6 +7,7 @@ const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
 const provider_protocol = @import("provider_protocol.zig");
 const system_providers = @import("providers_macos.zig");
+const host_options = @import("weaver_host_options");
 
 const posix = std.posix;
 const c = @cImport({
@@ -23,6 +24,18 @@ const backend_environment = "WEAVER_BACKEND_FILE";
 
 const ControlCommand = enum { reload, down };
 const ControlResponse = enum { none, ok, failed };
+
+fn automationCommandOutcome(
+    seam_compiled: bool,
+    automation_enabled: ?[]const u8,
+    configured_outcome: ?[]const u8,
+) ?system_providers.CommandOutcome {
+    if (!seam_compiled) return null;
+    if (!std.mem.eql(u8, automation_enabled orelse return null, "1")) return null;
+    const outcome = configured_outcome orelse return null;
+    if (std.mem.eql(u8, outcome, "declined")) return .declined;
+    return null;
+}
 
 const ControlServer = struct {
     io: std.Io,
@@ -907,6 +920,11 @@ fn run(init: std.process.Init) !void {
         .framework_path = adapter_paths.framework,
         .cache = &media_art_cache,
         .platform_supported = c.weaver_macos_media_supported() != 0,
+        .command_test_outcome = automationCommandOutcome(
+            host_options.automation_seam,
+            init.environ_map.get("WEAVER_AUTOMATION"),
+            init.environ_map.get("WEAVER_MEDIA_TEST_COMMAND_OUTCOME"),
+        ),
     };
     defer media_provider.deinit();
     cleanupStaleChildren(init.io, allocator, runtime_root, runtime_exe);
@@ -1187,4 +1205,23 @@ test "provider socket discards an unterminated command at EOF" {
     }
     try std.testing.expect(endpoint.command_queue.malformed.load(.acquire));
     try std.testing.expect(endpoint.takeCommand() == null);
+}
+
+test "hosted media command override is compile and runtime gated" {
+    try std.testing.expectEqual(
+        @as(?system_providers.CommandOutcome, null),
+        automationCommandOutcome(false, "1", "declined"),
+    );
+    try std.testing.expectEqual(
+        @as(?system_providers.CommandOutcome, null),
+        automationCommandOutcome(true, null, "declined"),
+    );
+    try std.testing.expectEqual(
+        @as(?system_providers.CommandOutcome, null),
+        automationCommandOutcome(true, "1", "accepted"),
+    );
+    try std.testing.expectEqual(
+        system_providers.CommandOutcome.declined,
+        automationCommandOutcome(true, "1", "declined").?,
+    );
 }
