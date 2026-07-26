@@ -262,11 +262,14 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     const Endpoint = struct {
         io: std.Io,
         listener: std.Io.net.Server,
+        stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
         fn run(self: *@This()) void {
             const stream = self.listener.accept(self.io) catch return;
             defer stream.close(self.io);
-            std.Io.sleep(self.io, .fromSeconds(2), .awake) catch {};
+            while (!self.stopping.load(.acquire)) {
+                std.Io.sleep(self.io, .fromMilliseconds(10), .awake) catch return;
+            }
         }
     };
     var path_buffer: [96]u8 = undefined;
@@ -282,6 +285,7 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     var client: Client = .{};
     try client.init(std.testing.io, path);
     defer client.deinit();
+    defer endpoint.stopping.store(true, .release);
     const stream = client.stream.?;
     var fill = [_]u8{0xaa} ** 4096;
     while (true) {
