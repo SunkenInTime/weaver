@@ -312,13 +312,24 @@ fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
             bridge_state.media_tracker.remove(index);
             return fail(js, "MalformedMediaCommand");
         };
+    installMediaCallback(js, bridge_state, index, argv[1]);
     bridge_state.provider.send(command) catch {
+        discardMediaCallback(js, bridge_state, index);
         bridge_state.provider.unregisterAck(id);
         bridge_state.media_tracker.remove(index);
         return fail(js, "MediaChannelUnavailable");
     };
-    bridge_state.media_callbacks[index] = c.JS_DupValue(js, argv[1]);
     return qjs.undefinedValue();
+}
+
+fn installMediaCallback(ctx: *c.JSContext, bridge_state: *State, index: usize, callback: c.JSValueConst) void {
+    std.debug.assert(c.JS_IsUndefined(bridge_state.media_callbacks[index]));
+    bridge_state.media_callbacks[index] = c.JS_DupValue(ctx, callback);
+}
+
+fn discardMediaCallback(ctx: *c.JSContext, bridge_state: *State, index: usize) void {
+    c.JS_FreeValue(ctx, bridge_state.media_callbacks[index]);
+    bridge_state.media_callbacks[index] = qjs.undefinedValue();
 }
 
 fn storageRead(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
@@ -958,4 +969,25 @@ test "native mediaCommand exists only for a declared runtime capability" {
 
     try std.testing.expect(!try Probe.hasMediaCommand(false));
     try std.testing.expect(try Probe.hasMediaCommand(true));
+}
+
+test "media callback is installed before send and rollback releases its slot" {
+    const runtime = c.JS_NewRuntime() orelse return error.OutOfMemory;
+    defer c.JS_FreeRuntime(runtime);
+    const context = c.JS_NewContext(runtime) orelse return error.OutOfMemory;
+    defer c.JS_FreeContext(context);
+    var bridge_state: State = .{
+        .tree = undefined,
+        .storage = undefined,
+        .provider = undefined,
+        .origins = &.{},
+    };
+    const callback = c.JS_NewCFunction2(context, consoleLog, "callback", 1, c.JS_CFUNC_generic, 0);
+    defer c.JS_FreeValue(context, callback);
+    try std.testing.expect(c.JS_IsFunction(context, callback));
+
+    installMediaCallback(context, &bridge_state, 0, callback);
+    try std.testing.expect(c.JS_IsFunction(context, bridge_state.media_callbacks[0]));
+    discardMediaCallback(context, &bridge_state, 0);
+    try std.testing.expect(c.JS_IsUndefined(bridge_state.media_callbacks[0]));
 }
