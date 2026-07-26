@@ -142,3 +142,14 @@ the viewed 3300 ms capture shows red rejected. The runtime logged
 `pr05-timeout-rejected-3300ms.png`; raw notes are in
 `pr05-adversarial-live.txt`. The diagnostic widget source is deliberately not
 part of the PR.
+
+## REC-dot ruling addendum (2026-07-26)
+
+The original capture round recorded the red indicator as "follows status"
+while the source rendered it unconditionally — an evidence overclaim caught
+in Dara's eyes-on verification. Dara ruled the dot follows status like a REC
+light (2026-07-26). `widget.tsx` now renders the red dot only when
+`status === "playing"` (transparent placeholder preserves layout). Verified
+live against Spotify and viewed: `pr05-rec-dot-playing.png` (dot present,
+pause glyph) and `pr05-rec-dot-paused.png` (no dot, no placeholder artifact,
+play glyph).
