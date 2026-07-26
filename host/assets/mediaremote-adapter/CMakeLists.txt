@@ -22,6 +22,7 @@ set(ADAPTER_SOURCES
     src/adapter/now_playing.m
     src/adapter/repeat.m
     src/adapter/seek.m
+    src/adapter/seek_verifier.m
     src/adapter/send.m
     src/adapter/shuffle.m
     src/adapter/speed.m
@@ -90,3 +91,14 @@ set_source_files_properties(src/test/NowPlayingTest.m PROPERTIES COMPILE_FLAGS
 set_target_properties(
     MediaRemoteAdapterTestClient
     PROPERTIES OUTPUT_NAME "${MEDIAREMOTEADAPTER_TEST_CLIENT_NAME}")
+
+add_executable(MediaRemoteAdapterSeekTests
+               src/test/SeekVerifierTest.m
+               src/adapter/seek_verifier.m)
+target_include_directories(MediaRemoteAdapterSeekTests
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_custom_command(
+    TARGET MediaRemoteAdapterSeekTests
+    POST_BUILD
+    COMMAND $<TARGET_FILE:MediaRemoteAdapterSeekTests>
+    COMMENT "Running deterministic seek convergence tests")
