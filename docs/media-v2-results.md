@@ -2,6 +2,22 @@
 
 Date: 2026-07-25
 
+## 2026-07-25 round-2 addendum
+
+The second adversarial pass is implemented locally. The accepted state now
+also includes a deadline-bounded macOS runtime send, race-free Windows reader
+shutdown, binding- and signature-complete CLI capability detection,
+crash-supervised recovery from a fatal shared provider channel, a 10-second
+macOS first-frame watchdog, repeated seek read-back through the two-second
+deadline, and validated playback-rate timeline math. The Noro seek handler now
+uses `event.u`; a live Spotify recheck visibly advanced from `03:24` to `04:09`
+after a 75% strip press without changing the rendered shell.
+
+The Objective-C helper build/tests and hosted macOS session are **CI-pending**
+at this commit. Real Weaver behavior for the new watchdog, non-1× advancement
+and seek, and fatal-channel restart remains **UNVERIFIED (needs attended
+Mac)**; the earlier spike still proves only the route.
+
 ## 2026-07-25 adversarial-remediation addendum
 
 The historical macOS BLOCKED conclusion at the end of this file is
@@ -30,7 +46,7 @@ The Windows slice is complete through the noro gate:
 - Elapsed time, title, source status, and play/pause glyph are live.
 - Existing previous, play/pause, and next buttons deliver real SMTC commands.
 - The former static 312x3 progress stack is a pixel-matched click-to-seek
-  button using normalized local `event.x`.
+  button using the press event's normalized local `event.u`.
 - `skills/conjure-widget/SKILL.md` teaches `MediaData.artPath`,
   `useMediaTransport`, the `media-transport` capability, and promise semantics.
 

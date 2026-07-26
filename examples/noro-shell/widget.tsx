@@ -3,7 +3,6 @@ import { useMediaTransport, useProvider, widget } from "@weaver/sdk";
 // Pixel-faithful live port of noro-player (SunkenInTime/noro-player).
 // Every dimension and color comes from the skin's Variables.inc.
 const progressSegments = 24;
-const progressWidth = 312;
 
 function elapsed(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -50,7 +49,7 @@ export default widget({
               class="w-full h-[3px] bg-[#ffffff]/5"
               onPress={(event) => {
                 if (media.durationMs <= 0) return;
-                const normalized = Math.max(0, Math.min(1, (event?.x ?? 0) / progressWidth));
+                const normalized = Math.max(0, Math.min(1, event?.u ?? 0));
                 void transport.seek(Math.round(normalized * media.durationMs));
               }}
             >

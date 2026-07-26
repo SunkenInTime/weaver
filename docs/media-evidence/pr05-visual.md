@@ -77,6 +77,16 @@ live artwork, text, clock, and play state differ.
 The temporary seek diagnostic changed only the center text to
 `position/duration`; it was reverted before the final captures and commit.
 
+## Round-2 normalized-coordinate recheck (2026-07-25)
+
+The final shell was relaunched against the real Spotify session after replacing
+the hardcoded `event.x / 312` calculation with the press event's normalized
+`event.u`. The live widget was viewed before input at `03:24`; a press at 75%
+of the 312 px seek strip advanced the visible position to `04:09` within
+2.2 seconds. The observed window retained the same settled shell geometry and
+live artwork as the accepted captures above; this handler-only change alters
+no rendered node, dimension, class, or asset. Result: PASS.
+
 ## Adversarial remediation live recheck
 
 The repaired layer-05 head was launched again after F3/F9. The exact 340×356
