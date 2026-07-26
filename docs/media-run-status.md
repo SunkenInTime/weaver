@@ -205,6 +205,7 @@ This run will not change the submodule pointer.
   retaining the old cache path/pin. Later subscribed retries may still
   recover and publish art. Tests prove the retry bound and the unavailable
   frame state, so no permanent source can strand the prior media frame.
+- Greptile's final PR #33 review is PASS on `a153e6c`.
 - After that repair and the final restack, every changed layer was re-run
   locally. Layer 02: `npm test` PASS 62/62; layers 03-05: PASS 63/63. Every
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
@@ -217,10 +218,10 @@ All conclusions below are actual completed results, not projections.
 | PR | Head evidenced | Actions run | Jobs |
 |---|---|---|---|
 | #32 / 01 | `4dcf19c` | `30173553577` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #33 / 02 | `f6a6442` | `30181585842` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #34 / 03 | `9f1ca83` | `30189810926` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #36 / 04 | `5a40f03` | `30189812372` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #35 / 05 | `5d22e54` | `30189813642` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #33 / 02 | `a153e6c` | `30193379848` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #34 / 03 | `ddfff61` | `30193380921` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #36 / 04 | `9c31229` | `30193380839` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #35 / 05 | `12d5040` | `30193381494` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
 
 ## Blockers and unverified gates
 
