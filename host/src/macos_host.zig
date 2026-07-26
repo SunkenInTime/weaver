@@ -1229,14 +1229,26 @@ test "hosted automation ack crosses the authenticated provider socket" {
 
     var ack_buffer: [64]u8 = undefined;
     try std.testing.expect(writeAutomationMediaAck(endpoint, 7, &ack_buffer));
-    var reader_buffer: [64]u8 = undefined;
-    var reader = stream.reader(std.testing.io, &reader_buffer);
     var received: [64]u8 = undefined;
     var ack_len: usize = 0;
-    while (ack_len < received.len and std.mem.indexOfScalar(u8, received[0..ack_len], '\n') == null) {
-        const read = try reader.interface.readSliceShort(received[ack_len..]);
-        try std.testing.expect(read > 0);
-        ack_len += read;
+    for (0..100) |_| {
+        const read = c.recv(
+            stream.socket.handle,
+            received.ptr + ack_len,
+            received.len - ack_len,
+            c.MSG_DONTWAIT,
+        );
+        if (read > 0) {
+            ack_len += @intCast(read);
+            if (std.mem.indexOfScalar(u8, received[0..ack_len], '\n') != null or ack_len == received.len) break;
+            continue;
+        }
+        if (read == 0) break;
+        switch (posix.errno(read)) {
+            .INTR => continue,
+            .AGAIN => try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake),
+            else => return error.TestUnexpectedResult,
+        }
     }
     try std.testing.expectEqualStrings("{\"type\":\"media-ack\",\"id\":7,\"ok\":false}\n", received[0..ack_len]);
 }
