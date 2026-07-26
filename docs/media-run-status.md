@@ -10,7 +10,7 @@ Last updated: 2026-07-26
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`e8748fb`) |
 | 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`d3753b2`); restacked on the final layer-02 repair |
 | 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; round-3 repair locally green |
-| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35 (`b6cc02a` before restack); Dara's REC-dot commit preserved |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack in progress, Dara's REC-dot commit preserved |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -84,13 +84,6 @@ This run will not change the submodule pointer.
   hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
   transport-only idle-zero, forced SDK resolution despite a hostile widget
   tsconfig, and local hook aliases.
-- Layer 03 round-2 gate: `npm test` PASS 63/63, `npm run typecheck` PASS,
-  runtime and host `zig build test` PASS, and
-  `weaver check examples/now-playing` PASS. Direct aarch64-macos no-emit
-  compilation of the runtime provider passes. New tests cover a stalled
-  connected Unix host, deterministic host/runtime cancel-before-read
-  shutdown, fatal-channel crash/restart, and SDK calls through destructuring,
-  deferred assignment, object properties, and a re-export chain.
 - Layer 04 adversarial local gate: `npm test` PASS 63/63,
   `npm run typecheck` PASS, release audit PASS, every example directory with
   `widget.tsx` passed `weaver check`, runtime test/build PASS, and Windows host
@@ -123,6 +116,20 @@ This run will not change the submodule pointer.
   runtime-detected macOS command-send failure is now process-fatal; the hosted
   automation test requires a new widget PID, a new randomized endpoint,
   resumed media frames, and a subsequently resolved transport command.
+- Layer 05 adversarial Windows live art check: PASS. A real Next transition
+  retained the prior cover at 250/750/1250 ms and showed a visibly different
+  replacement cover/title at 2000 ms. All five exact-region PNGs were opened
+  and viewed; no bundled fallback, blank image, or black flash appeared.
+- Layer 05 exact timeout live check: PASS. With the provider connection open
+  and weaverd deliberately suspended, the temporary transport-only diagnostic
+  was visibly pending at 1000 ms and rejected at 3300 ms. The runtime log
+  measured `TIMEOUT_REJECTED_3003MS`. weaverd was resumed and the diagnostic
+  was uninstalled/deleted. Evidence is in
+  `docs/media-evidence/pr05-adversarial-live.txt` and `pr05-visual.md`.
+- Layer 05 final automated gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, release audit PASS, all 18 widget examples passed
+  `weaver check`, runtime test/build PASS, Windows host test/build PASS, and
+  both macOS provider/host no-emit semantic compiles PASS.
 
 ## Blockers and unverified gates
 
@@ -131,22 +138,18 @@ This run will not change the submodule pointer.
   `docs/media-evidence/pr04-mac-spike.md`; it does not prove the remediated
   Weaver implementation.
 - The remediated macOS implementation remains **UNVERIFIED (needs attended
-  Mac)** for: real metadata and playback-rate-aware 1 Hz advancement at
-  non-1×; 300×300+ art and malformed-art loss/recovery; all five verbs,
-  delayed seek convergence and ±2000 ms verified seek at non-1×; no-session
-  seek false; helper/framework/timeout/signal rejection; a silent first-frame
-  watchdog; fatal shared-channel widget restart with resumed frames and
-  transport; residual EOF, crash, quit/relaunch, exponential backoff, and
-  TERM-to-KILL teardown; Developer-ID signing, timestamp, notarization,
-  quarantine, and Gatekeeper.
+  Mac)** for: real metadata and 1 Hz timeline advancement; 300×300+ art and
+  malformed-art loss/recovery; all five verbs and ±2000 ms verified seek;
+  no-session seek false; helper/framework/timeout/signal rejection; residual
+  EOF, crash, quit/relaunch, exponential backoff, and TERM-to-KILL teardown;
+  Developer-ID signing, timestamp, notarization, quarantine, and Gatekeeper.
 - Exact macOS 15.4-floor execution is separately **UNVERIFIED (needs attended
   Mac running 15.4)**. The runtime ProcessInfo gate is implemented and tested
   statically; no helper is spawned below the floor.
 
 ## Current work
 
-The original 15-finding remediation remains implemented. Round 2 additionally
-fixes the three partial/new P1s and four P2s through layer 04:
+The 15-finding adversarial remediation is implemented through layer 04:
 
 | Finding | Owning layer | Accepted state |
 |---|---|---|
@@ -164,17 +167,7 @@ fixes the three partial/new P1s and four P2s through layer 04:
 | F12 | 03 | Fixed: Windows media calls run on a bounded per-widget worker. |
 | F13 | 04 | Fixed: restart reset requires a frame plus 30 s stable streaming. |
 | F14 | 04 | Fixed: ProcessInfo 15.4 runtime gate; exact-floor behavior remains unverified. |
-| F15 | 04/05 | Static-audit and blocked-record addenda fixed; `media-v2-results.md` addendum waits for layer-05 restack. |
-
-| Round-2 item | Owning layer | Accepted state |
-|---|---|---|
-| macOS runtime send | 03 | Fixed: nonblocking one-second deadline; the existing send-error path unregisters the pending slot and rejects. |
-| Windows shutdown race | 03 | Fixed: persistent manual-reset shutdown events, stopping checks before every read, and deterministic barrier tests in both readers. |
-| CLI binding bypasses | 03 | Fixed: binding/assignment tracing plus the resolved-signature declaration backstop and all four named bypass tests. |
-| fatal shared channel | 03/04 | Fixed: both hosts kill and crash-restart the slot rather than strand it. |
-| first-frame watchdog | 04 | Fixed: 10-second silent-helper kill, one loss frame, bounded backoff; hosted execution pending. |
-| seek convergence | 04 | Fixed: repeated observations through the two-second deadline with four verifier scenarios. |
-| playback rate | 04 | Fixed: parsed/validated and used in timestamp, synthetic advancement, and seek verification. |
+| F15 | 04/05 | Fixed: static audit, blocked record, spike row, results, and run status now tell the same dated story. |
 
 | Round-3 item | Owning layer | Accepted state |
 |---|---|---|

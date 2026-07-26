@@ -2,6 +2,24 @@
 
 Date: 2026-07-25
 
+## 2026-07-25 adversarial-remediation addendum
+
+The historical macOS BLOCKED conclusion at the end of this file is
+superseded. The standalone attended spike gate is **PASSED** per
+`docs/media-evidence/pr04-mac-spike.md`. Layer 04 now implements the route and
+passes the locally executable Windows, portable, release-audit, and macOS Zig
+semantic gates. The implementation itself remains **UNVERIFIED (needs
+attended Mac)**; the spike did not run Weaver's provider. Exact macOS 15.4
+floor behavior is separately **UNVERIFIED (needs attended Mac at 15.4)**.
+
+The accepted implementation state includes PID-bound endpoints, strict EOF
+framing, idle-zero transport, exact command deadlines, structurally non-lossy
+ack/nack lanes, truthful helper failure rejection, read-back-verified seek,
+timestamped timeline advancement, normalized artwork, retained Windows art on
+refresh failure, bounded platform waits/teardown, stable restart backoff, and
+the runtime OS floor. The finding-by-finding evidence and remaining attended
+matrix are in `docs/media-run-status.md`.
+
 ## Windows acceptance result
 
 The Windows slice is complete through the noro gate:
@@ -60,10 +78,11 @@ updates, and transport endpoint. It does not support a no-regression or broad
 benchmark claim. It does show bounded steady-state behavior over the measured
 minute: candidate private memory changed by about 0.03 MiB during the sample.
 
-## Open macOS acceptance
+## Historical macOS acceptance (superseded by the addendum above)
 
-PR 04 remains spike-gated and BLOCKED. This Windows run cannot produce a real
-macOS metadata frame plus delivered command, and compile-only evidence is not
-substituted for that gate. Consequently the attended macOS noro side-by-side
-also remains open. Exact evidence and the reproducible static audit are in
-`docs/media-evidence/pr04-blocked.md`.
+The original Windows-only run recorded PR 04 as spike-gated and BLOCKED
+because it could not produce a real macOS metadata frame plus delivered
+command. That historical decision is retained for provenance only. The later
+attended route evidence passes the spike, while Weaver's remediated
+implementation and the macOS noro side-by-side remain unverified as stated in
+the dated addendum.
