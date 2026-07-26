@@ -188,8 +188,11 @@ try {
     const providers = status()?.providers;
     const logs = ["System Monitor.log", "System Monitor 2.log"]
       .map((name) => join(environment.HOME, "Library", "Logs", "Weaver", name));
+    // SOCK_STREAM preserves bytes, not host write boundaries. Fan-out means
+    // both runtimes applied provider data; it does not require CPU + memory to
+    // arrive in one particular reader chunk or app-loop drain.
     return providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 && providers.systemFrames >= 4 &&
-      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied count=2"));
+      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied count="));
   });
   const activeRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))
