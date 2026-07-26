@@ -1329,7 +1329,7 @@ test "hosted automation ack crosses the authenticated provider socket" {
     for (0..100) |_| {
         const read = c.recv(
             stream.socket.handle,
-            received.ptr + ack_len,
+            received[ack_len..].ptr,
             received.len - ack_len,
             c.MSG_DONTWAIT,
         );
