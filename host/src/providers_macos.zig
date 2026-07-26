@@ -177,8 +177,11 @@ pub const MediaCommandExecutor = struct {
             self.mutex.lockUncancelable(self.io);
             const self_destroy = self.self_destroy;
             self.mutex.unlock(self.io);
-            _ = provider.command_worker_count.fetchSub(1, .acq_rel);
             if (self_destroy) allocator.destroy(self);
+            // This is the lifetime fence used by provider shutdown and the
+            // nonjoining teardown test. Publish completion only after a
+            // detached executor has released its final allocation.
+            _ = provider.command_worker_count.fetchSub(1, .acq_rel);
         }
         while (true) {
             self.mutex.lockUncancelable(self.io);
