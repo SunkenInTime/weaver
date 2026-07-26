@@ -606,7 +606,11 @@ const Host = struct {
 
     fn closeProcess(self: *Host, slot: *Slot) void {
         if (slot.platform.process) |pid| self.removeChildMarker(pid);
-        if (slot.platform.media_command_executor) |executor| executor.deinit();
+        // Reload, crash, and uninstall all run on the supervision loop. An
+        // in-flight adapter helper retains its own bounded 2.5 s timeout, so
+        // transfer executor ownership to its detached worker instead of
+        // joining here and pausing every Widget.
+        if (slot.platform.media_command_executor) |executor| executor.stopDetached();
         slot.platform.media_command_executor = null;
         if (slot.platform.endpoint) |endpoint| endpoint.deinit();
         slot.platform.endpoint = null;
@@ -991,6 +995,14 @@ fn run(init: std.process.Init) !void {
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
     host.audio_provider.setActive(false, monotonicMilliseconds());
     host.media_provider.setActive(false);
+    // The down acknowledgement is sent before slot teardown. Detached command
+    // workers have the adapter helper's 2.5 s hard timeout; keep provider
+    // storage alive for one bounded grace window, then fail closed rather than
+    // returning with a worker still holding its pointer.
+    if (!host.media_provider.waitForCommandWorkers(3000)) {
+        std.log.err("macOS media command worker exceeded its bounded shutdown window", .{});
+        std.process.exit(1);
+    }
     host.writeStatus(monotonicMilliseconds());
 }
 

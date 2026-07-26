@@ -93,6 +93,9 @@ pub const MediaCommandExecutor = struct {
     result_head: usize = 0,
     result_count: usize = 0,
     stopping: bool = false,
+    self_destroy: bool = false,
+    executing: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    command_fn: *const fn (*MediaCommandExecutor, media_commands.Command) CommandOutcome = runProviderCommand,
 
     pub fn start(
         io: std.Io,
@@ -107,6 +110,8 @@ pub const MediaCommandExecutor = struct {
             .provider = provider,
             .thread = undefined,
         };
+        _ = provider.command_worker_count.fetchAdd(1, .acq_rel);
+        errdefer _ = provider.command_worker_count.fetchSub(1, .acq_rel);
         self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, threadMain, .{self});
         return self;
     }
@@ -119,6 +124,20 @@ pub const MediaCommandExecutor = struct {
         self.thread.join();
         const allocator = self.allocator;
         allocator.destroy(self);
+    }
+
+    /// Relinquishes host-loop ownership without waiting for an in-flight
+    /// helper. The detached worker owns and frees itself after the helper's
+    /// existing bounded timeout. MediaProvider tracks detached workers so
+    /// process shutdown can prove they have all left before provider teardown.
+    pub fn stopDetached(self: *MediaCommandExecutor) void {
+        const thread = self.thread;
+        self.mutex.lockUncancelable(self.io);
+        self.stopping = true;
+        self.self_destroy = true;
+        self.condition.broadcast(self.io);
+        self.mutex.unlock(self.io);
+        thread.detach();
     }
 
     pub fn submit(self: *MediaCommandExecutor, command: media_commands.Command) bool {
@@ -144,6 +163,15 @@ pub const MediaCommandExecutor = struct {
     }
 
     fn threadMain(self: *MediaCommandExecutor) void {
+        defer {
+            const provider = self.provider;
+            const allocator = self.allocator;
+            self.mutex.lockUncancelable(self.io);
+            const self_destroy = self.self_destroy;
+            self.mutex.unlock(self.io);
+            _ = provider.command_worker_count.fetchSub(1, .acq_rel);
+            if (self_destroy) allocator.destroy(self);
+        }
         while (true) {
             self.mutex.lockUncancelable(self.io);
             while (self.command_count == 0 and !self.stopping) {
@@ -158,10 +186,12 @@ pub const MediaCommandExecutor = struct {
             self.command_count -= 1;
             self.mutex.unlock(self.io);
 
+            self.executing.store(true, .release);
             const result: CommandResult = .{
                 .id = command.id,
-                .outcome = self.provider.command(command),
+                .outcome = self.command_fn(self, command),
             };
+            self.executing.store(false, .release);
             self.mutex.lockUncancelable(self.io);
             while (self.result_count == self.results.len and !self.stopping) {
                 self.condition.waitUncancelable(self.io, &self.mutex);
@@ -175,6 +205,10 @@ pub const MediaCommandExecutor = struct {
             self.result_count += 1;
             self.mutex.unlock(self.io);
         }
+    }
+
+    fn runProviderCommand(self: *MediaCommandExecutor, command: media_commands.Command) CommandOutcome {
+        return self.provider.command(command);
     }
 };
 
@@ -192,6 +226,7 @@ pub const MediaProvider = struct {
     stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
     child_pid: std.atomic.Value(i32) = std.atomic.Value(i32).init(0),
+    command_worker_count: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
     mutex: std.Io.Mutex = .init,
     availability: MediaAvailability = .idle,
     pending_frame: ?media.Frame = null,
@@ -223,6 +258,15 @@ pub const MediaProvider = struct {
 
     pub fn deinit(self: *MediaProvider) void {
         self.stop();
+        std.debug.assert(self.command_worker_count.load(.acquire) == 0);
+    }
+
+    pub fn waitForCommandWorkers(self: *MediaProvider, timeout_ms: u64) bool {
+        const deadline = awakeMilliseconds(self.io) +| timeout_ms;
+        while (self.command_worker_count.load(.acquire) != 0 and awakeMilliseconds(self.io) < deadline) {
+            std.Io.sleep(self.io, .fromMilliseconds(10), .awake) catch break;
+        }
+        return self.command_worker_count.load(.acquire) == 0;
     }
 
     pub fn takeFrame(self: *MediaProvider, now_ms: u64) ?QueuedFrame {
@@ -666,6 +710,35 @@ fn memorySample(used_bytes: u64, total_bytes: u64) protocol.Memory {
 fn percent(numerator: u64, denominator: u64) f64 {
     if (denominator == 0) return 0;
     return @as(f64, @floatFromInt(numerator)) * 100.0 / @as(f64, @floatFromInt(denominator));
+}
+
+fn slowCommandTestSeam(executor: *MediaCommandExecutor, _: media_commands.Command) CommandOutcome {
+    std.Io.sleep(executor.io, .fromMilliseconds(300), .awake) catch {};
+    return .declined;
+}
+
+test "media command executor teardown never joins an in-flight helper on the supervision loop" {
+    var provider: MediaProvider = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .script_path = "",
+        .framework_path = "",
+        .cache = undefined,
+        .platform_supported = false,
+    };
+    const executor = try MediaCommandExecutor.start(std.testing.io, std.testing.allocator, &provider);
+    executor.command_fn = slowCommandTestSeam;
+    try std.testing.expect(executor.submit(.{ .id = 1, .verb = .play }));
+    for (0..100) |_| {
+        if (executor.executing.load(.acquire)) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(2), .awake);
+    }
+    try std.testing.expect(executor.executing.load(.acquire));
+
+    const started_ms = awakeMilliseconds(std.testing.io);
+    executor.stopDetached();
+    try std.testing.expect(awakeMilliseconds(std.testing.io) -| started_ms < 100);
+    try std.testing.expect(provider.waitForCommandWorkers(1000));
 }
 
 test "live sampler reports bounded public CPU and memory shapes" {
