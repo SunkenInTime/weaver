@@ -8,6 +8,28 @@ const protocol = @import("provider_protocol.zig");
 const reader_stack_bytes: usize = 256 * 1024;
 const command_write_deadline_ns: i128 = std.time.ns_per_s;
 
+const SendAttempt = union(enum) {
+    progress: usize,
+    retry,
+    failure,
+};
+
+const SendFn = *const fn (?*anyopaque, c_int, []const u8) SendAttempt;
+
+fn systemSend(_: ?*anyopaque, socket: c_int, bytes: []const u8) SendAttempt {
+    const sent = c.send(
+        socket,
+        bytes.ptr,
+        bytes.len,
+        c.MSG_DONTWAIT | c.MSG_NOSIGNAL,
+    );
+    if (sent > 0) return .{ .progress = @intCast(sent) };
+    return switch (posix.errno(sent)) {
+        .INTR, .AGAIN => .retry,
+        else => .failure,
+    };
+}
+
 const SpinMutex = struct {
     inner: std.atomic.Mutex = .unlocked,
 
@@ -33,6 +55,9 @@ pub const Client = struct {
     disconnected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     next_command_id: u64 = 1,
     wake: ?*const fn () void = null,
+    send_fn: SendFn = systemSend,
+    send_context: ?*anyopaque = null,
+    send_deadline_ns: i128 = command_write_deadline_ns,
 
     pub fn init(self: *Client, io: std.Io, endpoint: ?[]const u8) !void {
         // Inert clients still provide the monotonic clock used by transport
@@ -107,22 +132,15 @@ pub const Client = struct {
         const started_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds;
         var offset: usize = 0;
         while (offset < line.len + 1) {
-            const sent = c.send(
-                stream.socket.handle,
-                framed[offset..].ptr,
-                line.len + 1 - offset,
-                c.MSG_DONTWAIT | c.MSG_NOSIGNAL,
-            );
-            if (sent > 0) {
-                offset += @intCast(sent);
-                continue;
+            switch (self.send_fn(self.send_context, stream.socket.handle, framed[offset .. line.len + 1])) {
+                .progress => |sent| {
+                    offset += sent;
+                    continue;
+                },
+                .retry => {},
+                .failure => return self.failWrite(),
             }
-            switch (posix.errno(sent)) {
-                .INTR => continue,
-                .AGAIN => {},
-                else => return self.failWrite(),
-            }
-            if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= command_write_deadline_ns) {
+            if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= self.send_deadline_ns) {
                 return self.failWrite();
             }
             std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return self.failWrite();
@@ -288,36 +306,27 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     client.connected.store(1, .release);
     defer client.deinit();
     defer endpoint.stopping.store(true, .release);
-    const stream = client.stream.?;
-    var send_buffer_bytes: c_int = 1024;
-    try std.testing.expect(c.setsockopt(
-        stream.socket.handle,
-        c.SOL_SOCKET,
-        c.SO_SNDBUF,
-        &send_buffer_bytes,
-        @sizeOf(c_int),
-    ) == 0);
-    var fill = [_]u8{0xaa} ** 4096;
-    const fill_started = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
-    while (true) {
-        const sent = c.send(stream.socket.handle, &fill, fill.len, c.MSG_DONTWAIT | c.MSG_NOSIGNAL);
-        if (sent <= 0) {
-            if (posix.errno(sent) == .INTR) continue;
-            try std.testing.expectEqual(posix.E.AGAIN, posix.errno(sent));
-            break;
+
+    const StalledSend = struct {
+        attempts: usize = 0,
+
+        fn send(context: ?*anyopaque, _: c_int, _: []const u8) SendAttempt {
+            const self: *@This() = @ptrCast(@alignCast(context.?));
+            self.attempts += 1;
+            return .retry;
         }
-        // The explicit SO_SNDBUF makes this immediate on supported macOS
-        // kernels; retain a hard fixture bound so a kernel policy change can
-        // fail the test rather than hang CI.
-        if (std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - fill_started >= std.time.ns_per_s) {
-            return error.TestSocketDidNotSaturate;
-        }
-    }
+    };
+    var stalled_send: StalledSend = .{};
+    client.send_fn = StalledSend.send;
+    client.send_context = &stalled_send;
+    client.send_deadline_ns = 20 * std.time.ns_per_ms;
+
     const started = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
     try std.testing.expectError(error.HostEndpointWriteFailed, client.send("{\"command\":\"media\",\"verb\":\"pause\",\"id\":1}"));
     const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - started;
-    try std.testing.expect(elapsed >= command_write_deadline_ns);
-    try std.testing.expect(elapsed < 2 * std.time.ns_per_s);
+    try std.testing.expect(elapsed >= client.send_deadline_ns);
+    try std.testing.expect(elapsed < 500 * std.time.ns_per_ms);
+    try std.testing.expect(stalled_send.attempts > 1);
     try std.testing.expect(client.isDisconnected());
     // The caller is back on the app loop after the finite send deadline, so
     // pending-slot cleanup and promise rejection can run immediately.
