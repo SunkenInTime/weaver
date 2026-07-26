@@ -22,10 +22,6 @@ const environment = {
   WEAVER_AUTOMATION: "1",
   WEAVER_AUDIO_TEST_CONTROL: audioControl,
   WEAVER_PROVIDER_TEST_FAIL_SEND: providerSendFailure,
-  // The first runtime dies before delivery. Its replacement traverses the
-  // fresh UDS and host ack path, then deterministically receives a declined
-  // outcome even on a headless runner with no active media session.
-  WEAVER_MEDIA_TEST_COMMAND_OUTCOME: "declined",
 };
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
 const registryFile = join(dataRoot, "registry.json");

@@ -25,16 +25,8 @@ const backend_environment = "WEAVER_BACKEND_FILE";
 const ControlCommand = enum { reload, down };
 const ControlResponse = enum { none, ok, failed };
 
-fn automationCommandOutcome(
-    seam_compiled: bool,
-    automation_enabled: ?[]const u8,
-    configured_outcome: ?[]const u8,
-) ?system_providers.CommandOutcome {
-    if (!seam_compiled) return null;
-    if (!std.mem.eql(u8, automation_enabled orelse return null, "1")) return null;
-    const outcome = configured_outcome orelse return null;
-    if (std.mem.eql(u8, outcome, "declined")) return .declined;
-    return null;
+fn automationCommandOutcome(seam_compiled: bool) ?system_providers.CommandOutcome {
+    return if (seam_compiled) .declined else null;
 }
 
 const ControlServer = struct {
@@ -920,11 +912,7 @@ fn run(init: std.process.Init) !void {
         .framework_path = adapter_paths.framework,
         .cache = &media_art_cache,
         .platform_supported = c.weaver_macos_media_supported() != 0,
-        .command_test_outcome = automationCommandOutcome(
-            host_options.automation_seam,
-            init.environ_map.get("WEAVER_AUTOMATION"),
-            init.environ_map.get("WEAVER_MEDIA_TEST_COMMAND_OUTCOME"),
-        ),
+        .command_test_outcome = automationCommandOutcome(host_options.automation_seam),
     };
     defer media_provider.deinit();
     cleanupStaleChildren(init.io, allocator, runtime_root, runtime_exe);
@@ -1207,21 +1195,13 @@ test "provider socket discards an unterminated command at EOF" {
     try std.testing.expect(endpoint.takeCommand() == null);
 }
 
-test "hosted media command override is compile and runtime gated" {
+test "hosted media command override is compile gated" {
     try std.testing.expectEqual(
         @as(?system_providers.CommandOutcome, null),
-        automationCommandOutcome(false, "1", "declined"),
-    );
-    try std.testing.expectEqual(
-        @as(?system_providers.CommandOutcome, null),
-        automationCommandOutcome(true, null, "declined"),
-    );
-    try std.testing.expectEqual(
-        @as(?system_providers.CommandOutcome, null),
-        automationCommandOutcome(true, "1", "accepted"),
+        automationCommandOutcome(false),
     );
     try std.testing.expectEqual(
         system_providers.CommandOutcome.declined,
-        automationCommandOutcome(true, "1", "declined").?,
+        automationCommandOutcome(true).?,
     );
 }
