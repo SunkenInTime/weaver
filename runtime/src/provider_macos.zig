@@ -283,7 +283,9 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     defer server_thread.join();
 
     var client: Client = .{};
-    try client.init(std.testing.io, path);
+    client.io = std.testing.io;
+    client.stream = try address.connect(std.testing.io);
+    client.connected.store(1, .release);
     defer client.deinit();
     defer endpoint.stopping.store(true, .release);
     const stream = client.stream.?;
