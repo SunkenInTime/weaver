@@ -1150,6 +1150,18 @@ test "provider socket discards an unterminated command at EOF" {
     try endpoint.bind(posix.system.getpid());
     const address = try std.Io.net.UnixAddress.init(path);
     const stream = try address.connect(std.testing.io);
+    // LOCAL_PEERPID is only available while the peer is alive. Keep this
+    // in-process client open until the accept thread has authenticated it;
+    // otherwise a fast close can turn this framing test into a PID-race test.
+    var accepted = false;
+    for (0..100) |_| {
+        endpoint.mutex.lockUncancelable(std.testing.io);
+        accepted = endpoint.stream != null;
+        endpoint.mutex.unlock(std.testing.io);
+        if (accepted) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(accepted);
     {
         defer stream.close(std.testing.io);
         var write_buffer: [256]u8 = undefined;
