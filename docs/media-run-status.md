@@ -161,14 +161,41 @@ This run will not change the submodule pointer.
   broke the two-widget fan-out batch gate. Layer 03 now advances the reader
   wake generation only for acknowledgements and acknowledgement-protocol
   failures; metadata frames retain their 1 Hz/fast-audio timer drain.
-  Runtime tests and direct aarch64 semantic compilation pass; the final
-  hosted-session result is pending.
+  Runtime tests and direct aarch64 semantic compilation pass.
 - Layer 05 round-2 local gate: `npm test` PASS 63/63,
   `npm run typecheck` PASS, all 18 examples passed `weaver check`, runtime and
   Windows-host `zig build test` PASS, and both macOS no-emit semantic compiles
   PASS. The Noro seek handler now uses normalized `event.u`; a viewed live
   Spotify recheck moved the visible position from `03:24` to `04:09` within
   2.2 seconds after a 75% strip press, with unchanged shell rendering.
+- The final layer-03 stalled-send test uses a real connected UDS plus an
+  injected retry seam in the production nonblocking send loop. It proves the
+  deadline, disconnect, and return to the app loop without depending on
+  kernel socket-buffer capacity. The final hosted run passes this test.
+- The hosted fan-out gate now asserts semantic delivery: two running
+  per-widget endpoints, two subscribers, and bounded successful frame writes.
+  It does not mistake `SOCK_STREAM` read segmentation or log flush timing for
+  a protocol packet boundary.
+- The first-frame watchdog is also enforced from the host's 1 Hz supervision
+  tick. Its atomic attempt state races the first valid frame against the exact
+  10-second deadline; expiry kills the child, emits one canonical empty frame,
+  marks unavailable, and enters the existing bounded backoff. Hosted runs
+  `30189812372` and `30189813642` pass the full smoke.
+- Greptile replies were posted for PR #35's normalized `event.u` fix and both
+  PR #36 worker-stall fixes; their commit references were updated after the
+  final restack.
+
+## Final GitHub Actions results
+
+All conclusions below are actual completed results, not projections.
+
+| PR | Head evidenced | Actions run | Jobs |
+|---|---|---|---|
+| #32 / 01 | `4dcf19c` | `30173553577` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #33 / 02 | `f6a6442` | `30181585842` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #34 / 03 | `9f1ca83` | `30189810926` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #36 / 04 | `5a40f03` | `30189812372` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #35 / 05 | `5d22e54` | `30189813642` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
 
 ## Blockers and unverified gates
 
@@ -218,7 +245,7 @@ fixes the three partial/new P1s and four P2s through layer 05:
 | Windows shutdown race | 03 | Fixed: persistent manual-reset shutdown events, stopping checks before every read, and deterministic barrier tests in both readers. |
 | CLI binding bypasses | 03 | Fixed: binding/assignment tracing plus the resolved-signature declaration backstop and all four named bypass tests. |
 | fatal shared channel | 03/04 | Fixed: both hosts kill and crash-restart the slot rather than strand it. |
-| first-frame watchdog | 04 | Fixed: 10-second silent-helper kill, one loss frame, bounded backoff; hosted execution pending. |
+| first-frame watchdog | 04 | Fixed: 10-second silent-helper kill, one loss frame, bounded backoff; hosted execution PASS. |
 | seek convergence | 04 | Fixed: repeated observations through the two-second deadline with delayed/no-session/timeout/out-of-tolerance verifier tests. |
 | playback rate | 04 | Fixed: parsed/validated and used in timestamp, synthetic advancement, and seek verification. |
 | Noro normalized seek | 05 | Fixed: `event.u` replaces the hardcoded width division; live Windows recheck passed. |
