@@ -46,6 +46,7 @@ pub const Model = struct {
     has_provider_subscriptions: bool = false,
     media_deadline_ms: u64 = 0,
     provider_frames: u64 = 0,
+    provider_batch_logged: bool = false,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
@@ -313,7 +314,12 @@ fn drainProviderFrames(model: *Model, _: *Effects) !void {
     const count = try (model.engine orelse return).drainProviders();
     if (count == 0) return;
     model.provider_frames += count;
-    if (model.provider_frames == count) std.log.info("widget provider frames applied count={d}", .{count});
+    const first_drain = model.provider_frames == count;
+    const first_multi_frame_batch = count > 1 and !model.provider_batch_logged;
+    if (first_drain or first_multi_frame_batch) {
+        std.log.info("widget provider frames applied count={d}", .{count});
+    }
+    if (count > 1) model.provider_batch_logged = true;
 }
 
 fn reloadIfChanged(model: *Model, effects: *Effects) !void {
