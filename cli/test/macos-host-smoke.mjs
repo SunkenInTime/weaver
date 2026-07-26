@@ -185,14 +185,15 @@ try {
   run(["install", join(repoRoot, "examples", "system")]);
   run(["install", "system-two"]);
   await waitFor("system-provider fan-out", () => {
-    const providers = status()?.providers;
-    const logs = ["System Monitor.log", "System Monitor 2.log"]
-      .map((name) => join(environment.HOME, "Library", "Logs", "Weaver", name));
-    // SOCK_STREAM preserves bytes, not host write boundaries. Fan-out means
-    // both runtimes applied provider data; it does not require CPU + memory to
-    // arrive in one particular reader chunk or app-loop drain.
-    return providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 && providers.systemFrames >= 4 &&
-      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied count="));
+    const document = status();
+    const providers = document?.providers;
+    // `systemFrames` counts successful per-endpoint writes, while subscriber
+    // and running-widget counts prove both per-widget endpoints are active.
+    // Do not infer packet boundaries from SOCK_STREAM or log flush timing.
+    return document?.widgets?.length === 2 &&
+      document.widgets.every((widget) => widget.state === "running") &&
+      providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 &&
+      providers.systemFrames >= providers.systemSubscribers * 4;
   });
   const activeRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))
