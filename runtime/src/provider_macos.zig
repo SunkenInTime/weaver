@@ -136,8 +136,11 @@ pub const Client = struct {
                 framer.finish(&self.queues);
                 return;
             }
+            const wake_before = self.queues.wakeGeneration();
             if (!framer.feed(&self.queues, chunk[0..read])) return;
-            if (self.wake) |wake| wake();
+            if (self.queues.wakeGeneration() != wake_before) {
+                if (self.wake) |wake| wake();
+            }
         }
     }
 };

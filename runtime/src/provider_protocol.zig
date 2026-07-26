@@ -51,6 +51,7 @@ pub const Queues = struct {
     acks: [ack_queue_capacity]AckSlot = [_]AckSlot{.{}} ** ack_queue_capacity,
     ack_protocol_failed: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     unknown_ack_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    wake_generation: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
 
     /// Registration happens on the app loop before the command is written.
     /// One slot per live command makes the lane structurally non-lossy: with
@@ -81,7 +82,10 @@ pub const Queues = struct {
 
     pub fn routeLine(self: *Queues, line: []const u8) void {
         const envelope = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, line, .{}) catch {
-            if (std.mem.indexOf(u8, line, "\"ack\"") != null) self.ack_protocol_failed.store(1, .release);
+            if (std.mem.indexOf(u8, line, "\"ack\"") != null) {
+                self.ack_protocol_failed.store(1, .release);
+                _ = self.wake_generation.fetchAdd(1, .release);
+            }
             return self.pushFrame(line);
         };
         defer envelope.deinit();
@@ -90,6 +94,10 @@ pub const Queues = struct {
             else => false,
         };
         if (is_ack) {
+            // Reader threads wake the app loop for acknowledgement/protocol
+            // events only. Provider frames retain their established timer
+            // drain and batching behavior.
+            _ = self.wake_generation.fetchAdd(1, .release);
             const parsed = std.json.parseFromSlice(AckWire, std.heap.page_allocator, line, .{
                 .ignore_unknown_fields = false,
             }) catch {
@@ -116,6 +124,10 @@ pub const Queues = struct {
             return;
         }
         self.pushFrame(line);
+    }
+
+    pub fn wakeGeneration(self: *const Queues) u64 {
+        return self.wake_generation.load(.acquire);
     }
 
     fn pushFrame(self: *Queues, line: []const u8) void {
@@ -166,6 +178,7 @@ pub const Framer = struct {
     pub fn feed(self: *Framer, queues: *Queues, bytes: []const u8) bool {
         if (bytes.len > self.pending.len - self.pending_len) {
             queues.ack_protocol_failed.store(1, .release);
+            _ = queues.wake_generation.fetchAdd(1, .release);
             return false;
         }
         @memcpy(self.pending[self.pending_len..][0..bytes.len], bytes);
@@ -212,6 +225,16 @@ test "interleaved frames coalesce while four acks never drop" {
         .{ .id = 3, .ok = true },
         .{ .id = 4, .ok = true },
     }) |expected| try std.testing.expectEqualDeep(expected, queues.takeAck().?);
+}
+
+test "reader wake generation advances for acknowledgements but not provider frames" {
+    var queues: Queues = .{};
+    const initial = queues.wakeGeneration();
+    queues.routeLine("{\"provider\":\"cpu\",\"value\":{\"percent\":1}}");
+    try std.testing.expectEqual(initial, queues.wakeGeneration());
+    try std.testing.expect(queues.registerAck(1));
+    queues.routeLine("{\"ack\":1,\"ok\":true}");
+    try std.testing.expectEqual(initial + 1, queues.wakeGeneration());
 }
 
 test "late acknowledgements cannot crowd out replacement command IDs" {
