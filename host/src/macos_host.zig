@@ -401,9 +401,17 @@ const Host = struct {
         var ack_buffer: [64]u8 = undefined;
         for (&self.slots) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
+            var channel_failed = false;
             while (endpoint.takeNack()) |id| {
                 const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
-                _ = endpoint.write(ack);
+                if (!endpoint.write(ack)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.restartAfterMediaChannelFailure(slot, now_ms);
+                continue;
             }
             while (endpoint.takeCommand()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
@@ -412,12 +420,25 @@ const Host = struct {
                 // reaches weaverd and is honestly declined.
                 const ok = allowed and false;
                 const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
-                _ = endpoint.write(ack);
+                if (!endpoint.write(ack)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.restartAfterMediaChannelFailure(slot, now_ms);
+                continue;
             }
             if (endpoint.command_queue.malformed.swap(false, .acq_rel)) {
                 std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
             }
         }
+    }
+
+    fn restartAfterMediaChannelFailure(self: *Host, slot: *Slot, now_ms: u64) void {
+        std.log.warn("restarting widget {s} after fatal provider channel failure", .{slot.name()});
+        self.stopSlot(slot, false);
+        supervisor.recordChannelFailure(slot, now_ms);
     }
 
     fn launch(self: *Host, slot: *Slot, now_ms: u64) !void {

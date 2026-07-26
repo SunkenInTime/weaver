@@ -174,6 +174,13 @@ pub fn recordCrash(slot: anytype, now_ms: u64, exit_code: ?u32) void {
     slot.setReason("crashed; restart {d} in {d}s", .{ slot.crash_count, backoff.delayMs(slot.crash_count) / 1000 });
 }
 
+/// A fatal provider/command channel is process-fatal because the authenticated
+/// endpoint is intentionally created once per widget launch. Reuse the crash
+/// budget and backoff so a replacement process receives a fresh endpoint.
+pub fn recordChannelFailure(slot: anytype, now_ms: u64) void {
+    recordCrash(slot, now_ms, null);
+}
+
 pub fn rendererDesired(slots: anytype, force_software: bool) bool {
     if (force_software) return false;
     for (slots) |slot| {
@@ -385,6 +392,31 @@ test "slot state machine preserves subscriptions renderer policy and crash backo
     try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slot, true, false, false, 1200));
     try std.testing.expect(rendererDesired(&[_]FakeSlot{slot}, false));
     try std.testing.expect(!rendererDesired(&[_]FakeSlot{slot}, true));
+}
+
+test "fatal provider channel restarts the slot and restores media delivery and transport" {
+    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var slot = &slots[0];
+    try slot.setRegistration(.{ .name = "Player", .sourcePath = "/owned/player", .enabled = true, .dev = false });
+    selectManifest(slot, &.{"media"}, &.{"media-transport"}, "software", false);
+    slot.platform.running = true;
+    markRunning(slot, 100, 1);
+
+    // The platform host kills the old process/endpoint first.
+    slot.platform.running = false;
+    recordChannelFailure(slot, 200);
+    try std.testing.expectEqual(RunState.backoff, slot.state);
+    try std.testing.expectEqual(SlotAction.none, nextSlotAction(slot, true, false, false, 1199));
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(slot, true, false, false, 1200));
+
+    // A successful relaunch preserves the manifest contract and creates a
+    // fresh authenticated endpoint, so both lanes become live again.
+    slot.platform.running = true;
+    markRunning(slot, 1200, 1);
+    var fake: FakeAdapter = .{ .slots = &slots };
+    try std.testing.expect(hasSubscription(&slots, .media, &fake));
+    try std.testing.expect(slot.wants_media_transport);
+    try std.testing.expect(!slot.media_sent);
 }
 
 test "portable status serializer keeps the public state spelling" {

@@ -134,7 +134,11 @@ const WindowsSlotState = struct {
     pid: u32 = 0,
     pipe: c.HANDLE = invalid_handle,
     write_event: c.HANDLE = null,
+    command_shutdown_event: c.HANDLE = null,
     command_thread: ?std.Thread = null,
+    command_stopping: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+    test_before_command_read: c.HANDLE = null,
+    test_resume_command_read: c.HANDLE = null,
     media_command_executor: ?*MediaCommandExecutor = null,
     command_queue: media_commands.Queue = .{},
     command_rate: media_commands.RateLimiter = .{},
@@ -349,6 +353,8 @@ const Host = struct {
                 return error.ConnectPipeFailed;
             }
             slot.platform.write_event = c.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
+            slot.platform.command_shutdown_event = c.CreateEventW(null, 1, 0, null) orelse return error.CreateEventFailed;
+            slot.platform.command_stopping.store(0, .release);
             slot.platform.command_thread = try std.Thread.spawn(
                 .{ .stack_size = 256 * 1024 },
                 commandReaderMain,
@@ -467,6 +473,8 @@ const Host = struct {
     fn closePipe(_: *Host, slot: *Slot) void {
         if (slot.platform.pipe == invalid_handle) return;
         slot.platform.command_queue.stop();
+        slot.platform.command_stopping.store(1, .release);
+        if (slot.platform.command_shutdown_event) |event| _ = c.SetEvent(event);
         _ = c.CancelIoEx(slot.platform.pipe, null);
         if (slot.platform.command_thread) |thread| thread.join();
         slot.platform.command_thread = null;
@@ -477,6 +485,8 @@ const Host = struct {
         slot.platform.pipe = invalid_handle;
         if (slot.platform.write_event) |event| _ = c.CloseHandle(event);
         slot.platform.write_event = null;
+        if (slot.platform.command_shutdown_event) |event| _ = c.CloseHandle(event);
+        slot.platform.command_shutdown_event = null;
         slot.platform.command_queue = .{};
         slot.platform.command_rate = .{};
     }
@@ -621,8 +631,7 @@ const Host = struct {
                 }
             }
             if (channel_failed) {
-                std.log.warn("closing failed media command channel for widget {s}", .{slot.name()});
-                self.closePipe(slot);
+                self.restartAfterMediaChannelFailure(slot, now_ms);
                 continue;
             }
             while (slot.platform.command_queue.takeNack()) |id| {
@@ -633,7 +642,7 @@ const Host = struct {
                 }
             }
             if (channel_failed) {
-                self.closePipe(slot);
+                self.restartAfterMediaChannelFailure(slot, now_ms);
                 continue;
             }
             while (slot.platform.command_queue.take()) |command| {
@@ -656,13 +665,19 @@ const Host = struct {
                 }
             }
             if (channel_failed) {
-                self.closePipe(slot);
+                self.restartAfterMediaChannelFailure(slot, now_ms);
                 continue;
             }
             if (slot.platform.command_queue.malformed.swap(false, .acq_rel)) {
                 std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
             }
         }
+    }
+
+    fn restartAfterMediaChannelFailure(self: *Host, slot: *Slot, now_ms: u64) void {
+        std.log.warn("restarting widget {s} after fatal provider channel failure", .{slot.name()});
+        self.stopSlot(slot, false);
+        supervisor.recordChannelFailure(slot, now_ms);
     }
 
     fn writeStatus(self: *Host, now_ms: u64) void {
@@ -973,19 +988,39 @@ fn commandReaderMain(platform: *WindowsSlotState) void {
     var framer: media_commands.Framer = .{};
     var chunk: [512]u8 = undefined;
     while (true) {
+        if (platform.command_stopping.load(.acquire) != 0) return;
         var read: c.DWORD = 0;
         _ = c.ResetEvent(event);
         var overlapped: c.OVERLAPPED = std.mem.zeroes(c.OVERLAPPED);
         overlapped.hEvent = event;
+        if (platform.test_before_command_read) |barrier| {
+            _ = c.SetEvent(barrier);
+            if (platform.test_resume_command_read) |resume_event| _ = c.WaitForSingleObject(resume_event, c.INFINITE);
+        }
+        if (platform.command_stopping.load(.acquire) != 0) return;
         if (c.ReadFile(platform.pipe, &chunk, chunk.len, &read, &overlapped) == 0) {
-            if (c.GetLastError() != c.ERROR_IO_PENDING or
-                c.WaitForSingleObject(event, c.INFINITE) != c.WAIT_OBJECT_0 or
-                c.GetOverlappedResult(platform.pipe, &overlapped, &read, 0) == 0)
-            {
+            if (c.GetLastError() != c.ERROR_IO_PENDING) {
+                framer.finish(&platform.command_queue);
+                return;
+            }
+            const shutdown = platform.command_shutdown_event orelse {
+                framer.finish(&platform.command_queue);
+                return;
+            };
+            const handles = [_]c.HANDLE{ event, shutdown };
+            const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, c.INFINITE);
+            if (wait == c.WAIT_OBJECT_0 + 1) {
+                _ = c.CancelIoEx(platform.pipe, &overlapped);
+                var cancelled: c.DWORD = 0;
+                _ = c.GetOverlappedResult(platform.pipe, &overlapped, &cancelled, 1);
+                return;
+            }
+            if (wait != c.WAIT_OBJECT_0 or c.GetOverlappedResult(platform.pipe, &overlapped, &read, 0) == 0) {
                 framer.finish(&platform.command_queue);
                 return;
             }
         }
+        if (platform.command_stopping.load(.acquire) != 0) return;
         if (read == 0) {
             framer.finish(&platform.command_queue);
             return;
@@ -1085,6 +1120,25 @@ test {
     _ = backoff;
     _ = media;
     _ = providers;
+}
+
+test "Windows host command reader closes the cancel-before-read shutdown race" {
+    var platform: WindowsSlotState = .{};
+    platform.command_shutdown_event = c.CreateEventW(null, 1, 0, null) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(platform.command_shutdown_event);
+    platform.test_before_command_read = c.CreateEventW(null, 1, 0, null) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(platform.test_before_command_read);
+    platform.test_resume_command_read = c.CreateEventW(null, 1, 0, null) orelse return error.CreateEventFailed;
+    defer _ = c.CloseHandle(platform.test_resume_command_read);
+    const thread = try std.Thread.spawn(.{}, commandReaderMain, .{&platform});
+    try std.testing.expectEqual(c.WAIT_OBJECT_0, c.WaitForSingleObject(platform.test_before_command_read, 1000));
+
+    // Cancellation occurs while the worker is deterministically between reads.
+    platform.command_stopping.store(1, .release);
+    _ = c.SetEvent(platform.command_shutdown_event);
+    _ = c.CancelIoEx(platform.pipe, null);
+    _ = c.SetEvent(platform.test_resume_command_read);
+    thread.join();
 }
 
 test "provider pipe rejects a connected client whose pid is not the launched child" {

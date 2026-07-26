@@ -1192,30 +1192,92 @@ function validateMediaTransportCapability(project: SourceProject, errors: string
   const program = ts.createProgram({ rootNames: parsed.fileNames, options });
   const checker = program.getTypeChecker();
 
-  const resolvedSymbol = (node: ts.Node, seen = new Set<ts.Symbol>()): ts.Symbol | undefined => {
+  const sdkHookDeclaration = (declaration: ts.Declaration | undefined): boolean => {
+    if (!declaration) return false;
+    const path = resolve(declaration.getSourceFile().fileName);
+    if (!pathsEqual(path, sdkDirectory) && !pathInside(sdkDirectory, path)) return false;
+    const named = declaration as ts.Declaration & { name?: ts.DeclarationName };
+    if (!named.name) return false;
+    let symbol = checker.getSymbolAtLocation(named.name);
+    if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    return symbol?.getName() === "useMediaTransport";
+  };
+
+  const assignments = new Map<ts.Symbol, ts.Expression[]>();
+  const canonicalSymbol = (node: ts.Node): ts.Symbol | undefined => {
     let symbol = checker.getSymbolAtLocation(node);
+    const seen = new Set<ts.Symbol>();
     while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !seen.has(symbol)) {
       seen.add(symbol);
       symbol = checker.getAliasedSymbol(symbol);
     }
-    if (!symbol || seen.has(symbol)) return symbol;
-    seen.add(symbol);
-    for (const declaration of symbol.declarations ?? []) {
-      if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) continue;
-      const initializer = declaration.initializer;
-      if (ts.isIdentifier(initializer) || ts.isPropertyAccessExpression(initializer)) {
-        return resolvedSymbol(initializer, seen);
-      }
-    }
     return symbol;
   };
+  const rememberAssignment = (target: ts.Expression, value: ts.Expression): void => {
+    const symbol = canonicalSymbol(target);
+    if (!symbol) return;
+    const values = assignments.get(symbol) ?? [];
+    values.push(value);
+    assignments.set(symbol, values);
+  };
+  for (const sourceFile of program.getSourceFiles()) {
+    const indexAssignments = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        rememberAssignment(node.left, node.right);
+      }
+      ts.forEachChild(node, indexAssignments);
+    };
+    indexAssignments(sourceFile);
+  }
+
+  const tracesSdkHookSymbol = (symbol: ts.Symbol | undefined, seen: Set<ts.Symbol>): boolean => {
+    while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !seen.has(symbol)) {
+      seen.add(symbol);
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    if (!symbol || seen.has(symbol)) return false;
+    seen.add(symbol);
+    if (symbol.getName() === "useMediaTransport" && (symbol.declarations ?? []).some(sdkHookDeclaration)) return true;
+    for (const value of assignments.get(symbol) ?? []) {
+      if (tracesSdkHookNode(value, seen)) return true;
+    }
+    for (const declaration of symbol.declarations ?? []) {
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer && tracesSdkHookNode(declaration.initializer, seen)) return true;
+      if (ts.isPropertyAssignment(declaration) && tracesSdkHookNode(declaration.initializer, seen)) return true;
+      if (ts.isShorthandPropertyAssignment(declaration)) {
+        const valueSymbol = checker.getShorthandAssignmentValueSymbol(declaration);
+        if (tracesSdkHookSymbol(valueSymbol, seen)) return true;
+      }
+      if (ts.isBindingElement(declaration)) {
+        let parent: ts.Node = declaration.parent;
+        while (ts.isObjectBindingPattern(parent) || ts.isArrayBindingPattern(parent) || ts.isBindingElement(parent)) parent = parent.parent;
+        if (ts.isVariableDeclaration(parent) && parent.initializer) {
+          const propertyNode = declaration.propertyName ?? declaration.name;
+          const propertyName = ts.isIdentifier(propertyNode) || ts.isStringLiteral(propertyNode) || ts.isNumericLiteral(propertyNode)
+            ? propertyNode.text
+            : undefined;
+          if (propertyName) {
+            const sourceType = checker.getTypeAtLocation(parent.initializer);
+            if (tracesSdkHookSymbol(checker.getPropertyOfType(sourceType, propertyName), seen)) return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+  function tracesSdkHookNode(node: ts.Node, seen = new Set<ts.Symbol>()): boolean {
+    return tracesSdkHookSymbol(canonicalSymbol(node), seen);
+  }
+  const signatureIsSdkHook = (node: ts.CallExpression): boolean => {
+    const declaration = checker.getResolvedSignature(node)?.getDeclaration();
+    return sdkHookDeclaration(declaration);
+  };
   const isSdkHook = (node: ts.CallExpression): boolean => {
-    const symbol = resolvedSymbol(node.expression);
-    if (!symbol || symbol.getName() !== "useMediaTransport") return false;
-    return (symbol.declarations ?? []).some((declaration) => {
-      const path = resolve(declaration.getSourceFile().fileName);
-      return pathsEqual(path, sdkDirectory) || pathInside(sdkDirectory, path);
-    });
+    // The signature declaration is the authoritative backstop: TypeScript
+    // preserves the SDK call signature through destructuring, assignments,
+    // object properties, and re-export chains even when the local symbol is a
+    // BindingElement or an inferred variable.
+    return signatureIsSdkHook(node) || tracesSdkHookNode(node.expression);
   };
 
   for (const sourceFile of program.getSourceFiles()) {

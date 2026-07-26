@@ -8,7 +8,7 @@ Last updated: 2026-07-25
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; adversarial repair in progress |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; round-2 repair locally green |
 | 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
 | 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
@@ -84,26 +84,35 @@ This run will not change the submodule pointer.
   hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
   transport-only idle-zero, forced SDK resolution despite a hostile widget
   tsconfig, and local hook aliases.
+- Layer 03 round-2 repair: `npm test` PASS 63/63, `npm run typecheck`
+  PASS, runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS, host
+  `zig build test` PASS, and `weaver check examples/now-playing` PASS.
+  Direct semantic compilation of `runtime/src/provider_macos.zig` for
+  `aarch64-macos` also passes. New deterministic tests cover a connected host
+  that stops reading, the host and runtime cancel-before-read interleavings,
+  fatal shared-channel crash/restart semantics, and SDK-hook calls reached
+  through destructuring, deferred assignment, object properties, and a
+  re-export chain.
 
 ## Blockers and unverified gates
 
 - None for the Windows stack.
-- PR 04 remains spike-gated. This Windows run cannot claim the required real
-  macOS metadata frame or delivered command without recorded external Mac/CI
-  execution evidence.
+- The attended Mac route spike passed with real metadata and a delivered pause
+  command; its evidence enters the stack in layer 04. The round-2 adapter
+  changes still require hosted CI and an attended Mac before any implementation
+  behavior is claimed verified.
 
 ## Current work
 
-The 15-finding adversarial remediation is in progress bottom-up. F9 is fixed,
-tested, committed, and pushed in layer 02. Layer 03 now contains the owning
-repairs for F1/F2/F3/F4/F10/F11/F12: PID-bound endpoints, strict EOF framing,
-reader wakeups and exact one-shot deadlines, keyed acknowledgements and a
-provably bounded nack lane, forced SDK symbol resolution, deadline-bounded
-endpoint writes, and an isolated deadline-bounded Windows command worker.
-macOS reader and endpoint changes pass semantic cross-compilation; the full
-layer gate passes.
+Round-2 remediation is in progress bottom-up. Layer 03 now bounds the macOS
+runtime-to-host command write, makes both Windows reader shutdown sequences
+race-free with persistent shutdown events, traces the SDK transport hook
+through all reviewed binding forms with the resolved-signature backstop, and
+restarts a widget through crash supervision after fatal failure of its shared
+provider channel. The layer is locally green; macOS runtime send behavior is
+compile- and seam-tested here but remains unattended-Mac unverified.
 
 ## Next executable task
 
-Commit/push the layer-03 remediation, then restack layer 04 and repair
-F2/F5/F6/F7/F8/F11/F13/F14/F15.
+Commit/push the layer-03 round-2 remediation, then restack layer 04 and add the
+first-frame watchdog, convergent seek read-back, and playback-rate timeline.

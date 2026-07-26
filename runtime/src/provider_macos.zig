@@ -1,7 +1,12 @@
 const std = @import("std");
+const c = @cImport({
+    @cInclude("sys/socket.h");
+});
+const posix = std.posix;
 const protocol = @import("provider_protocol.zig");
 
 const reader_stack_bytes: usize = 256 * 1024;
+const command_write_deadline_ns: i128 = std.time.ns_per_s;
 
 const SpinMutex = struct {
     inner: std.atomic.Mutex = .unlocked,
@@ -99,14 +104,35 @@ pub const Client = struct {
         var framed: [protocol.command_line_capacity + 1]u8 = undefined;
         @memcpy(framed[0..line.len], line);
         framed[line.len] = '\n';
-        var write_buffer: [protocol.command_line_capacity + 1]u8 = undefined;
-        var writer = stream.writer(self.io, &write_buffer);
-        writer.interface.writeAll(framed[0 .. line.len + 1]) catch {
-            self.connected.store(0, .release);
-            self.disconnected.store(1, .release);
-            return error.HostEndpointWriteFailed;
-        };
-        writer.interface.flush() catch return error.HostEndpointWriteFailed;
+        const started_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds;
+        var offset: usize = 0;
+        while (offset < line.len + 1) {
+            const sent = c.send(
+                stream.socket.handle,
+                framed[offset..].ptr,
+                line.len + 1 - offset,
+                c.MSG_DONTWAIT | c.MSG_NOSIGNAL,
+            );
+            if (sent > 0) {
+                offset += @intCast(sent);
+                continue;
+            }
+            switch (posix.errno(sent)) {
+                .INTR => continue,
+                .AGAIN => {},
+                else => return self.failWrite(),
+            }
+            if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= command_write_deadline_ns) {
+                return self.failWrite();
+            }
+            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return self.failWrite();
+        }
+    }
+
+    fn failWrite(self: *Client) error{HostEndpointWriteFailed} {
+        self.connected.store(0, .release);
+        self.disconnected.store(1, .release);
+        return error.HostEndpointWriteFailed;
     }
 
     pub fn nextCommandId(self: *Client) !u64 {
@@ -230,4 +256,48 @@ test "Unix provider transport rejects an unterminated ack at EOF" {
     }
     try std.testing.expect(client.protocolFailed());
     try std.testing.expect(client.takeAck() == null);
+}
+
+test "Unix provider command send has a deadline when the connected host stalls" {
+    const Endpoint = struct {
+        io: std.Io,
+        listener: std.Io.net.Server,
+
+        fn run(self: *@This()) void {
+            const stream = self.listener.accept(self.io) catch return;
+            defer stream.close(self.io);
+            std.Io.sleep(self.io, .fromSeconds(2), .awake) catch {};
+        }
+    };
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-stall-test-{d}.sock", .{std.posix.system.getpid()});
+    std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    const address = try std.Io.net.UnixAddress.init(path);
+    var endpoint: Endpoint = .{ .io = std.testing.io, .listener = try address.listen(std.testing.io, .{}) };
+    defer endpoint.listener.deinit(std.testing.io);
+    const server_thread = try std.Thread.spawn(.{}, Endpoint.run, .{&endpoint});
+    defer server_thread.join();
+
+    var client: Client = .{};
+    try client.init(std.testing.io, path);
+    defer client.deinit();
+    const stream = client.stream.?;
+    var fill = [_]u8{0xaa} ** 4096;
+    while (true) {
+        const sent = c.send(stream.socket.handle, &fill, fill.len, c.MSG_DONTWAIT | c.MSG_NOSIGNAL);
+        if (sent > 0) continue;
+        if (posix.errno(sent) == .INTR) continue;
+        try std.testing.expectEqual(posix.E.AGAIN, posix.errno(sent));
+        break;
+    }
+    const started = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
+    try std.testing.expectError(error.HostEndpointWriteFailed, client.send("{\"command\":\"media\",\"verb\":\"pause\",\"id\":1}"));
+    const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - started;
+    try std.testing.expect(elapsed >= command_write_deadline_ns);
+    try std.testing.expect(elapsed < 2 * std.time.ns_per_s);
+    try std.testing.expect(client.isDisconnected());
+    // The caller is back on the app loop after the finite send deadline, so
+    // pending-slot cleanup and promise rejection can run immediately.
+    try std.testing.expect(client.nowMilliseconds() > 0);
 }
