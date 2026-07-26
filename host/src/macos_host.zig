@@ -621,11 +621,29 @@ const Host = struct {
         const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
         for (&self.slots) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
-            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and endpoint.write(cpu)) {
+            const send_cpu = provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed);
+            const send_memory = provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed);
+            if (send_cpu and send_memory) {
+                // One system sample is one socket publication. Keeping the two
+                // newline-delimited frames in a single bounded write prevents
+                // the runtime's 1 Hz drain from phase-splitting CPU and memory
+                // indefinitely while preserving the frozen per-frame wire
+                // format and all-or-nothing delivery accounting.
+                var batch: [cpu_buffer.len + memory_buffer.len]u8 = undefined;
+                @memcpy(batch[0..cpu.len], cpu);
+                @memcpy(batch[cpu.len..][0..memory.len], memory);
+                if (endpoint.write(batch[0 .. cpu.len + memory.len])) {
+                    slot.cpu_sent = true;
+                    slot.memory_sent = true;
+                    self.system_frames += 2;
+                }
+                continue;
+            }
+            if (send_cpu and endpoint.write(cpu)) {
                 slot.cpu_sent = true;
                 self.system_frames += 1;
             }
-            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and endpoint.write(memory)) {
+            if (send_memory and endpoint.write(memory)) {
                 slot.memory_sent = true;
                 self.system_frames += 1;
             }
