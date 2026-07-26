@@ -39,6 +39,7 @@ typedef struct WeaverMediaArtwork {
     int too_large;
     int refresh_failed;
     int session_changed;
+    int unavailable;
 } WeaverMediaArtwork;
 
 WeaverMediaSession *weaver_media_create(void);
@@ -48,6 +49,7 @@ void weaver_media_artwork_release(WeaverMediaArtwork *artwork);
 void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]);
 int weaver_media_test_dirty_coalescing(void);
 int weaver_media_test_refresh_retry(void);
+int weaver_media_test_refresh_failure_bound(void);
 
 #ifdef __cplusplus
 }

@@ -159,6 +159,7 @@ extern "C" int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t 
 
 constexpr size_t max_artwork_bytes = 1024 * 1024;
 constexpr uint64_t max_artwork_pixel_bytes = 256 * 1024;
+constexpr uint32_t max_artwork_refresh_attempts = 3;
 
 static bool normalized_artwork_bytes(
     const uint8_t *source,
@@ -281,6 +282,7 @@ struct WeaverMediaSession {
     std::string album;
     std::string source_app;
     bool refresh_failed = false;
+    uint32_t refresh_failure_count = 0;
     bool apartment_initialized = false;
 
     ~WeaverMediaSession() {
@@ -343,6 +345,8 @@ static void rebind_current_session(WeaverMediaSession *state) {
     state->properties_subscribed = false;
     state->current = nullptr;
     clear_cached_properties(state);
+    state->refresh_failed = false;
+    state->refresh_failure_count = 0;
     state->current = state->manager.GetCurrentSession();
     if (state->current) {
         state->source_app = source_app_name(state->current.SourceAppUserModelId());
@@ -362,6 +366,14 @@ static bool should_refresh_properties(bool dirty, bool refresh_failed) {
     return dirty || refresh_failed;
 }
 
+static uint32_t next_refresh_failure_count(uint32_t current) {
+    return std::min(current + 1, max_artwork_refresh_attempts);
+}
+
+static bool refresh_retry_exhausted(uint32_t count) {
+    return count >= max_artwork_refresh_attempts;
+}
+
 static bool read_thumbnail(
     const winrt::Windows::Storage::Streams::IRandomAccessStreamReference &reference,
     WeaverMediaArtwork *artwork) {
@@ -374,7 +386,9 @@ static bool read_thumbnail(
         const uint64_t size = stream.Size();
         if (size > max_artwork_bytes) {
             artwork->too_large = 1;
-            return false;
+            artwork->unavailable = 1;
+            artwork->changed = 1;
+            return true;
         }
         if (size == 0) {
             artwork->changed = 1;
@@ -442,14 +456,28 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         if (!session) return 0;
         const bool properties_dirty = state->dirty.take_properties();
         if (should_refresh_properties(properties_dirty, state->refresh_failed)) {
+            bool refresh_succeeded = false;
             try {
                 const auto properties = session.TryGetMediaPropertiesAsync().get();
                 state->title = winrt::to_string(properties.Title());
                 state->artist = winrt::to_string(properties.Artist());
                 state->album = winrt::to_string(properties.AlbumTitle());
-                state->refresh_failed = !read_thumbnail(properties.Thumbnail(), artwork);
+                refresh_succeeded = read_thumbnail(properties.Thumbnail(), artwork);
             } catch (...) {
-                state->refresh_failed = true;
+                refresh_succeeded = false;
+            }
+            state->refresh_failed = !refresh_succeeded;
+            if (refresh_succeeded) {
+                state->refresh_failure_count = 0;
+            } else {
+                state->refresh_failure_count = next_refresh_failure_count(state->refresh_failure_count);
+                if (refresh_retry_exhausted(state->refresh_failure_count)) {
+                    // Resolve refreshed metadata without stale art after a
+                    // bounded window. Later subscribed polls keep retrying, so
+                    // a recovered source can still publish artwork.
+                    artwork->unavailable = 1;
+                    artwork->changed = 1;
+                }
             }
         }
         artwork->refresh_failed = state->refresh_failed ? 1 : 0;
@@ -501,4 +529,15 @@ extern "C" int weaver_media_test_refresh_retry(void) {
     if (!should_refresh_properties(true, false)) return 0;
     if (!should_refresh_properties(false, true)) return 0;
     return should_refresh_properties(true, true) ? 1 : 0;
+}
+
+extern "C" int weaver_media_test_refresh_failure_bound(void) {
+    uint32_t count = 0;
+    count = next_refresh_failure_count(count);
+    if (refresh_retry_exhausted(count)) return 0;
+    count = next_refresh_failure_count(count);
+    if (refresh_retry_exhausted(count)) return 0;
+    count = next_refresh_failure_count(count);
+    if (!refresh_retry_exhausted(count)) return 0;
+    return next_refresh_failure_count(count) == max_artwork_refresh_attempts ? 1 : 0;
 }
