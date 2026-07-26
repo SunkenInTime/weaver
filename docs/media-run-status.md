@@ -130,6 +130,32 @@ This run will not change the submodule pointer.
   `npm run typecheck` PASS, release audit PASS, all 18 widget examples passed
   `weaver check`, runtime test/build PASS, Windows host test/build PASS, and
   both macOS provider/host no-emit semantic compiles PASS.
+- After the final layer-03 macOS test-harness repair and 04/05 restack, the
+  layer-05 head was rechecked locally: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, all 18 widget examples passed `weaver check`,
+  runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS, and host
+  `zig build test` PASS.
+- A post-restack Greptile P1 correctly identified that macOS slot teardown
+  still joined an in-flight command worker on the supervision loop. Layer 04
+  now transfers ownership to the stopped worker, which self-releases after
+  the helper's bounded timeout; final process shutdown tracks and drains all
+  workers within an explicit three-second fail-closed window. A deterministic
+  test holds a command for 300 ms and requires supervision-side teardown to
+  return in under 100 ms. Both macOS source files pass direct aarch64 semantic
+  compilation; runtime behavior remains attended-Mac unverified.
+- The first layer-03 hosted-session run and its retry deterministically
+  exposed a time-only macOS startup crash: `subscribe: ["time"]` incorrectly
+  armed the host-provider drain, which reached an inert client whose clock had
+  not been initialized. Layer 03 now excludes runtime-native `time` from
+  host-backed subscription polling and initializes the inert client's clock.
+  The repaired hosted run passed that Clock startup gate.
+- That same hosted run then exposed frame wakes bypassing the established
+  timer drain: all system frames arrived, but immediate one-at-a-time drains
+  broke the two-widget fan-out batch gate. Layer 03 now advances the reader
+  wake generation only for acknowledgements and acknowledgement-protocol
+  failures; metadata frames retain their 1 Hz/fast-audio timer drain.
+  Runtime tests and direct aarch64 semantic compilation pass; the final
+  hosted-session result is pending.
 
 ## Blockers and unverified gates
 
@@ -149,13 +175,13 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-The 15-finding adversarial remediation is implemented through layer 04:
+The 15-finding adversarial remediation is implemented through layer 05:
 
 | Finding | Owning layer | Accepted state |
 |---|---|---|
 | F1 | 03 | Fixed: both endpoints require the launched child PID; real hijack tests added. |
 | F2 | 03/04 | Fixed: all command, runtime, and adapter readers discard/count EOF residuals. |
-| F3 | 03 | Fixed: subscription-only polling, reader wake, exact one-shot 3 s deadline. |
+| F3 | 03 | Fixed: host-backed subscription-only polling (time excluded), reader wake, exact one-shot 3 s deadline. |
 | F4 | 03 | Fixed: nine-entry proven nack lane plus keyed four-pending ack slots and late-ack test. |
 | F5 | 04 | Fixed: helper/channel failures reject; only exit 2 OS decline resolves false. |
 | F6 | 04 | Fixed: seek requires bounded read-back within ±2000 ms accounting for advance. |
@@ -164,7 +190,7 @@ The 15-finding adversarial remediation is implemented through layer 04:
 | F9 | 02 | Fixed: failed refresh retains the prior Windows art snapshot and pin. |
 | F10 | 03 | Fixed: forced SDK mapping and alias/re-export symbol tracing with bypass tests. |
 | F11 | 03/04 | Fixed: bounded endpoint writes and bounded TERM-to-KILL helper teardown. |
-| F12 | 03 | Fixed: Windows media calls run on a bounded per-widget worker. |
+| F12 | 03/04 | Fixed: platform calls run on bounded per-widget workers; macOS slot teardown never joins them on supervision. |
 | F13 | 04 | Fixed: restart reset requires a frame plus 30 s stable streaming. |
 | F14 | 04 | Fixed: ProcessInfo 15.4 runtime gate; exact-floor behavior remains unverified. |
 | F15 | 04/05 | Fixed: static audit, blocked record, spike row, results, and run status now tell the same dated story. |
@@ -177,7 +203,7 @@ The 15-finding adversarial remediation is implemented through layer 04:
 
 ## Next executable task
 
-Commit/push layer 04, restack layer 05 without dropping Dara's `b6cc02a`,
+Finish and push the layer-05 restack without dropping Dara's REC-dot change,
 then wait for and record every actual Actions result. In particular, hosted
 macOS must compile/link the helper and pass the full runtime-fatal recovery
 gate before this document calls that behavior remotely verified.
