@@ -29,7 +29,11 @@ This route is isolated behind `host/src/providers_macos.zig` and the existing
 per-widget UDS. Widgets see the same media frame-v2 and verb/ack protocol as
 Windows. Apple breakage or a later replacement with per-application
 AppleScript changes no widget source, SDK type, manifest declaration, wire
-key, or UDS ownership rule.
+key, or UDS ownership rule. The endpoint is intentionally scoped to one
+widget process: if that runtime detects a command-send failure it exits
+nonzero, and host crash supervision launches a new PID with a fresh
+authenticated endpoint. Weaver does not strand the widget or reconnect the
+old process.
 
 Helper EOF, EOF with an unterminated residual record, malformed metadata or
 artwork, or child exit is adapter loss. Weaver emits one canonical empty media
@@ -44,7 +48,9 @@ session with a blank title remains a session; absent playback state is
 media publication clock using the adapter's validated playback rate. A helper
 that remains alive but emits no complete first frame for 10 seconds is treated
 as adapter loss: Weaver kills it, emits the same single empty/unavailable
-transition, and enters the same bounded backoff.
+transition, and enters the same bounded backoff. Once a valid first frame has
+arrived, the stream worker has no polling timeout; it blocks on stdout/HUP so
+an idle helper creates no periodic host work.
 
 Artwork crosses the same budget boundary as Windows: decode, aspect-fit to at
 most 256×256 / 256 KiB decoded RGBA, PNG re-encode, then atomic art-cache

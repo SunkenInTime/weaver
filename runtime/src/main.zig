@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const weaver_build_options = @import("weaver_build_options");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const geometry_mod = @import("geometry.zig");
@@ -127,6 +128,11 @@ fn initEffects(model: *Model, effects: *Effects) void {
 /// One SDK timer delivery is one JS batch. All retained-tree ops complete
 /// before update returns, after which UiApp derives and presents once.
 fn update(model: *Model, msg: Msg, effects: *Effects) void {
+    // A per-launch provider endpoint has no reconnection protocol. A runtime-
+    // detected macOS command write failure is therefore process-fatal: exit
+    // after the current JS/native batch and let host crash supervision create
+    // a replacement PID with a fresh authenticated endpoint.
+    defer exitOnFatalProviderChannel(model);
     defer synchronizeImages(model, effects) catch |err| {
         std.log.err("widget image synchronization failed: {s}", .{@errorName(err)});
     };
@@ -235,6 +241,12 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             syncTimers(model, effects);
         },
     }
+}
+
+fn exitOnFatalProviderChannel(model: *const Model) void {
+    if (!model.provider.fatalChannelFailure()) return;
+    std.log.err("fatal provider command channel failure; exiting for supervised restart", .{});
+    std.process.exit(1);
 }
 
 fn dispatchPressEvent(model: *Model, effects: *Effects, kind: []const u8, event: native_sdk.canvas.WidgetPressEvent) void {
@@ -1166,6 +1178,13 @@ pub fn main(init: std.process.Init) !void {
         init.environ_map.get("WEAVER_HOST_ENDPOINT"),
     ));
     defer app_state.model.provider.deinit();
+    if (builtin.os.tag == .macos and weaver_build_options.automation_seam) {
+        const automation = init.environ_map.get("WEAVER_AUTOMATION");
+        const failure_path = init.environ_map.get("WEAVER_PROVIDER_TEST_FAIL_SEND");
+        if (automation != null and std.mem.eql(u8, automation.?, "1") and failure_path != null) {
+            app_state.model.provider.setAutomationSendFailurePath(failure_path.?);
+        }
+    }
     app_state.model.provider.setWake(notifyProviderWake);
     app_state.model.has_provider_subscriptions = hasHostProviderSubscription(loaded.manifest.subscribe);
     app_state.model.media_transport_enabled = for (loaded.manifest.capabilities) |capability| {
@@ -1190,6 +1209,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
+    if (app_state.model.provider.fatalChannelFailure()) return error.FatalProviderChannelFailure;
     try loadLocalImages(init.io, allocator, directory, &app_state.model);
     try seedImageStates(&app_state.model);
 

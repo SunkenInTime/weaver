@@ -1,16 +1,16 @@
 # Media v2 unattended run status
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 ## Stack map
 
 | Layer | Branch | Parent | State |
 |---|---|---|---|
-| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`01360ad`); round-2 repair pushed |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; round-2 repair locally green |
-| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
+| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`4dcf19c`) |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`e8748fb`) |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`d3753b2`); restacked on the final layer-02 repair |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; round-3 repair locally green |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35 (`b6cc02a` before restack); Dara's REC-dot commit preserved |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -112,6 +112,17 @@ This run will not change the submodule pointer.
   verifier executable for delayed seek convergence, no session, callback
   timeout, and persistent out-of-tolerance observations. The Objective-C
   helper build/test and hosted session remain CI-pending.
+- Layer 04 round-3 local gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, release audit PASS, all 18 examples passed
+  `weaver check`, runtime build/test PASS (including the automation build),
+  and Windows host build/test PASS. macOS-only compilation and execution are
+  pending the hosted runner.
+- Round 3 removes the adapter's post-first-frame 100 ms poll: after one valid
+  frame the worker now waits indefinitely for stdout/HUP, and a regression
+  test asserts that monotonic time cannot create idle wakeups. A
+  runtime-detected macOS command-send failure is now process-fatal; the hosted
+  automation test requires a new widget PID, a new randomized endpoint,
+  resumed media frames, and a subsequently resolved transport command.
 
 ## Blockers and unverified gates
 
@@ -165,8 +176,15 @@ fixes the three partial/new P1s and four P2s through layer 04:
 | seek convergence | 04 | Fixed: repeated observations through the two-second deadline with four verifier scenarios. |
 | playback rate | 04 | Fixed: parsed/validated and used in timestamp, synthetic advancement, and seek verification. |
 
+| Round-3 item | Owning layer | Accepted state |
+|---|---|---|
+| post-frame idle work | 04 | Fixed locally: startup alone uses bounded watchdog polls; a proven stream blocks indefinitely on stdout/HUP. Hosted macOS result pending. |
+| runtime-detected send failure | 04 | Fixed locally: failure marks the channel fatal and wakes/exits the runtime through crash supervision. The hosted full PID/endpoint/frame/command recovery gate is pending. |
+| stale result narrative | 05 | Pending layer-05 restack; the CI-pending statement will be replaced only with actual completed check results. |
+
 ## Next executable task
 
-Commit/push layer 04, restack/fix layer 05, then let macOS CI compile/link the
-Objective-C helper and prove the hosted first-frame watchdog before recording
-any remote result.
+Commit/push layer 04, restack layer 05 without dropping Dara's `b6cc02a`,
+then wait for and record every actual Actions result. In particular, hosted
+macOS must compile/link the helper and pass the full runtime-fatal recovery
+gate before this document calls that behavior remotely verified.
