@@ -113,24 +113,7 @@ pub const Provider = struct {
         } else {
             self.refresh_failure_logged = false;
         }
-        if (artwork.changed != 0) {
-            self.current_art_path_len = 0;
-            if (self.cache) |cache| {
-                cache.clearPublished();
-                if (artwork.too_large != 0) {
-                    std.log.warn("SMTC thumbnail exceeds the 1 MiB art-cache limit; omitting art", .{});
-                } else if (artwork.bytes != null and artwork.length > 0) {
-                    const publication: ?art_cache.Publication = cache.publish(artwork.bytes[0..artwork.length]) catch |err| failure: {
-                        std.log.err("media artwork cache publication failed: {s}", .{@errorName(err)});
-                        break :failure null;
-                    };
-                    if (publication) |published| {
-                        @memcpy(self.current_art_path[0..published.path_len], published.path[0..published.path_len]);
-                        self.current_art_path_len = published.path_len;
-                    }
-                }
-            }
-        }
+        self.applyArtwork(&artwork);
         if (result == 0) return .{};
         var frame: Frame = .{
             .status = statusFromNative(source.status),
@@ -157,6 +140,29 @@ pub const Provider = struct {
     fn close(self: *Provider) void {
         if (self.session) |session| native.weaver_media_destroy(session);
         self.session = null;
+    }
+
+    /// A transient refresh or publication failure must retain both the prior
+    /// path and the cache pin. The prior snapshot is cleared only when SMTC
+    /// successfully confirms that the current session has no artwork.
+    fn applyArtwork(self: *Provider, artwork: *const native.WeaverMediaArtwork) void {
+        if (artwork.changed == 0 or artwork.refresh_failed != 0) return;
+        if (artwork.too_large != 0) {
+            std.log.warn("SMTC thumbnail exceeds the 1 MiB art-cache limit; retaining prior art", .{});
+            return;
+        }
+        if (artwork.bytes != null and artwork.length > 0) {
+            const cache = self.cache orelse return;
+            const publication = (cache.publish(artwork.bytes[0..artwork.length]) catch |err| {
+                std.log.err("media artwork cache publication failed; retaining prior art: {s}", .{@errorName(err)});
+                return;
+            }) orelse return;
+            @memcpy(self.current_art_path[0..publication.path_len], publication.path[0..publication.path_len]);
+            self.current_art_path_len = publication.path_len;
+            return;
+        }
+        self.current_art_path_len = 0;
+        if (self.cache) |cache| cache.clearPublished();
     }
 };
 
@@ -273,4 +279,30 @@ test "native playback status maps to the frozen tri-state" {
 
 test "native media dirty flags start dirty and coalesce duplicate events" {
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
+}
+
+test "art refresh failure retains prior path and cache pin until genuine no-art" {
+    const root = ".zig-cache/weaver-media-art-refresh-retention";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    const initial = (try cache.publish("prior-art")).?;
+    var provider: Provider = .{ .cache = &cache };
+    @memcpy(provider.current_art_path[0..initial.path_len], initial.path[0..initial.path_len]);
+    provider.current_art_path_len = initial.path_len;
+
+    var failed: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    failed.changed = 1;
+    failed.refresh_failed = 1;
+    provider.applyArtwork(&failed);
+    try std.testing.expectEqualStrings(initial.pathSlice(), provider.current_art_path[0..provider.current_art_path_len]);
+    try std.testing.expect(cache.published);
+    try std.testing.expectEqualSlices(u8, &initial.hash, &cache.published_hash);
+
+    var no_art: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    no_art.changed = 1;
+    provider.applyArtwork(&no_art);
+    try std.testing.expectEqual(@as(usize, 0), provider.current_art_path_len);
+    try std.testing.expect(!cache.published);
 }

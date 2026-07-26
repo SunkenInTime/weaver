@@ -358,16 +358,21 @@ static void rebind_current_session(WeaverMediaSession *state) {
 static bool read_thumbnail(
     const winrt::Windows::Storage::Streams::IRandomAccessStreamReference &reference,
     WeaverMediaArtwork *artwork) {
-    artwork->changed = 1;
-    if (!reference) return true;
+    if (!reference) {
+        artwork->changed = 1;
+        return true;
+    }
     try {
         const auto stream = reference.OpenReadAsync().get();
         const uint64_t size = stream.Size();
         if (size > max_artwork_bytes) {
             artwork->too_large = 1;
+            return false;
+        }
+        if (size == 0) {
+            artwork->changed = 1;
             return true;
         }
-        if (size == 0) return true;
         const auto input = stream.GetInputStreamAt(0);
         winrt::Windows::Storage::Streams::DataReader reader(input);
         const uint32_t loaded = reader.LoadAsync(static_cast<uint32_t>(size)).get();
@@ -381,6 +386,7 @@ static bool read_thumbnail(
         std::memcpy(bytes.get(), normalized.data(), normalized.size());
         artwork->bytes = bytes.release();
         artwork->length = normalized.size();
+        artwork->changed = 1;
         return true;
     } catch (...) {
         return false;

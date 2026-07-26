@@ -7,10 +7,10 @@ Last updated: 2026-07-25
 | Layer | Branch | Parent | State |
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`bffe5c2`) |
-| 03/05 | `media/03-transport` | layer 02 | NOT STARTED |
-| 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
-| 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`2eecd49` plus adversarial repair pending push) |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; restack pending |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -48,6 +48,11 @@ This run will not change the submodule pointer.
   0.000 ms process CPU over matched ~60.014 s windows after 41–42 s settles.
   Private memory ended at 42.684 MiB parent / 41.570 MiB layer 02. Raw values
   and the bounded claim are recorded with the visual evidence.
+- Adversarial finding F9 repaired at its owning layer: transient thumbnail
+  refresh, normalization, size, and cache-publication failures retain the
+  prior art path and cache pin. Only a successful replacement or a confirmed
+  no-art state changes the snapshot. The new retention/no-art test and
+  `host: zig build test` pass.
 
 ## Blockers and unverified gates
 
@@ -58,12 +63,10 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 02 is committed, pushed, and open as draft PR
-`https://github.com/SunkenInTime/weaver/pull/33`. Automated, live visual, and
-static-image idle A/B gates pass.
+The 15-finding adversarial remediation is in progress bottom-up. F9 is fixed
+and tested in layer 02; its complete per-layer gate and publication are next.
 
 ## Next executable task
 
-Create `media/03-transport` from layer 02 and implement the frozen duplex
-channel, ack demultiplexing, verb semantics, capability gate, SDK transport
-hook, and Windows live controls.
+Run the complete layer-02 gate, commit/push F9, then restack layer 03 and fix
+F1/F2/F3/F4/F10/F11/F12 at the transport-owning layer.
