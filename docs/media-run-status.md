@@ -193,6 +193,11 @@ This run will not change the submodule pointer.
   old title/cover remained at 250 and 750 ms, and the replacement title/cover
   appeared together at 1500 ms with no blank or mismatched frame. Evidence and
   the per-element checklist are in `docs/media-evidence/pr05-visual.md`.
+- The follow-up review correctly found that the initial atomic guard consumed
+  a transient first-refresh dirty event without retrying. While
+  `refresh_failed` remains active, the subscribed provider now retries on its
+  existing bounded 1 Hz poll; it creates no transport-only or idle timer. The
+  native retry truth-table regression test and every exact-head gate pass.
 - After that repair and the final restack, every changed layer was re-run
   locally. Layer 02: `npm test` PASS 62/62; layers 03-05: PASS 63/63. Every
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
@@ -244,7 +249,7 @@ fixes the three partial/new P1s and four P2s through layer 05:
 | F6 | 04 | Fixed: seek polls to a two-second deadline and requires read-back within ±2000 ms at the reported rate. |
 | F7 | 04 | Fixed: blank title is a session, unknown is stopped, and validated-rate position advances at 1 Hz. |
 | F8 | 04 | Fixed: decode/downsample/PNG/cache path; malformed art causes adapter loss. |
-| F9 | 02 | Fixed: failed refresh retains the prior Windows snapshot/pin; a replacement session with unresolved art retains the prior complete frame and cannot pair that art with new metadata. |
+| F9 | 02 | Fixed: failed refresh retains the prior Windows snapshot/pin; a replacement session retains the prior complete frame, retries transient failure at the subscribed 1 Hz cadence, and cannot pair old art with new metadata. |
 | F10 | 03 | Fixed: forced SDK mapping, binding/assignment tracing, and SDK-signature backstop with bypass tests. |
 | F11 | 03/04 | Fixed: both UDS directions use bounded writes and helper teardown escalates TERM-to-KILL. |
 | F12 | 03/04 | Fixed: platform calls run on bounded per-widget workers; macOS slot teardown never joins them on supervision. |
