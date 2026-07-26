@@ -318,7 +318,7 @@ pub const MediaProvider = struct {
 
     pub fn command(self: *MediaProvider, command_value: media_commands.Command) CommandOutcome {
         if (self.command_test_outcome) |outcome| return outcome;
-        // Exit 2 is reserved for a request that reached MediaRemote and was
+        // Exit 2 is reserved for a request that reached the adapter and was
         // declined. A missing vendored script/framework must not accidentally
         // inherit Perl's own exit-2 convention and resolve false.
         const cwd = std.Io.Dir.cwd();
