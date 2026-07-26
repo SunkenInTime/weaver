@@ -8,8 +8,8 @@ Last updated: 2026-07-25
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`5fbc620`) |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; adversarial repair locally green |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`01360ad`); round-2 repair pushed |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; round-2 repair locally green |
 | 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
@@ -84,6 +84,13 @@ This run will not change the submodule pointer.
   hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
   transport-only idle-zero, forced SDK resolution despite a hostile widget
   tsconfig, and local hook aliases.
+- Layer 03 round-2 gate: `npm test` PASS 63/63, `npm run typecheck` PASS,
+  runtime and host `zig build test` PASS, and
+  `weaver check examples/now-playing` PASS. Direct aarch64-macos no-emit
+  compilation of the runtime provider passes. New tests cover a stalled
+  connected Unix host, deterministic host/runtime cancel-before-read
+  shutdown, fatal-channel crash/restart, and SDK calls through destructuring,
+  deferred assignment, object properties, and a re-export chain.
 - Layer 04 adversarial local gate: `npm test` PASS 63/63,
   `npm run typecheck` PASS, release audit PASS, every example directory with
   `widget.tsx` passed `weaver check`, runtime test/build PASS, and Windows host
@@ -96,6 +103,15 @@ This run will not change the submodule pointer.
   300×300 PNG normalization fixture, malformed artwork, helper failure
   rejection, exit-2 decline, no-session seek decline, 30-second restart
   stability, and the 15.4 floor predicate.
+- Layer 04 round-2 local gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, every example with `widget.tsx` passed
+  `weaver check`, runtime and Windows-host `zig build test` PASS, and direct
+  no-emit aarch64-macos compiles of `providers_macos.zig` and
+  `macos_host.zig` PASS. New tests cover the 10-second first-frame boundary,
+  invalid/non-1× playback rate and 1 Hz advancement, plus a helper-owned
+  verifier executable for delayed seek convergence, no session, callback
+  timeout, and persistent out-of-tolerance observations. The Objective-C
+  helper build/test and hosted session remain CI-pending.
 
 ## Blockers and unverified gates
 
@@ -104,18 +120,22 @@ This run will not change the submodule pointer.
   `docs/media-evidence/pr04-mac-spike.md`; it does not prove the remediated
   Weaver implementation.
 - The remediated macOS implementation remains **UNVERIFIED (needs attended
-  Mac)** for: real metadata and 1 Hz timeline advancement; 300×300+ art and
-  malformed-art loss/recovery; all five verbs and ±2000 ms verified seek;
-  no-session seek false; helper/framework/timeout/signal rejection; residual
-  EOF, crash, quit/relaunch, exponential backoff, and TERM-to-KILL teardown;
-  Developer-ID signing, timestamp, notarization, quarantine, and Gatekeeper.
+  Mac)** for: real metadata and playback-rate-aware 1 Hz advancement at
+  non-1×; 300×300+ art and malformed-art loss/recovery; all five verbs,
+  delayed seek convergence and ±2000 ms verified seek at non-1×; no-session
+  seek false; helper/framework/timeout/signal rejection; a silent first-frame
+  watchdog; fatal shared-channel widget restart with resumed frames and
+  transport; residual EOF, crash, quit/relaunch, exponential backoff, and
+  TERM-to-KILL teardown; Developer-ID signing, timestamp, notarization,
+  quarantine, and Gatekeeper.
 - Exact macOS 15.4-floor execution is separately **UNVERIFIED (needs attended
   Mac running 15.4)**. The runtime ProcessInfo gate is implemented and tested
   statically; no helper is spawned below the floor.
 
 ## Current work
 
-The 15-finding adversarial remediation is implemented through layer 04:
+The original 15-finding remediation remains implemented. Round 2 additionally
+fixes the three partial/new P1s and four P2s through layer 04:
 
 | Finding | Owning layer | Accepted state |
 |---|---|---|
@@ -135,8 +155,18 @@ The 15-finding adversarial remediation is implemented through layer 04:
 | F14 | 04 | Fixed: ProcessInfo 15.4 runtime gate; exact-floor behavior remains unverified. |
 | F15 | 04/05 | Static-audit and blocked-record addenda fixed; `media-v2-results.md` addendum waits for layer-05 restack. |
 
+| Round-2 item | Owning layer | Accepted state |
+|---|---|---|
+| macOS runtime send | 03 | Fixed: nonblocking one-second deadline; the existing send-error path unregisters the pending slot and rejects. |
+| Windows shutdown race | 03 | Fixed: persistent manual-reset shutdown events, stopping checks before every read, and deterministic barrier tests in both readers. |
+| CLI binding bypasses | 03 | Fixed: binding/assignment tracing plus the resolved-signature declaration backstop and all four named bypass tests. |
+| fatal shared channel | 03/04 | Fixed: both hosts kill and crash-restart the slot rather than strand it. |
+| first-frame watchdog | 04 | Fixed: 10-second silent-helper kill, one loss frame, bounded backoff; hosted execution pending. |
+| seek convergence | 04 | Fixed: repeated observations through the two-second deadline with four verifier scenarios. |
+| playback rate | 04 | Fixed: parsed/validated and used in timestamp, synthetic advancement, and seek verification. |
+
 ## Next executable task
 
-Commit/push layer 04, let macOS CI compile/link its platform code, repair any
-CI defect, then restack layer 05 and finish the F15 results addendum plus the
-required Windows live art-flash/timeout re-verification.
+Commit/push layer 04, restack/fix layer 05, then let macOS CI compile/link the
+Objective-C helper and prove the hosted first-frame watchdog before recording
+any remote result.

@@ -726,7 +726,8 @@ reject; only a request that reached the current system media session and was
 declined resolves `false`.
 
 An adapter whose elapsed-time setter has no success result must verify seek by
-read-back: within two seconds it must observe the requested position within
-2000 ms, accounting for playback advance. Only that verified observation
-resolves `true`; no session, unavailable read-back, and an out-of-tolerance
-observation resolve `false`.
+read-back: it keeps observing until success or a two-second deadline and must
+observe the requested position within 2000 ms, accounting for playback advance
+at the reported playback rate. Only that verified observation resolves `true`;
+no session, unavailable read-back, and an out-of-tolerance observation at the
+deadline resolve `false`.

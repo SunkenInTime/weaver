@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
             adapter_build_dir,
             "--target",
             "MediaRemoteAdapter",
+            "MediaRemoteAdapterSeekTests",
             "--config",
             "Release",
         });

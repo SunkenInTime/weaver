@@ -19,11 +19,11 @@ failure, missing framework or symbols, timeout, signal death, unexpected
 stdout, and every other process/channel failure reject the widget promise.
 
 MediaRemote's elapsed-time setter is void, so seek never trusts the setter
-call alone. The helper reads Now Playing state back within two seconds and
-accepts only an observed elapsed time within 2000 ms of the requested time,
-adjusted for playback advance during verification. Missing session,
-unavailable read-back, or an out-of-tolerance value is an OS decline and
-resolves `false`.
+call alone. The helper repeatedly reads Now Playing state until convergence or
+the two-second deadline and accepts only an observed elapsed time within
+2000 ms of the requested time, adjusted by the reported playback rate during
+verification. Missing session, unavailable read-back, or an out-of-tolerance
+value at the deadline is an OS decline and resolves `false`.
 
 This route is isolated behind `host/src/providers_macos.zig` and the existing
 per-widget UDS. Widgets see the same media frame-v2 and verb/ack protocol as
@@ -41,7 +41,10 @@ data. A valid full frame restores availability and rebuilds state; an empty
 payload from a live helper remains an honest no-session observation. A present
 session with a blank title remains a session; absent playback state is
 `"stopped"`. Timestamped elapsed time advances on Weaver's existing one-second
-media publication clock.
+media publication clock using the adapter's validated playback rate. A helper
+that remains alive but emits no complete first frame for 10 seconds is treated
+as adapter loss: Weaver kills it, emits the same single empty/unavailable
+transition, and enters the same bounded backoff.
 
 Artwork crosses the same budget boundary as Windows: decode, aspect-fit to at
 most 256×256 / 256 KiB decoded RGBA, PNG re-encode, then atomic art-cache

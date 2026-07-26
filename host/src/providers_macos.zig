@@ -6,6 +6,7 @@ const protocol = @import("provider_protocol.zig");
 
 const c = @cImport({
     @cInclude("macos_system.h");
+    @cInclude("poll.h");
 });
 const posix = std.posix;
 
@@ -13,6 +14,7 @@ pub const media_stream_line_bytes: usize = 2 * 1024 * 1024;
 pub const media_restart_initial_ms: u64 = 1000;
 pub const media_restart_max_ms: u64 = 30_000;
 pub const media_restart_stable_ms: u64 = 30_000;
+pub const media_first_frame_deadline_ms: u64 = 10_000;
 pub const media_command_timeout_ms: i64 = 2500;
 pub const media_stop_grace_ms: u64 = 1000;
 
@@ -49,6 +51,7 @@ const Payload = struct {
     elapsedTimeMicros: ?f64 = null,
     elapsedTimeNowMicros: ?f64 = null,
     timestampEpochMicros: ?f64 = null,
+    playbackRate: ?f64 = null,
     duration: ?f64 = null,
     durationMicros: ?f64 = null,
     artworkData: ?[]const u8 = null,
@@ -57,6 +60,11 @@ const Payload = struct {
 const QueuedFrame = struct {
     frame: media.Frame,
     force: bool = false,
+};
+
+const ParsedAdapterFrame = struct {
+    frame: media.Frame,
+    playback_rate: f64,
 };
 
 const AdapterCommand = struct {
@@ -235,6 +243,7 @@ pub const MediaProvider = struct {
     next_timeline_publish_ms: u64 = 0,
     loss_pending: bool = false,
     current_duration_ms: u64 = 0,
+    current_playback_rate: f64 = 0,
 
     pub fn setActive(self: *MediaProvider, active: bool) void {
         if (active) {
@@ -284,7 +293,7 @@ pub const MediaProvider = struct {
         if (frame.status != .playing or now_ms < self.next_timeline_publish_ms) return null;
         frame.position_ms = @min(
             if (frame.duration_ms > 0) frame.duration_ms else std.math.maxInt(u64),
-            frame.position_ms +| (now_ms -| self.frame_observed_ms),
+            frame.position_ms +| scaledTimelineAdvance(now_ms -| self.frame_observed_ms, self.current_playback_rate),
         );
         self.current_frame = frame;
         self.frame_observed_ms = now_ms;
@@ -347,6 +356,7 @@ pub const MediaProvider = struct {
         self.loss_pending = false;
         self.availability = .idle;
         self.current_duration_ms = 0;
+        self.current_playback_rate = 0;
         self.frame_observed_ms = 0;
         self.next_timeline_publish_ms = 0;
         self.mutex.unlock(self.io);
@@ -385,6 +395,24 @@ pub const MediaProvider = struct {
             var pending_len: usize = 0;
             var chunk: [64 * 1024]u8 = undefined;
             while (!self.stopping.load(.acquire)) {
+                const now_ms = awakeMilliseconds(self.io);
+                const poll_timeout_ms = firstFramePollTimeoutMs(started_ms, now_ms, saw_frame);
+                if (!saw_frame and poll_timeout_ms == 0) {
+                    malformed = true;
+                    break;
+                }
+                var descriptor: c.struct_pollfd = .{
+                    .fd = child.stdout.?.handle,
+                    .events = c.POLLIN | c.POLLHUP,
+                    .revents = 0,
+                };
+                const ready = c.poll(&descriptor, 1, @intCast(poll_timeout_ms));
+                if (ready < 0) {
+                    if (posix.errno(ready) == .INTR) continue;
+                    malformed = true;
+                    break;
+                }
+                if (ready == 0) continue;
                 const read = reader.interface.readSliceShort(&chunk) catch {
                     malformed = true;
                     break;
@@ -401,17 +429,17 @@ pub const MediaProvider = struct {
                 pending_len += read;
                 var start: usize = 0;
                 while (std.mem.indexOfScalarPos(u8, pending[0..pending_len], start, '\n')) |end| {
-                    const now_ms = awakeMilliseconds(self.io);
+                    const frame_now_ms = awakeMilliseconds(self.io);
                     const frame = self.parseFrameAt(
                         pending[start..end],
-                        now_ms,
+                        frame_now_ms,
                         realEpochMicroseconds(self.io),
                     ) catch {
                         malformed = true;
                         break;
                     };
                     saw_frame = true;
-                    self.publishFrame(frame, now_ms);
+                    self.publishFrameAtRate(frame.frame, frame.playback_rate, frame_now_ms);
                     start = end + 1;
                 }
                 if (malformed) break;
@@ -436,7 +464,7 @@ pub const MediaProvider = struct {
         line: []const u8,
         now_ms: u64,
         now_epoch_micros: u64,
-    ) !media.Frame {
+    ) !ParsedAdapterFrame {
         const parsed = try std.json.parseFromSlice(StreamEnvelope, self.allocator, line, .{
             .ignore_unknown_fields = true,
         });
@@ -454,14 +482,16 @@ pub const MediaProvider = struct {
             payload.elapsedTimeMicros != null or
             payload.elapsedTimeNowMicros != null or
             payload.timestampEpochMicros != null or
+            payload.playbackRate != null or
             payload.duration != null or
             payload.durationMicros != null or
             payload.artworkData != null;
         if (!has_session) {
             self.cache.clearPublished();
-            return .{};
+            return .{ .frame = .{}, .playback_rate = 0 };
         }
-        const position_micros = timelinePositionMicros(payload, now_epoch_micros);
+        const playback_rate = try adapterPlaybackRate(payload);
+        const position_micros = timelinePositionMicros(payload, now_epoch_micros, playback_rate);
         var frame: media.Frame = .{
             .status = if (payload.playing) |playing|
                 if (playing) .playing else .paused
@@ -512,16 +542,21 @@ pub const MediaProvider = struct {
             self.cache.clearPublished();
         }
         _ = now_ms;
-        return frame;
+        return .{ .frame = frame, .playback_rate = playback_rate };
     }
 
     fn publishFrame(self: *MediaProvider, frame: media.Frame, now_ms: u64) void {
+        self.publishFrameAtRate(frame, if (frame.status == .playing) 1 else 0, now_ms);
+    }
+
+    fn publishFrameAtRate(self: *MediaProvider, frame: media.Frame, playback_rate: f64, now_ms: u64) void {
         self.mutex.lockUncancelable(self.io);
         self.pending_frame = frame;
         self.current_frame = frame;
         self.frame_observed_ms = now_ms;
         self.next_timeline_publish_ms = now_ms + 1000;
         self.current_duration_ms = frame.duration_ms;
+        self.current_playback_rate = playback_rate;
         self.availability = .live;
         self.mutex.unlock(self.io);
     }
@@ -533,6 +568,7 @@ pub const MediaProvider = struct {
         self.pending_frame = null;
         self.current_frame = null;
         self.current_duration_ms = 0;
+        self.current_playback_rate = 0;
         self.frame_observed_ms = 0;
         self.next_timeline_publish_ms = 0;
         self.availability = .unavailable;
@@ -574,13 +610,19 @@ fn microsecondsToMilliseconds(microseconds: f64) u64 {
     return @intFromFloat(@round(milliseconds));
 }
 
-fn timelinePositionMicros(payload: Payload, now_epoch_micros: u64) ?f64 {
+fn adapterPlaybackRate(payload: Payload) !f64 {
+    const rate: f64 = payload.playbackRate orelse if (payload.playing == true) 1.0 else 0.0;
+    if (!std.math.isFinite(rate) or rate < 0 or rate > 16) return error.InvalidAdapterPlaybackRate;
+    return rate;
+}
+
+fn timelinePositionMicros(payload: Payload, now_epoch_micros: u64, playback_rate: f64) ?f64 {
     if (payload.elapsedTimeNowMicros) |value| return value;
     if (payload.elapsedTimeMicros) |elapsed| {
         if (payload.playing == true) {
             if (payload.timestampEpochMicros) |timestamp| {
                 const now: f64 = @floatFromInt(now_epoch_micros);
-                return elapsed + @max(0, now - timestamp);
+                return elapsed + @max(0, now - timestamp) * playback_rate;
             }
         }
         return elapsed;
@@ -588,6 +630,20 @@ fn timelinePositionMicros(payload: Payload, now_epoch_micros: u64) ?f64 {
     if (payload.elapsedTimeNow) |value| return value * 1_000_000.0;
     if (payload.elapsedTime) |value| return value * 1_000_000.0;
     return null;
+}
+
+fn scaledTimelineAdvance(elapsed_ms: u64, playback_rate: f64) u64 {
+    if (elapsed_ms == 0 or playback_rate <= 0 or !std.math.isFinite(playback_rate)) return 0;
+    const scaled = @as(f64, @floatFromInt(elapsed_ms)) * playback_rate;
+    if (scaled >= @as(f64, @floatFromInt(std.math.maxInt(u64)))) return std.math.maxInt(u64);
+    return @intFromFloat(@round(scaled));
+}
+
+fn firstFramePollTimeoutMs(started_ms: u64, now_ms: u64, saw_frame: bool) u64 {
+    if (saw_frame) return 100;
+    const elapsed = now_ms -| started_ms;
+    if (elapsed >= media_first_frame_deadline_ms) return 0;
+    return @min(media_first_frame_deadline_ms - elapsed, 100);
 }
 
 fn classifyCommandResult(term: std.process.Child.Term, stdout: []const u8) CommandOutcome {
@@ -770,36 +826,38 @@ test "macOS adapter maps full and empty stream frames into media v2" {
         .platform_supported = true,
     };
 
-    const frame = try provider.parseFrameAt(
-        \\{"type":"data","diff":false,"payload":{"title":"Satellites","artist":"Frost Children","album":"Tweaker Poem","bundleIdentifier":"com.spotify.client","playing":true,"elapsedTimeMicros":51000000,"timestampEpochMicros":1700000000000000,"durationMicros":211000000}}
+    const parsed_frame = try provider.parseFrameAt(
+        \\{"type":"data","diff":false,"payload":{"title":"Satellites","artist":"Frost Children","album":"Tweaker Poem","bundleIdentifier":"com.spotify.client","playing":true,"playbackRate":2,"elapsedTimeMicros":51000000,"timestampEpochMicros":1700000000000000,"durationMicros":211000000}}
     ,
         10_000,
         1_700_000_000_227_000,
     );
+    const frame = parsed_frame.frame;
     try std.testing.expectEqualStrings("Satellites", frame.titleSlice());
     try std.testing.expectEqualStrings("Frost Children", frame.artistSlice());
     try std.testing.expectEqualStrings("Tweaker Poem", frame.albumSlice());
     try std.testing.expectEqualStrings("com.spotify.client", frame.sourceAppSlice());
     try std.testing.expectEqual(media.Status.playing, frame.status);
-    try std.testing.expectEqual(@as(u64, 51_227), frame.position_ms);
+    try std.testing.expectEqual(@as(u64, 51_454), frame.position_ms);
+    try std.testing.expectEqual(@as(f64, 2), parsed_frame.playback_rate);
     try std.testing.expectEqual(@as(u64, 211_000), frame.duration_ms);
 
-    const blank_title = try provider.parseFrameAt(
+    const blank_title = (try provider.parseFrameAt(
         \\{"type":"data","diff":false,"payload":{"title":"","bundleIdentifier":"com.spotify.client"}}
     ,
         10_000,
         1_700_000_000_227_000,
-    );
+    )).frame;
     try std.testing.expectEqual(@as(usize, 0), blank_title.title_len);
     try std.testing.expectEqualStrings("com.spotify.client", blank_title.sourceAppSlice());
     try std.testing.expectEqual(media.Status.stopped, blank_title.status);
 
-    const empty = try provider.parseFrameAt(
+    const empty = (try provider.parseFrameAt(
         \\{"type":"data","diff":false,"payload":{}}
     ,
         10_000,
         1_700_000_000_227_000,
-    );
+    )).frame;
     try std.testing.expectEqual(media.Status.stopped, empty.status);
     try std.testing.expectEqual(@as(usize, 0), empty.title_len);
     try std.testing.expectEqual(@as(usize, 0), empty.art_path_len);
@@ -828,12 +886,12 @@ test "macOS 300x300 artwork is normalized to the shared image budget" {
         .cache = &cache,
         .platform_supported = true,
     };
-    const frame = try provider.parseFrameAt(
+    const frame = (try provider.parseFrameAt(
         \\{"type":"data","diff":false,"payload":{"title":"Artwork","playing":false,"artworkData":"iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAYAAAB5fY51AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAPwSURBVHhe7dQxDQAgAMAwxGIJmWiAHwUs6dFnAjbm2gegYLwB4FeGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGFYQIZhARmGBWQYFpBhWECGYQEZhgVkGBaQYVhAhmEBGYYFZBgWkGHEBYmXXaN2gGYQAAAAASUVORK5CYII="}}
     ,
         100,
         1_700_000_000_000_000,
-    );
+    )).frame;
     try std.testing.expect(frame.art_path_len > 0);
     const artwork = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -889,11 +947,40 @@ test "macOS adapter loss queues one forced empty frame until recovery" {
 
     recovered.status = .playing;
     recovered.position_ms = 1000;
-    provider.publishFrame(recovered, 1000);
+    provider.publishFrameAtRate(recovered, 2, 1000);
     _ = provider.takeFrame(1000).?;
     try std.testing.expect(provider.takeFrame(1999) == null);
     const advanced = provider.takeFrame(2000).?;
-    try std.testing.expectEqual(@as(u64, 2000), advanced.frame.position_ms);
+    try std.testing.expectEqual(@as(u64, 3000), advanced.frame.position_ms);
+}
+
+test "macOS adapter validates playback rate and bounds its first-frame watchdog" {
+    const root = ".zig-cache/weaver-macos-media-rate";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    var provider: MediaProvider = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .script_path = "",
+        .framework_path = "",
+        .cache = &cache,
+        .platform_supported = true,
+    };
+    try std.testing.expectError(
+        error.InvalidAdapterPlaybackRate,
+        provider.parseFrameAt(
+            \\{"type":"data","diff":false,"payload":{"title":"Bad rate","playing":true,"playbackRate":20}}
+        ,
+            0,
+            0,
+        ),
+    );
+    try std.testing.expectEqual(@as(u64, 100), firstFramePollTimeoutMs(1000, 1000, false));
+    try std.testing.expectEqual(@as(u64, 1), firstFramePollTimeoutMs(1000, 10_999, false));
+    try std.testing.expectEqual(@as(u64, 0), firstFramePollTimeoutMs(1000, 11_000, false));
+    try std.testing.expectEqual(@as(u64, 100), firstFramePollTimeoutMs(1000, 99_000, true));
 }
 
 test "macOS adapter freezes command IDs seek units clamp and restart bounds" {
