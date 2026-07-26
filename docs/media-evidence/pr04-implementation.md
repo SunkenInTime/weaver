@@ -82,6 +82,16 @@ zig test host/src/macos_host.zig -I host/src \
 PASS (semantic compile only)
 ```
 
+Post-review teardown hardening (2026-07-25): widget reload/crash/uninstall now
+marks the per-widget command executor stopped and transfers ownership to its
+detached worker without joining on the supervision loop. The worker
+self-releases after the already-bounded 2.5-second helper result; the provider
+tracks every worker, and final process shutdown allows one explicit
+three-second drain before failing closed. A deterministic 300 ms in-flight
+command seam verifies that supervision-side teardown returns in under 100 ms.
+Both macOS source files pass the semantic cross-compile above; runtime behavior
+remains **UNVERIFIED (needs attended Mac)**.
+
 Performance claim: explicitly declined. Windows code paths remain green, but
 this run has no attended execution of Weaver's macOS adapter and therefore no
 honest macOS process-cost measurement.
