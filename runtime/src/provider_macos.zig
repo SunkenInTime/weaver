@@ -142,7 +142,7 @@ pub const Client = struct {
         const stream = self.stream orelse return error.HostEndpointUnavailable;
         if (!self.isAvailable()) return error.HostEndpointUnavailable;
         if (self.consumeAutomationSendFailure()) {
-            std.log.err("automation injected provider command send failure", .{});
+            std.log.warn("automation injected provider command send failure", .{});
             return self.failWrite();
         }
         var framed: [protocol.command_line_capacity + 1]u8 = undefined;
@@ -158,16 +158,16 @@ pub const Client = struct {
                 },
                 .retry => {},
                 .failure => {
-                    std.log.err("provider command socket write failed", .{});
+                    std.log.warn("provider command socket write failed", .{});
                     return self.failWrite();
                 },
             }
             if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= self.send_deadline_ns) {
-                std.log.err("provider command socket write reached its deadline", .{});
+                std.log.warn("provider command socket write reached its deadline", .{});
                 return self.failWrite();
             }
             std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch {
-                std.log.err("provider command socket retry sleep failed", .{});
+                std.log.warn("provider command socket retry sleep failed", .{});
                 return self.failWrite();
             };
         }
