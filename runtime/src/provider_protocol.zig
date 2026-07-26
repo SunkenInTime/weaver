@@ -81,12 +81,18 @@ pub const Queues = struct {
     }
 
     pub fn routeLine(self: *Queues, line: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.routeLineLocked(line);
+    }
+
+    fn routeLineLocked(self: *Queues, line: []const u8) void {
         const envelope = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, line, .{}) catch {
             if (std.mem.indexOf(u8, line, "\"ack\"") != null) {
                 self.ack_protocol_failed.store(1, .release);
                 _ = self.wake_generation.fetchAdd(1, .release);
             }
-            return self.pushFrame(line);
+            return self.pushFrameLocked(line);
         };
         defer envelope.deinit();
         const is_ack = switch (envelope.value) {
@@ -109,8 +115,6 @@ pub const Queues = struct {
                 self.ack_protocol_failed.store(1, .release);
                 return;
             }
-            self.mutex.lock();
-            defer self.mutex.unlock();
             for (&self.acks) |*slot| {
                 if (slot.id != parsed.value.ack) continue;
                 if (slot.value != null or slot.delivered) {
@@ -123,17 +127,15 @@ pub const Queues = struct {
             _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
             return;
         }
-        self.pushFrame(line);
+        self.pushFrameLocked(line);
     }
 
     pub fn wakeGeneration(self: *const Queues) u64 {
         return self.wake_generation.load(.acquire);
     }
 
-    fn pushFrame(self: *Queues, line: []const u8) void {
+    fn pushFrameLocked(self: *Queues, line: []const u8) void {
         if (line.len == 0 or line.len > frame_line_capacity) return;
-        self.mutex.lock();
-        defer self.mutex.unlock();
         if (self.frame_count == self.frames.len) {
             self.frame_head = (self.frame_head + 1) % self.frames.len;
             self.frame_count -= 1;
@@ -183,9 +185,15 @@ pub const Framer = struct {
         }
         @memcpy(self.pending[self.pending_len..][0..bytes.len], bytes);
         self.pending_len += bytes.len;
+        // One stream read is one publication boundary. The host deliberately
+        // writes related newline-delimited frames (for example CPU + memory)
+        // in one bounded send, so keep every complete line from that read
+        // indivisible with respect to the app-loop drain.
+        queues.mutex.lock();
+        defer queues.mutex.unlock();
         var start: usize = 0;
         while (std.mem.indexOfScalarPos(u8, self.pending[0..self.pending_len], start, '\n')) |end| {
-            queues.routeLine(self.pending[start..end]);
+            queues.routeLineLocked(self.pending[start..end]);
             start = end + 1;
         }
         if (start > 0) {
