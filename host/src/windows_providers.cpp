@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -268,6 +269,21 @@ struct WeaverMediaDirtyFlags {
     }
 };
 
+struct WeaverMediaEventState {
+    std::atomic<bool> active{true};
+    WeaverMediaDirtyFlags dirty;
+};
+
+static void mark_session_if_alive(const std::weak_ptr<WeaverMediaEventState> &weak_events) {
+    const auto events = weak_events.lock();
+    if (events && events->active.load(std::memory_order_acquire)) events->dirty.mark_session();
+}
+
+static void mark_properties_if_alive(const std::weak_ptr<WeaverMediaEventState> &weak_events) {
+    const auto events = weak_events.lock();
+    if (events && events->active.load(std::memory_order_acquire)) events->dirty.mark_properties();
+}
+
 struct WeaverMediaSession {
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession current{nullptr};
@@ -275,8 +291,7 @@ struct WeaverMediaSession {
     winrt::event_token properties_token{};
     bool manager_subscribed = false;
     bool properties_subscribed = false;
-    std::atomic<bool> shutting_down{false};
-    WeaverMediaDirtyFlags dirty;
+    std::shared_ptr<WeaverMediaEventState> events = std::make_shared<WeaverMediaEventState>();
     std::string title;
     std::string artist;
     std::string album;
@@ -286,7 +301,7 @@ struct WeaverMediaSession {
     bool apartment_initialized = false;
 
     ~WeaverMediaSession() {
-        shutting_down.store(true, std::memory_order_release);
+        events->active.store(false, std::memory_order_release);
         try {
             if (properties_subscribed && current) current.MediaPropertiesChanged(properties_token);
         } catch (...) {
@@ -350,13 +365,14 @@ static void rebind_current_session(WeaverMediaSession *state) {
     state->current = state->manager.GetCurrentSession();
     if (state->current) {
         state->source_app = source_app_name(state->current.SourceAppUserModelId());
+        const std::weak_ptr<WeaverMediaEventState> weak_events = state->events;
         state->properties_token = state->current.MediaPropertiesChanged(
-            [state](const auto &, const auto &) {
-                if (!state->shutting_down.load(std::memory_order_acquire)) state->dirty.mark_properties();
+            [weak_events](const auto &, const auto &) {
+                mark_properties_if_alive(weak_events);
             });
         state->properties_subscribed = true;
     }
-    state->dirty.mark_properties();
+    state->events->dirty.mark_properties();
 }
 
 static bool should_refresh_properties(bool dirty, bool refresh_failed) {
@@ -382,7 +398,12 @@ static bool read_thumbnail(
         return true;
     }
     try {
-        const auto stream = reference.OpenReadAsync().get();
+        auto open = reference.OpenReadAsync();
+        if (open.wait_for(std::chrono::seconds(2)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            open.Cancel();
+            return false;
+        }
+        const auto stream = open.GetResults();
         const uint64_t size = stream.Size();
         if (size > max_artwork_bytes) {
             artwork->too_large = 1;
@@ -396,7 +417,12 @@ static bool read_thumbnail(
         }
         const auto input = stream.GetInputStreamAt(0);
         winrt::Windows::Storage::Streams::DataReader reader(input);
-        const uint32_t loaded = reader.LoadAsync(static_cast<uint32_t>(size)).get();
+        auto load = reader.LoadAsync(static_cast<uint32_t>(size));
+        if (load.wait_for(std::chrono::seconds(2)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            load.Cancel();
+            return false;
+        }
+        const uint32_t loaded = load.GetResults();
         if (loaded != size) return false;
         std::vector<uint8_t> raw(loaded);
         reader.ReadBytes(winrt::array_view<uint8_t>(raw));
@@ -428,9 +454,10 @@ extern "C" WeaverMediaSession *weaver_media_create(void) {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         state->apartment_initialized = true;
         state->manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        const std::weak_ptr<WeaverMediaEventState> weak_events = state->events;
         state->manager_token = state->manager.CurrentSessionChanged(
-            [raw = state.get()](const auto &, const auto &) {
-                if (!raw->shutting_down.load(std::memory_order_acquire)) raw->dirty.mark_session();
+            [weak_events](const auto &, const auto &) {
+                mark_session_if_alive(weak_events);
             });
         state->manager_subscribed = true;
         return state.release();
@@ -446,7 +473,7 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
     std::memset(output, 0, sizeof(*output));
     std::memset(artwork, 0, sizeof(*artwork));
     try {
-        const bool session_changed = state->dirty.take_session();
+        const bool session_changed = state->events->dirty.take_session();
         if (session_changed) {
             rebind_current_session(state);
             artwork->changed = 1;
@@ -454,7 +481,7 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         }
         const auto session = state->current;
         if (!session) return 0;
-        const bool properties_dirty = state->dirty.take_properties();
+        const bool properties_dirty = state->events->dirty.take_properties();
         if (should_refresh_properties(properties_dirty, state->refresh_failed)) {
             bool refresh_succeeded = false;
             try {
@@ -522,6 +549,23 @@ extern "C" int weaver_media_test_dirty_coalescing(void) {
     dirty.mark_properties();
     dirty.mark_properties();
     return dirty.take_properties() && !dirty.take_properties();
+}
+
+extern "C" int weaver_media_test_event_lifetime(void) {
+    auto events = std::make_shared<WeaverMediaEventState>();
+    const std::weak_ptr<WeaverMediaEventState> weak_events = events;
+    if (!events->dirty.take_session() || !events->dirty.take_properties()) return 0;
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    if (!events->dirty.take_session() || !events->dirty.take_properties()) return 0;
+    events->active.store(false, std::memory_order_release);
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    if (events->dirty.take_session() || events->dirty.take_properties()) return 0;
+    events.reset();
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    return weak_events.expired() ? 1 : 0;
 }
 
 extern "C" int weaver_media_test_refresh_retry(void) {

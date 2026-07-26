@@ -335,6 +335,10 @@ test "native media dirty flags start dirty and coalesce duplicate events" {
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
 }
 
+test "native media event callbacks stop at the shared lifetime fence" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_event_lifetime());
+}
+
 test "native media retries a consumed transient refresh failure" {
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_retry());
 }

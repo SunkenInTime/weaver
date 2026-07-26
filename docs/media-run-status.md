@@ -63,10 +63,10 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-The 15-finding adversarial remediation is in progress bottom-up. F9 is fixed
-and tested in layer 02; its complete per-layer gate and publication are next.
+The 15-finding adversarial remediation is in progress bottom-up. Layer 02's F9
+repair is committed and published after its complete per-layer gate passed.
 
 ## Next executable task
 
-Run the complete layer-02 gate, commit/push F9, then restack layer 03 and fix
-F1/F2/F3/F4/F10/F11/F12 at the transport-owning layer.
+Restack layer 03, then fix F1/F2/F3/F4/F10/F11/F12 at the
+transport-owning layer.

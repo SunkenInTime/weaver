@@ -66,6 +66,7 @@ fn bridgeTimerCapacity() usize {
     return @import("bridge.zig").max_timers;
 }
 const max_images: usize = 16;
+const max_image_load_attempts: u8 = 3;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
 const geometry_save_key: u64 = 0x7767_656f_6d65;
@@ -76,6 +77,7 @@ const ImageState = struct {
     epoch: u64 = 0,
     observed: ?[:0]u8 = null,
     observed_valid: bool = false,
+    load_failure_count: u8 = 0,
     registered: bool = false,
 };
 
@@ -852,6 +854,7 @@ fn replaceObserved(state: *ImageState, observed: [:0]u8, valid: bool) void {
     if (state.observed) |previous| std.heap.page_allocator.free(previous);
     state.observed = observed;
     state.observed_valid = valid;
+    state.load_failure_count = 0;
 }
 
 fn rememberRawSource(state: *ImageState, source: []const u8) !void {
@@ -860,6 +863,17 @@ fn rememberRawSource(state: *ImageState, source: []const u8) !void {
 
 fn observedEquals(state: *const ImageState, source: []const u8, valid: bool) bool {
     return state.observed_valid == valid and if (state.observed) |observed| std.mem.eql(u8, observed, source) else false;
+}
+
+fn recordImageLoadFailure(state: *ImageState, observed: [:0]u8) void {
+    const prior_failure_count = if (observedEquals(state, observed, true)) state.load_failure_count else 0;
+    replaceObserved(state, observed, true);
+    state.load_failure_count = @min(prior_failure_count + 1, max_image_load_attempts);
+}
+
+fn observedImageLoadSettled(state: *const ImageState, source: []const u8) bool {
+    if (!observedEquals(state, source, true)) return false;
+    return state.load_failure_count == 0 or state.load_failure_count >= max_image_load_attempts;
 }
 
 fn invalidImageSourceError(err: anyerror) bool {
@@ -890,7 +904,7 @@ fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, n
         }
         return;
     };
-    if (observedEquals(state, resolved.path, true)) {
+    if (observedImageLoadSettled(state, resolved.path)) {
         std.heap.page_allocator.free(resolved.path);
         return;
     }
@@ -900,18 +914,43 @@ fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, n
         std.heap.page_allocator,
         .limited(1024 * 1024),
     ) catch |err| {
-        replaceObserved(state, resolved.path, true);
+        recordImageLoadFailure(state, resolved.path);
         std.log.err("image reload read failed; keeping the prior image: {s}", .{@errorName(err)});
         return;
     };
     defer std.heap.page_allocator.free(bytes);
     _ = effects.registerImageBytes(id, bytes) catch |err| {
-        replaceObserved(state, resolved.path, true);
+        recordImageLoadFailure(state, resolved.path);
         std.log.err("image reload decode/register failed; keeping the prior image: {s}", .{@errorName(err)});
         return;
     };
     replaceObserved(state, resolved.path, true);
     state.registered = true;
+}
+
+test "image reload failures retry twice then settle until the source changes" {
+    var state: ImageState = .{};
+    defer if (state.observed) |observed| std.heap.page_allocator.free(observed);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(@as(u8, 1), state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(@as(u8, 2), state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(max_image_load_attempts, state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "second.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "second.img"));
+    try std.testing.expectEqual(@as(u8, 1), state.load_failure_count);
+
+    replaceObserved(&state, try std.heap.page_allocator.dupeZ(u8, "second.img"), true);
+    try std.testing.expect(observedImageLoadSettled(&state, "second.img"));
+    try std.testing.expectEqual(@as(u8, 0), state.load_failure_count);
 }
 
 /// Runs after every app-loop turn, but the generation equality is the static

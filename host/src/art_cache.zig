@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const windows = std.os.windows;
 
@@ -105,14 +106,22 @@ pub const Cache = struct {
             defer file.close(self.io);
             try file.setTimestampsNow(self.io);
         }
-        self.published_hash = hash;
-        self.published = true;
-        try self.prune();
+        self.finishPublication(hash);
 
         var result: Publication = .{ .hash = hash };
         @memcpy(result.path[0..final_path.len], final_path);
         result.path_len = final_path.len;
         return result;
+    }
+
+    fn finishPublication(self: *Cache, hash: [hash_hex_bytes]u8) void {
+        self.published_hash = hash;
+        self.published = true;
+        self.prune() catch |err| {
+            if (!builtin.is_test) {
+                std.log.warn("art cache prune failed after publication: {s}", .{@errorName(err)});
+            }
+        };
     }
 
     fn cleanupTemps(self: *Cache) !void {
@@ -224,6 +233,22 @@ test "art cache skips oversized input and cleans startup temps" {
     @memset(oversized, 0xaa);
     try std.testing.expect((try cache.publish(oversized)) == null);
     try std.testing.expectEqual(@as(usize, 0), try testImageCount(std.testing.io, root));
+}
+
+test "art cache keeps a completed publication when post-publish pruning fails" {
+    const root = try std.testing.allocator.dupe(u8, ".zig-cache/weaver-art-cache-missing-prune-root");
+    var cache: Cache = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .root = root,
+    };
+    defer cache.deinit();
+    const hash: [hash_hex_bytes]u8 = @splat('a');
+
+    cache.finishPublication(hash);
+
+    try std.testing.expect(cache.published);
+    try std.testing.expectEqualSlices(u8, &hash, &cache.published_hash);
 }
 
 test "art cache prunes to 32 files without pruning the published hash" {
