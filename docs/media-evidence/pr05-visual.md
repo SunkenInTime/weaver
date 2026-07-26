@@ -76,3 +76,36 @@ live artwork, text, clock, and play state differ.
 
 The temporary seek diagnostic changed only the center text to
 `position/duration`; it was reverted before the final captures and commit.
+
+## Adversarial remediation live recheck
+
+The repaired layer-05 head was launched again after F3/F9. The exact 340×356
+desktop widget region was captured before and at 250, 750, 1250, and 2000 ms
+after a real Next click. Every PNG was opened and viewed.
+
+| Element | Present | Positioned | Styled | Correct data | Result |
+|---|---:|---:|---:|---:|---|
+| Shell, artwork viewport, overlays | PASS | PASS | PASS | PASS | PASS |
+| Prior cover during refresh | PASS | PASS | PASS | PASS at 250/750/1250 ms | PASS |
+| Replacement cover | PASS | PASS | PASS | PASS at 2000 ms | PASS |
+| Title transition | PASS | PASS | PASS | `YOU'RE MINE, YOU!` → `DEEP IN A DREAM` | PASS |
+| Fallback/blank/black flash | N/A | N/A | N/A | Absent in every viewed frame | PASS |
+| Transport buttons and seek strip | PASS | PASS | PASS | Live | PASS |
+
+Capture paths:
+
+- `pr05-adversarial-recheck-before.png`
+- `pr05-adversarial-recheck-0250ms.png`
+- `pr05-adversarial-recheck-0750ms.png`
+- `pr05-adversarial-recheck-1250ms.png`
+- `pr05-adversarial-recheck-2000ms.png`
+
+The exact deadline was exercised with a temporary transport-only diagnostic:
+weaverd was suspended after keeping the provider connection open, then a real
+command was sent. The viewed 1000 ms capture shows the yellow pending state;
+the viewed 3300 ms capture shows red rejected. The runtime logged
+`TIMEOUT_REJECTED_3003MS`. Captures are
+`pr05-timeout-pending-1000ms.png` and
+`pr05-timeout-rejected-3300ms.png`; raw notes are in
+`pr05-adversarial-live.txt`. The diagnostic widget source is deliberately not
+part of the PR.

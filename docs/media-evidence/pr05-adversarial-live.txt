@@ -1,0 +1,23 @@
+2026-07-25 Windows adversarial live re-verification
+
+Artifact:
+  node cli/bin/weaver.js dev examples/noro-shell
+
+Artwork transition:
+  Before: YOU'RE MINE, YOU! with its live host-cached cover.
+  250 ms: prior cover/title retained.
+  750 ms: prior cover/title retained.
+  1250 ms: prior cover/title retained.
+  2000 ms: DEEP IN A DREAM with a visibly different live cover.
+  No bundled fallback, blank frame, or black image appeared in any viewed
+  capture.
+
+Exact timeout:
+  A temporary transport-only diagnostic widget started play() while weaverd
+  was suspended with the provider connection left open.
+  1000 ms capture: yellow PENDING indicator.
+  3300 ms capture: red REJECTED indicator.
+  Runtime log:
+    [2026-07-26T01:31:47.973Z] info: widget console: TIMEOUT_REJECTED_3003MS
+  weaverd was resumed immediately after capture. The diagnostic source was
+  not committed.
