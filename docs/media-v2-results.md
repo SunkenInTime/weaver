@@ -2,6 +2,17 @@
 
 Date: 2026-07-25
 
+## 2026-07-26 round-3 addendum
+
+The Objective-C helper tests and hosted macOS session passed on the completed
+round-2 heads recorded in `docs/media-run-status.md`; the earlier
+“CI-pending” statement below is superseded. Round 3 removes a post-first-frame
+100 ms adapter poll and makes a runtime-detected macOS command-send failure
+process-fatal so host supervision replaces the widget and its authenticated
+endpoint. The current round-3 macOS implementation is locally green; its new
+hosted idle/recovery coverage has not yet completed and is not claimed here.
+Real-player macOS behavior remains within the attended-only UNVERIFIED matrix.
+
 ## 2026-07-25 round-2 addendum
 
 The second adversarial pass is implemented locally. The accepted state now
@@ -13,10 +24,11 @@ deadline, and validated playback-rate timeline math. The Noro seek handler now
 uses `event.u`; a live Spotify recheck visibly advanced from `03:24` to `04:09`
 after a 75% strip press without changing the rendered shell.
 
-The Objective-C helper build/tests and hosted macOS session are **CI-pending**
-at this commit. Real Weaver behavior for the new watchdog, non-1× advancement
-and seek, and fatal-channel restart remains **UNVERIFIED (needs attended
-Mac)**; the earlier spike still proves only the route.
+The Objective-C helper build/tests and hosted macOS session subsequently
+passed for the exact round-2 heads recorded in the run status. Those synthetic
+checks do not verify real-player behavior for the watchdog, non-1×
+advancement and seek, or fatal-channel restart; those remain **UNVERIFIED
+(needs attended Mac)**, and the earlier spike still proves only the route.
 
 ## 2026-07-25 adversarial-remediation addendum
 

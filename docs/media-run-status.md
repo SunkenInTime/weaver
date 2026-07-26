@@ -9,8 +9,8 @@ Last updated: 2026-07-26
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`4dcf19c`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`e8748fb`) |
 | 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`d3753b2`); restacked on the final layer-02 repair |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; round-3 repair locally green |
-| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack in progress, Dara's REC-dot commit preserved |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36 (`4495be9`); round-3 repair pushed |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; round-3 implementation head `6f73027`, Dara's REC-dot commit preserved |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -111,7 +111,8 @@ This run will not change the submodule pointer.
   invalid/non-1× playback rate and 1 Hz advancement, plus a helper-owned
   verifier executable for delayed seek convergence, no session, callback
   timeout, and persistent out-of-tolerance observations. The Objective-C
-  helper build/test and hosted session remain CI-pending.
+  helper build/test and hosted session passed on the recorded round-2 heads;
+  the new round-3 recovery scenario is awaiting its own hosted result.
 - Layer 04 round-3 local gate: `npm test` PASS 63/63,
   `npm run typecheck` PASS, release audit PASS, all 18 examples passed
   `weaver check`, runtime build/test PASS (including the automation build),
@@ -211,9 +212,11 @@ This run will not change the submodule pointer.
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
   18 `weaver check` example gates.
 
-## Final GitHub Actions results
+## Superseded round-2 GitHub Actions results
 
-All conclusions below are actual completed results, not projections.
+All conclusions below were actual completed results for the named heads. They
+do not project the still-running round-3 heads; a final table will replace
+this one only after those runs complete.
 
 | PR | Head evidenced | Actions run | Jobs |
 |---|---|---|---|
@@ -280,11 +283,11 @@ fixes the three partial/new P1s and four P2s through layer 05:
 |---|---|---|
 | post-frame idle work | 04 | Fixed locally: startup alone uses bounded watchdog polls; a proven stream blocks indefinitely on stdout/HUP. Hosted macOS result pending. |
 | runtime-detected send failure | 04 | Fixed locally: failure marks the channel fatal and wakes/exits the runtime through crash supervision. The hosted full PID/endpoint/frame/command recovery gate is pending. |
-| stale result narrative | 05 | Pending layer-05 restack; the CI-pending statement will be replaced only with actual completed check results. |
+| stale result narrative | 05 | Fixed: results now distinguish the completed round-2 hosted jobs from the not-yet-completed round-3 heads. |
 
 ## Next executable task
 
-Finish and push the layer-05 restack without dropping Dara's REC-dot change,
-then wait for and record every actual Actions result. In particular, hosted
-macOS must compile/link the helper and pass the full runtime-fatal recovery
-gate before this document calls that behavior remotely verified.
+Commit/push the layer-05 restack, run every local head gate, then wait for and
+record every actual Actions result. In particular, hosted macOS must
+compile/link the helper and pass the full runtime-fatal recovery gate before
+this document calls that behavior remotely verified.
