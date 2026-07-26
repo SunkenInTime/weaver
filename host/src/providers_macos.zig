@@ -236,6 +236,10 @@ pub const MediaProvider = struct {
     /// Compile-gated automation override for the hosted supervision test.
     /// Shipping builds always leave this null.
     command_test_outcome: ?CommandOutcome = null,
+    /// The automation build publishes one canonical loss frame per active
+    /// subscription epoch. This makes endpoint replacement observable on a
+    /// player-less hosted runner without introducing a repeating test poll.
+    automation_active: bool = false,
     thread: ?std.Thread = null,
     stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     thread_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
@@ -257,6 +261,16 @@ pub const MediaProvider = struct {
     current_playback_rate: f64 = 0,
 
     pub fn setActive(self: *MediaProvider, active: bool) void {
+        if (self.command_test_outcome != null) {
+            if (active and !self.automation_active) {
+                self.automation_active = true;
+                self.recordLoss();
+            } else if (!active and self.automation_active) {
+                self.automation_active = false;
+                self.setAvailability(.idle);
+            }
+            return;
+        }
         if (active) {
             if (!self.platform_supported) {
                 self.recordLoss();
@@ -1053,6 +1067,36 @@ test "macOS adapter has no post-frame idle timeout wakeups" {
     for ([_]u64{ 1000, 1100, 11_000, 99_000, std.math.maxInt(u64) }) |now_ms| {
         try std.testing.expectEqual(@as(?u64, null), firstFramePollTimeoutMs(1000, now_ms, true));
     }
+}
+
+test "macOS hosted seam publishes once per subscription epoch without idle work" {
+    const root = ".zig-cache/weaver-macos-media-hosted-seam";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    var provider: MediaProvider = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .script_path = "",
+        .framework_path = "",
+        .cache = &cache,
+        .platform_supported = true,
+        .command_test_outcome = .declined,
+    };
+
+    provider.setActive(true);
+    try std.testing.expect(provider.takeFrame(0) != null);
+    provider.setActive(true);
+    provider.setActive(true);
+    try std.testing.expect(provider.takeFrame(60_000) == null);
+    try std.testing.expect(provider.thread == null);
+
+    provider.setActive(false);
+    try std.testing.expectEqualStrings("idle", provider.availabilityLabel());
+    provider.setActive(true);
+    try std.testing.expect(provider.takeFrame(60_001) != null);
+    try std.testing.expect(provider.takeFrame(120_000) == null);
 }
 
 test "macOS adapter freezes command IDs seek units clamp and restart bounds" {

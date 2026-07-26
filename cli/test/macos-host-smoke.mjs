@@ -217,13 +217,15 @@ export default widget({
   </column>;
 });
 `, "utf8");
+  const recoveryFramesBeforeInstall = status().providers.mediaPipeFrames;
   writeFileSync(providerSendFailure, "fail-next-send", "utf8");
   run(["install", "media-recovery"]);
   const firstRecovery = await waitFor("initial media recovery Widget", () => {
     const document = status();
     const widget = document?.widgets?.[0];
     return widget?.name === "Media Recovery" && widget.state === "running" &&
-      document.providers?.mediaPipeFrames >= 1 && { document, widget };
+      document.providers?.mediaPipeFrames > recoveryFramesBeforeInstall &&
+      { document, widget };
   }, 15_000);
   trackedPids.add(firstRecovery.widget.pid);
   const firstRecoverySockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
