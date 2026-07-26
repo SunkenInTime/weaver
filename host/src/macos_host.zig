@@ -7,7 +7,6 @@ const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
 const provider_protocol = @import("provider_protocol.zig");
 const system_providers = @import("providers_macos.zig");
-const host_options = @import("weaver_host_options");
 
 const posix = std.posix;
 const c = @cImport({
@@ -24,10 +23,6 @@ const backend_environment = "WEAVER_BACKEND_FILE";
 
 const ControlCommand = enum { reload, down };
 const ControlResponse = enum { none, ok, failed };
-
-fn automationCommandOutcome(seam_compiled: bool) ?system_providers.CommandOutcome {
-    return if (seam_compiled) .declined else null;
-}
 
 const ControlServer = struct {
     io: std.Io,
@@ -913,7 +908,7 @@ fn run(init: std.process.Init) !void {
         .framework_path = adapter_paths.framework,
         .cache = &media_art_cache,
         .platform_supported = c.weaver_macos_media_supported() != 0,
-        .command_test_outcome = automationCommandOutcome(host_options.automation_seam),
+        .command_test_outcome = if (c.weaver_macos_automation_seam() != 0) .declined else null,
     };
     defer media_provider.deinit();
     cleanupStaleChildren(init.io, allocator, runtime_root, runtime_exe);

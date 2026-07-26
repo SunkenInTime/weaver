@@ -4,8 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = hostTarget(b);
     const optimize = b.standardOptimizeOption(.{});
     const automation_seam = b.option(bool, "automation-seam", "Compile the deterministic audio test-injection seam (automation builds only)") orelse false;
-    const host_options = b.addOptions();
-    host_options.addOption(bool, "automation_seam", automation_seam);
     const supervisor_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/supervisor.zig"),
@@ -24,7 +22,6 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        exe.root_module.addOptions("weaver_host_options", host_options);
         addMacosAudio(exe.root_module, b, automation_seam);
         const adapter_build_dir = b.pathFromRoot(".zig-cache/mediaremote-adapter");
         const adapter_source_dir = b.pathFromRoot("assets/mediaremote-adapter");
@@ -107,7 +104,6 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        tests.root_module.addOptions("weaver_host_options", host_options);
         addMacosAudio(tests.root_module, b, automation_seam);
         tests.root_module.linkSystemLibrary("c", .{});
         const test_step = b.step("test", "Run macOS host and portable supervisor tests");

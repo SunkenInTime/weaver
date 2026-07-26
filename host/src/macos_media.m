@@ -18,6 +18,14 @@ int weaver_macos_media_supported(void) {
            (version.majorVersion == 15 && version.minorVersion >= 4);
 }
 
+int weaver_macos_automation_seam(void) {
+#if defined(WEAVER_AUTOMATION_SEAM)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 int weaver_macos_normalize_artwork(const uint8_t *input, size_t input_length,
                                    uint8_t **output, size_t *output_length,
                                    uint32_t *width, uint32_t *height) {
