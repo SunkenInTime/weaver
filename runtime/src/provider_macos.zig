@@ -78,10 +78,11 @@ pub const Client = struct {
     }
 
     pub fn deinit(self: *Client) void {
-        if (self.stream) |stream| stream.close(self.io);
-        self.stream = null;
+        if (self.stream) |stream| _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
         if (self.thread) |thread| thread.join();
         self.thread = null;
+        if (self.stream) |stream| stream.close(self.io);
+        self.stream = null;
         self.connected.store(0, .release);
         self.disconnected.store(1, .release);
     }
@@ -199,12 +200,13 @@ pub const Client = struct {
             if (self.wake) |wake| wake();
         }
         const stream = self.stream orelse return;
-        var reader_buffer: [4096]u8 = undefined;
-        var reader = stream.reader(self.io, &reader_buffer);
         var framer: protocol.Framer = .{};
         var chunk: [4096]u8 = undefined;
         while (true) {
-            const read = reader.interface.readSliceShort(&chunk) catch {
+            // The duplex provider socket remains open for the widget
+            // lifetime. Consume bytes available from each host write instead
+            // of waiting for a full 4 KiB buffer or EOF before routing acks.
+            const read = posix.read(stream.socket.handle, &chunk) catch {
                 framer.finish(&self.queues);
                 return;
             };
@@ -271,6 +273,58 @@ test "Unix provider transport frames lines and bounds its queue" {
         try std.testing.expectEqualStrings(expected, client.take(&output).?);
     }
     try std.testing.expect(client.take(&output) == null);
+}
+
+test "Unix provider transport routes a short ack while the host stays connected" {
+    const Endpoint = struct {
+        io: std.Io,
+        listener: std.Io.net.Server,
+        send_ack: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+        fn run(self: *@This()) void {
+            const stream = self.listener.accept(self.io) catch return;
+            defer stream.close(self.io);
+            while (!self.send_ack.load(.acquire) and !self.stopping.load(.acquire)) {
+                std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return;
+            }
+            if (self.stopping.load(.acquire)) return;
+            var buffer: [64]u8 = undefined;
+            var writer = stream.writer(self.io, &buffer);
+            writer.interface.writeAll("{\"ack\":7,\"ok\":true}\n") catch return;
+            writer.interface.flush() catch return;
+            while (!self.stopping.load(.acquire)) {
+                std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return;
+            }
+        }
+    };
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-live-ack-test-{d}.sock", .{std.posix.system.getpid()});
+    std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    const address = try std.Io.net.UnixAddress.init(path);
+    var endpoint: Endpoint = .{ .io = std.testing.io, .listener = try address.listen(std.testing.io, .{}) };
+    defer endpoint.listener.deinit(std.testing.io);
+    const server_thread = try std.Thread.spawn(.{}, Endpoint.run, .{&endpoint});
+    defer server_thread.join();
+    defer endpoint.stopping.store(true, .release);
+
+    var client: Client = .{};
+    try client.init(std.testing.io, path);
+    defer client.deinit();
+    try std.testing.expect(client.registerAck(7));
+    endpoint.send_ack.store(true, .release);
+
+    var ack: ?protocol.Ack = null;
+    for (0..100) |_| {
+        ack = client.takeAck();
+        if (ack != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(5), .awake);
+    }
+    try std.testing.expect(ack != null);
+    try std.testing.expectEqual(@as(u64, 7), ack.?.id);
+    try std.testing.expect(ack.?.ok);
+    try std.testing.expect(client.isAvailable());
 }
 
 test "Unix provider transport rejects an unterminated ack at EOF" {

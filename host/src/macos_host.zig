@@ -171,7 +171,7 @@ const ProviderEndpoint = struct {
         self.mutex.lockUncancelable(self.io);
         self.stopping = true;
         self.command_queue.stop();
-        if (self.stream) |stream| stream.close(self.io);
+        if (self.stream) |stream| _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
         self.stream = null;
         self.mutex.unlock(self.io);
         self.listener.deinit(self.io);
@@ -184,6 +184,10 @@ const ProviderEndpoint = struct {
 
     fn acceptMain(self: *ProviderEndpoint) void {
         while (true) {
+            self.mutex.lockUncancelable(self.io);
+            const stopping = self.stopping;
+            self.mutex.unlock(self.io);
+            if (stopping) return;
             const stream = self.listener.accept(self.io) catch return;
             const actual_pid = peerPid(stream);
             if (actual_pid != self.expected_pid) {
@@ -203,26 +207,37 @@ const ProviderEndpoint = struct {
             self.stream = stream;
             self.mutex.unlock(self.io);
 
-            var reader_buffer: [512]u8 = undefined;
-            var reader = stream.reader(self.io, &reader_buffer);
             var framer: media_commands.Framer = .{};
             var chunk: [512]u8 = undefined;
             while (true) {
-                const read = reader.interface.readSliceShort(&chunk) catch {
+                // The provider socket stays open for the widget lifetime.
+                // Read only currently available bytes; readSliceShort waits
+                // for all 512 bytes or EOF and strands ordinary command lines.
+                const read = posix.read(stream.socket.handle, &chunk) catch {
                     framer.finish(&self.command_queue);
-                    return;
+                    break;
                 };
                 if (read == 0) {
                     framer.finish(&self.command_queue);
-                    return;
+                    break;
                 }
-                if (!framer.feed(&self.command_queue, chunk[0..read])) return;
+                if (!framer.feed(&self.command_queue, chunk[0..read])) break;
             }
+            self.mutex.lockUncancelable(self.io);
+            if (self.stream) |active| {
+                if (active.socket.handle == stream.socket.handle) self.stream = null;
+            }
+            const should_stop = self.stopping;
+            self.mutex.unlock(self.io);
+            // The reader thread owns the accepted descriptor. Writers only
+            // shut it down to wake this loop, avoiding close-vs-read races.
+            stream.close(self.io);
+            if (should_stop) return;
         }
     }
 
     fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
-        stream.close(self.io);
+        _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
         self.stream = null;
     }
 
@@ -991,7 +1006,10 @@ fn run(init: std.process.Init) !void {
         host.supervise(now);
         host.drainMediaCommands(now);
         host.sampleAudio(now);
-        host.sampleMedia(now);
+        // MediaProvider timestamps adapter frames and watchdog attempts with
+        // Zig's awake clock. Keep its publication tick in that same domain;
+        // CLOCK_MONOTONIC has a different epoch on macOS.
+        host.sampleMedia(system_providers.mediaClockMilliseconds(init.io));
         const audio_availability_changed = audio_availability != host.audio_provider.availability;
         audio_availability = host.audio_provider.availability;
         const current_media_availability = host.media_provider.availabilityLabel();
@@ -1205,6 +1223,42 @@ test "provider socket discards an unterminated command at EOF" {
     }
     try std.testing.expect(endpoint.command_queue.malformed.load(.acquire));
     try std.testing.expect(endpoint.takeCommand() == null);
+}
+
+test "provider socket dispatches a short command while the widget stays connected" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-live-test-{d}.sock", .{posix.system.getpid()});
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid());
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    defer stream.close(std.testing.io);
+
+    var accepted = false;
+    for (0..100) |_| {
+        endpoint.mutex.lockUncancelable(std.testing.io);
+        accepted = endpoint.stream != null;
+        endpoint.mutex.unlock(std.testing.io);
+        if (accepted) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(accepted);
+
+    var write_buffer: [128]u8 = undefined;
+    var writer = stream.writer(std.testing.io, &write_buffer);
+    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"play\",\"id\":17}\n");
+    try writer.interface.flush();
+
+    var command: ?media_commands.Command = null;
+    for (0..100) |_| {
+        command = endpoint.takeCommand();
+        if (command != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(command != null);
+    try std.testing.expectEqual(@as(u64, 17), command.?.id);
+    try std.testing.expectEqual(media_commands.Verb.play, command.?.verb);
 }
 
 test "hosted automation ack crosses the authenticated provider socket" {
