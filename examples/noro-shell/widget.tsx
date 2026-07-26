@@ -37,7 +37,9 @@ export default widget({
           <image src="./assets/GridTile.png" tile class="size-full" />
           <image src="./assets/GrainTile.png" tile class="size-full opacity-20" />
           <column class="size-full pt-[22px] pr-[24px] items-end">
-            <panel class="w-[10px] h-[10px] rounded-full bg-[#ff3b30]/78" />
+            {playing
+              ? <panel class="w-[10px] h-[10px] rounded-full bg-[#ff3b30]/78" />
+              : <panel class="w-[10px] h-[10px] bg-transparent" />}
           </column>
           <column class="size-full justify-end">
             <row class="w-full pl-[12px] pr-[2px] items-center gap-[4px]">
