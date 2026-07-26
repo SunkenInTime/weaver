@@ -305,6 +305,10 @@ test "native media dirty flags start dirty and coalesce duplicate events" {
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
 }
 
+test "native media retries a consumed transient refresh failure" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_retry());
+}
+
 test "art refresh failure retains prior path and cache pin until genuine no-art" {
     const root = ".zig-cache/weaver-media-art-refresh-retention";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};

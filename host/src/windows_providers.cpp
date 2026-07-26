@@ -355,6 +355,13 @@ static void rebind_current_session(WeaverMediaSession *state) {
     state->dirty.mark_properties();
 }
 
+static bool should_refresh_properties(bool dirty, bool refresh_failed) {
+    // The host calls this provider at most once per second and only while a
+    // widget subscribes to media. Retrying here therefore recovers a consumed
+    // transient first-refresh failure without creating an idle poll path.
+    return dirty || refresh_failed;
+}
+
 static bool read_thumbnail(
     const winrt::Windows::Storage::Streams::IRandomAccessStreamReference &reference,
     WeaverMediaArtwork *artwork) {
@@ -433,7 +440,8 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
         }
         const auto session = state->current;
         if (!session) return 0;
-        if (state->dirty.take_properties()) {
+        const bool properties_dirty = state->dirty.take_properties();
+        if (should_refresh_properties(properties_dirty, state->refresh_failed)) {
             try {
                 const auto properties = session.TryGetMediaPropertiesAsync().get();
                 state->title = winrt::to_string(properties.Title());
@@ -486,4 +494,11 @@ extern "C" int weaver_media_test_dirty_coalescing(void) {
     dirty.mark_properties();
     dirty.mark_properties();
     return dirty.take_properties() && !dirty.take_properties();
+}
+
+extern "C" int weaver_media_test_refresh_retry(void) {
+    if (should_refresh_properties(false, false)) return 0;
+    if (!should_refresh_properties(true, false)) return 0;
+    if (!should_refresh_properties(false, true)) return 0;
+    return should_refresh_properties(true, true) ? 1 : 0;
 }

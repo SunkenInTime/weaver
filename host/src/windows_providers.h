@@ -47,6 +47,7 @@ int weaver_media_poll(WeaverMediaSession *session, WeaverMediaState *state, Weav
 void weaver_media_artwork_release(WeaverMediaArtwork *artwork);
 void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]);
 int weaver_media_test_dirty_coalescing(void);
+int weaver_media_test_refresh_retry(void);
 
 #ifdef __cplusplus
 }
