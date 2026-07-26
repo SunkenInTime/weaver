@@ -30,9 +30,12 @@ pub const Client = struct {
     wake: ?*const fn () void = null,
 
     pub fn init(self: *Client, io: std.Io, endpoint: ?[]const u8) !void {
+        // Inert clients still provide the monotonic clock used by transport
+        // deadline bookkeeping; endpoint absence must not leave `io`
+        // undefined.
+        self.io = io;
         const path = endpoint orelse return;
         const address = try std.Io.net.UnixAddress.init(path);
-        self.io = io;
         self.stream = address.connect(io) catch return error.HostEndpointUnavailable;
         errdefer {
             self.stream.?.close(io);
@@ -152,6 +155,14 @@ const TestEndpoint = struct {
         writer.interface.flush() catch {};
     }
 };
+
+test "inert Unix provider client retains a valid monotonic clock" {
+    var client: Client = .{};
+    try client.init(std.testing.io, null);
+    defer client.deinit();
+    try std.testing.expect(client.nowMilliseconds() > 0);
+    try std.testing.expect(!client.isAvailable());
+}
 
 test "Unix provider transport frames lines and bounds its queue" {
     var path_buffer: [96]u8 = undefined;

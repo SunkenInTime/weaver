@@ -472,6 +472,15 @@ fn providerTimerNeeded(has_subscriptions: bool, poll_interval_ms: u64, has_fast_
     return has_subscriptions and !(poll_interval_ms <= 33 and has_fast_clock);
 }
 
+fn hasHostProviderSubscription(subscriptions: []const []const u8) bool {
+    for (subscriptions) |subscription| {
+        // `time` is synthesized by the runtime's native timer and never has a
+        // weaverd endpoint. Only host-backed subscriptions need this drain.
+        if (!std.mem.eql(u8, subscription, "time")) return true;
+    }
+    return false;
+}
+
 fn mediaDeadlineDelay(deadline_ms: u64, now_ms: u64) u64 {
     return @max(deadline_ms -| now_ms, 1);
 }
@@ -1152,7 +1161,7 @@ pub fn main(init: std.process.Init) !void {
     ));
     defer app_state.model.provider.deinit();
     app_state.model.provider.setWake(notifyProviderWake);
-    app_state.model.has_provider_subscriptions = loaded.manifest.subscribe.len != 0;
+    app_state.model.has_provider_subscriptions = hasHostProviderSubscription(loaded.manifest.subscribe);
     app_state.model.media_transport_enabled = for (loaded.manifest.capabilities) |capability| {
         if (std.mem.eql(u8, capability, "media-transport")) break true;
     } else false;
@@ -1391,6 +1400,8 @@ test "transport-only capability arms no repeating provider timer" {
     try std.testing.expect(!providerTimerNeeded(false, 1000, false));
     try std.testing.expect(providerTimerNeeded(true, 1000, false));
     try std.testing.expect(!providerTimerNeeded(true, 33, true));
+    try std.testing.expect(!hasHostProviderSubscription(&.{"time"}));
+    try std.testing.expect(hasHostProviderSubscription(&.{ "time", "media" }));
 }
 
 test "media command deadline one-shot is exactly three seconds" {
