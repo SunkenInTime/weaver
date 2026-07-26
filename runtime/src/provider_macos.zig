@@ -139,7 +139,10 @@ pub const Client = struct {
         defer self.send_mutex.unlock();
         const stream = self.stream orelse return error.HostEndpointUnavailable;
         if (!self.isAvailable()) return error.HostEndpointUnavailable;
-        if (self.consumeAutomationSendFailure()) return self.failWrite();
+        if (self.consumeAutomationSendFailure()) {
+            std.log.err("automation injected provider command send failure", .{});
+            return self.failWrite();
+        }
         var framed: [protocol.command_line_capacity + 1]u8 = undefined;
         @memcpy(framed[0..line.len], line);
         framed[line.len] = '\n';
@@ -152,12 +155,19 @@ pub const Client = struct {
                     continue;
                 },
                 .retry => {},
-                .failure => return self.failWrite(),
+                .failure => {
+                    std.log.err("provider command socket write failed", .{});
+                    return self.failWrite();
+                },
             }
             if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= self.send_deadline_ns) {
+                std.log.err("provider command socket write reached its deadline", .{});
                 return self.failWrite();
             }
-            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return self.failWrite();
+            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch {
+                std.log.err("provider command socket retry sleep failed", .{});
+                return self.failWrite();
+            };
         }
     }
 

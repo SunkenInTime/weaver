@@ -85,6 +85,18 @@ function transportOutcome() {
   return null;
 }
 
+function widgetLogs() {
+  const directory = join(environment.HOME, "Library", "Logs", "Weaver");
+  if (!existsSync(directory)) return "(no widget log directory)";
+  return readdirSync(directory)
+    .filter((name) => name.endsWith(".log"))
+    .map((name) => {
+      try { return `--- ${name} ---\n${readFileSync(join(directory, name), "utf8")}`; }
+      catch { return `--- ${name} unreadable ---`; }
+    })
+    .join("\n");
+}
+
 async function waitFor(description, predicate, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -92,7 +104,7 @@ async function waitFor(description, predicate, timeoutMs = 10_000) {
     if (value) return value;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
   }
-  throw new Error(`Timed out waiting for ${description}\nstatus:\n${JSON.stringify(status(), null, 2)}\ndev stdout:\n${devStdout}\ndev stderr:\n${devStderr}`);
+  throw new Error(`Timed out waiting for ${description}\nstatus:\n${JSON.stringify(status(), null, 2)}\ndev stdout:\n${devStdout}\ndev stderr:\n${devStderr}\nwidget logs:\n${widgetLogs()}`);
 }
 
 function editClock(from, to) {
