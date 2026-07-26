@@ -361,14 +361,17 @@ test "native media dirty flags start dirty and coalesce duplicate events" {
 }
 
 test "native media event callbacks stop at the shared lifetime fence" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_event_lifetime());
 }
 
 test "native media retries a consumed transient refresh failure" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_retry());
 }
 
 test "native media bounds unresolved artwork before publishing metadata without it" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_failure_bound());
 }
 
@@ -404,6 +407,7 @@ test "art refresh failure retains prior path and cache pin until genuine no-art"
 }
 
 test "session replacement refresh failure suppresses prior art without unpinning it" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-session-boundary";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
@@ -442,6 +446,7 @@ test "session replacement refresh failure suppresses prior art without unpinning
 }
 
 test "permanent artwork failure publishes metadata without stale art" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-unavailable";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
