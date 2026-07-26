@@ -58,6 +58,22 @@ void failf(NSString *format, ...) {
     fail(formattedMessage);
 }
 
+// Exit 2 is reserved for a request that reached MediaRemote and was declined.
+// Loader, symbol, process, timeout, and other helper failures remain exit 1.
+void decline(NSString *message) {
+    printErr(message);
+    exit(2);
+}
+
+void declinef(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *formattedMessage = [[NSString alloc] initWithFormat:format
+                                                        arguments:args];
+    va_end(args);
+    decline(formattedMessage);
+}
+
 NSString *formatError(NSError *error) {
     return
         [NSString stringWithFormat:@"%@ (%@:%ld)", [error localizedDescription],

@@ -34,7 +34,9 @@ void adapter_shuffle(MRAShuffleMode mode) {
 
     g_mediaRemote.setShuffleMode((int)mode);
 
-    waitForCommandCompletion();
+    if (!waitForCommandCompletion()) {
+        fail(@"MediaRemote command completion timed out");
+    }
 }
 
 static inline int shuffle_0_mode() {

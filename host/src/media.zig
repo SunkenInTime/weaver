@@ -274,7 +274,7 @@ pub fn formatFrame(frame: *const Frame, output: []u8) ![]const u8 {
     return writer.buffered();
 }
 
-fn copyText(destination: anytype, length: *usize, source: []const u8) void {
+pub fn copyText(destination: anytype, length: *usize, source: []const u8) void {
     length.* = @min(source.len, destination.len);
     @memcpy(destination[0..length.*], source[0..length.*]);
 }
@@ -319,6 +319,7 @@ test "media frame bound covers maximum escaped fields and future art path" {
 }
 
 test "source app mapping prefers packaged display names and honestly falls back" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const fixtures = [_]struct {
         raw: [:0]const u8,
         resolved: [:0]const u8,
@@ -337,14 +338,17 @@ test "source app mapping prefers packaged display names and honestly falls back"
 }
 
 fn statusFromNative(value: c_int) Status {
-    return switch (value) {
-        native.WEAVER_MEDIA_STATUS_PLAYING => .playing,
-        native.WEAVER_MEDIA_STATUS_PAUSED => .paused,
-        else => .stopped,
-    };
+    if (comptime builtin.os.tag == .windows) {
+        return switch (value) {
+            native.WEAVER_MEDIA_STATUS_PLAYING => .playing,
+            native.WEAVER_MEDIA_STATUS_PAUSED => .paused,
+            else => .stopped,
+        };
+    } else return .stopped;
 }
 
 test "native playback status maps to the frozen tri-state" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(Status.playing, statusFromNative(native.WEAVER_MEDIA_STATUS_PLAYING));
     try std.testing.expectEqual(Status.paused, statusFromNative(native.WEAVER_MEDIA_STATUS_PAUSED));
     try std.testing.expectEqual(Status.stopped, statusFromNative(native.WEAVER_MEDIA_STATUS_STOPPED));
@@ -352,7 +356,7 @@ test "native playback status maps to the frozen tri-state" {
 }
 
 test "native media dirty flags start dirty and coalesce duplicate events" {
-    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
 }
 
@@ -369,7 +373,7 @@ test "native media bounds unresolved artwork before publishing metadata without 
 }
 
 test "art refresh failure retains prior path and cache pin until genuine no-art" {
-    if (builtin.os.tag != .windows) return error.SkipZigTest;
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-refresh-retention";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};

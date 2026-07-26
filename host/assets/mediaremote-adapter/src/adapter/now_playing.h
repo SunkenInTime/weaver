@@ -8,7 +8,7 @@
 
 // Requests information once so that the process runs long enough for the
 // MediaRemote command to actually be sent to the now playing application.
-void waitForCommandCompletion();
+bool waitForCommandCompletion();
 
 // Converts raw MediaRemote now playing information to adapter keys.
 // Optionally replaces keys with time values with microseconds equivalents.

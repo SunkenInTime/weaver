@@ -720,7 +720,13 @@ one-shot timer; acknowledgement arrival settles it immediately.
 `native.mediaCommand` is absent unless the runtime manifest declares
 `media-transport`.
 
-The proven desktop adapter implements the verbs through system media request
-APIs. The unproven adapter carries the same duplex plumbing in this layer but
-honestly returns `false` for valid commands until its separately spike-gated
-implementation exists.
+Every shipping adapter implements verbs through system media request APIs.
+Spawn/load failure, timeout, signal death, malformed output, and disconnect
+reject; only a request that reached the current system media session and was
+declined resolves `false`.
+
+An adapter whose elapsed-time setter has no success result must verify seek by
+read-back: within two seconds it must observe the requested position within
+2000 ms, accounting for playback advance. Only that verified observation
+resolves `true`; no session, unavailable read-back, and an out-of-tolerance
+observation resolve `false`.

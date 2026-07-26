@@ -20,7 +20,9 @@ void adapter_speed(int speed) {
 
     g_mediaRemote.setPlaybackSpeed(speed);
 
-    waitForCommandCompletion();
+    if (!waitForCommandCompletion()) {
+        fail(@"MediaRemote command completion timed out");
+    }
 }
 
 static inline int speed_0_speed() {

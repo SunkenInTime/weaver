@@ -22,6 +22,8 @@ int weaver_secure_private_dir(const char *path);
 int weaver_install_termination_handler(void);
 int weaver_termination_requested(void);
 
+#include "macos_media.h"
+
 #ifdef __cplusplus
 }
 #endif
