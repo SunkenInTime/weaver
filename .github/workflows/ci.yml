@@ -188,8 +188,10 @@ jobs:
       - name: Record hosted display capability
         run: system_profiler SPDisplaysDataType
 
-      - name: Rebuild host with the audio automation seam for the smoke
-        run: (cd host && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
+      - name: Rebuild host and runtime with automation seams for the smoke
+        run: |
+          (cd runtime && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
+          (cd host && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
 
       - name: Conjure, real Widget, provider, crash, and teardown gate
         run: node cli/test/macos-host-smoke.mjs

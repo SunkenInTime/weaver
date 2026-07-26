@@ -128,6 +128,10 @@ pub const Client = struct {
         return self.disconnected.load(.acquire) != 0;
     }
 
+    pub fn fatalChannelFailure(_: *const Client) bool {
+        return false;
+    }
+
     pub fn nowMilliseconds(self: *const Client) u64 {
         return @intCast(std.Io.Clock.now(.awake, self.io).toMilliseconds());
     }

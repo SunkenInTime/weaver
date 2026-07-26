@@ -15,11 +15,13 @@ const cli = join(repoRoot, "cli", "bin", "weaver.js");
 const tempRoot = realpathSync(tmpdir());
 const scratch = mkdtempSync(join(tempRoot, "weaver-macos-host-smoke-"));
 const audioControl = join(scratch, "audio-control");
+const providerSendFailure = join(scratch, "provider-send-failure");
 const environment = {
   ...process.env,
   HOME: join(scratch, "home"),
   WEAVER_AUTOMATION: "1",
   WEAVER_AUDIO_TEST_CONTROL: audioControl,
+  WEAVER_PROVIDER_TEST_FAIL_SEND: providerSendFailure,
 };
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
 const registryFile = join(dataRoot, "registry.json");
@@ -68,6 +70,19 @@ function alive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; }
   catch { return false; }
+}
+
+function transportOutcome() {
+  const directory = join(dataRoot, "storage");
+  if (!existsSync(directory)) return null;
+  for (const name of readdirSync(directory)) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const value = JSON.parse(readFileSync(join(directory, name), "utf8"));
+      if (typeof value.transport === "string") return value.transport;
+    } catch { /* Ignore a concurrently replaced or unrelated storage file. */ }
+  }
+  return null;
 }
 
 async function waitFor(description, predicate, timeoutMs = 10_000) {
@@ -160,6 +175,71 @@ try {
     return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 &&
       document.providers.mediaAvailability === "idle" && document;
   });
+
+  run(["init", "media-recovery"]);
+  writeFileSync(join(scratch, "media-recovery", "widget.tsx"), `
+import { useInterval, useMediaTransport, useProvider, useState, useStorage, widget } from "@weaver/sdk";
+
+export default widget({
+  name: "Media Recovery",
+  size: [260, 72],
+  anchor: { corner: "bottom-left", offset: [24, 24] },
+  subscribe: ["media"],
+  capabilities: ["media-transport"],
+}, () => {
+  const media = useProvider("media");
+  const transport = useMediaTransport();
+  const [attempted, setAttempted] = useState(false);
+  const [outcome, setOutcome] = useStorage("transport", "pending");
+  useInterval(() => {
+    if (attempted) return;
+    setAttempted(true);
+    void transport.pause().then((ok) => {
+      setOutcome(\`resolved:\${ok}\`);
+      console.log(\`media recovery command resolved:\${ok}\`);
+    }).catch((error) => setOutcome(\`rejected:\${String(error)}\`));
+  }, 2000);
+  return <column class="w-[260px] h-[72px] p-3 bg-[#11141c]">
+    <text class="text-sm text-white">{outcome}</text>
+    <text class="text-xs text-white">{media.status}</text>
+  </column>;
+});
+`, "utf8");
+  writeFileSync(providerSendFailure, "fail-next-send", "utf8");
+  run(["install", "media-recovery"]);
+  const firstRecovery = await waitFor("initial media recovery Widget", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    return widget?.name === "Media Recovery" && widget.state === "running" &&
+      document.providers?.mediaPipeFrames >= 1 && { document, widget };
+  }, 15_000);
+  trackedPids.add(firstRecovery.widget.pid);
+  const firstRecoverySockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"))
+    .map((entry) => entry.name);
+  assert.equal(firstRecoverySockets.length, 1, "initial recovery Widget did not own exactly one provider endpoint");
+
+  const replacementRecovery = await waitFor("runtime-fatal provider send recovery", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    return widget?.name === "Media Recovery" && widget.state === "running" &&
+      widget.pid !== firstRecovery.widget.pid && !alive(firstRecovery.widget.pid) &&
+      document.providers?.mediaPipeFrames > firstRecovery.document.providers.mediaPipeFrames &&
+      { document, widget };
+  }, 20_000);
+  trackedPids.add(replacementRecovery.widget.pid);
+  assert.equal(existsSync(providerSendFailure), false, "injected send failure was not consumed by the crashed runtime");
+  const replacementRecoverySockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"))
+    .map((entry) => entry.name);
+  assert.equal(replacementRecoverySockets.length, 1, "replacement recovery Widget did not own exactly one provider endpoint");
+  assert.notEqual(replacementRecoverySockets[0], firstRecoverySockets[0], "supervision reused the failed provider endpoint");
+  await waitFor("successful media command after runtime-fatal recovery", () => {
+    const outcome = transportOutcome();
+    return outcome?.startsWith("resolved:") && outcome;
+  }, 15_000);
+  run(["uninstall", "Media Recovery"]);
+  await waitFor("media recovery teardown", () => status()?.widgets?.length === 0);
 
   const validEmptyRegistry = readFileSync(registryFile, "utf8");
   writeFileSync(registryFile, "{ malformed\n", "utf8");

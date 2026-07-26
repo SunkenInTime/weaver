@@ -410,7 +410,7 @@ pub const MediaProvider = struct {
             while (!self.stopping.load(.acquire)) {
                 const now_ms = awakeMilliseconds(self.io);
                 const poll_timeout_ms = firstFramePollTimeoutMs(started_ms, now_ms, saw_frame);
-                if (!saw_frame and poll_timeout_ms == 0) {
+                if (!saw_frame and poll_timeout_ms.? == 0) {
                     _ = self.attempt_state.cmpxchgStrong(1, 2, .acq_rel, .acquire);
                     malformed = true;
                     break;
@@ -420,7 +420,11 @@ pub const MediaProvider = struct {
                     .events = c.POLLIN | c.POLLHUP,
                     .revents = 0,
                 };
-                const ready = c.poll(&descriptor, 1, @intCast(poll_timeout_ms));
+                // Once the helper has proved the stream with one valid frame,
+                // stdout/HUP is the only wake source. The bounded slices below
+                // belong solely to the first-frame watchdog; retaining them
+                // here would turn an idle media session into a 10 Hz poll.
+                const ready = c.poll(&descriptor, 1, if (poll_timeout_ms) |timeout| @intCast(timeout) else -1);
                 if (ready < 0) {
                     if (posix.errno(ready) == .INTR) continue;
                     malformed = true;
@@ -675,8 +679,8 @@ fn scaledTimelineAdvance(elapsed_ms: u64, playback_rate: f64) u64 {
     return @intFromFloat(@round(scaled));
 }
 
-fn firstFramePollTimeoutMs(started_ms: u64, now_ms: u64, saw_frame: bool) u64 {
-    if (saw_frame) return 100;
+fn firstFramePollTimeoutMs(started_ms: u64, now_ms: u64, saw_frame: bool) ?u64 {
+    if (saw_frame) return null;
     const elapsed = now_ms -| started_ms;
     if (elapsed >= media_first_frame_deadline_ms) return 0;
     return @min(media_first_frame_deadline_ms - elapsed, 100);
@@ -1013,10 +1017,9 @@ test "macOS adapter validates playback rate and bounds its first-frame watchdog"
             0,
         ),
     );
-    try std.testing.expectEqual(@as(u64, 100), firstFramePollTimeoutMs(1000, 1000, false));
-    try std.testing.expectEqual(@as(u64, 1), firstFramePollTimeoutMs(1000, 10_999, false));
-    try std.testing.expectEqual(@as(u64, 0), firstFramePollTimeoutMs(1000, 11_000, false));
-    try std.testing.expectEqual(@as(u64, 100), firstFramePollTimeoutMs(1000, 99_000, true));
+    try std.testing.expectEqual(@as(?u64, 100), firstFramePollTimeoutMs(1000, 1000, false));
+    try std.testing.expectEqual(@as(?u64, 1), firstFramePollTimeoutMs(1000, 10_999, false));
+    try std.testing.expectEqual(@as(?u64, 0), firstFramePollTimeoutMs(1000, 11_000, false));
 
     provider.setAvailability(.starting);
     provider.attempt_state.store(1, .release);
@@ -1026,6 +1029,15 @@ test "macOS adapter validates playback rate and bounds its first-frame watchdog"
     try std.testing.expect(watchdog_loss.force);
     try std.testing.expectEqual(@as(u8, 2), provider.attempt_state.load(.acquire));
     try std.testing.expectEqualStrings("unavailable", provider.availabilityLabel());
+}
+
+test "macOS adapter has no post-frame idle timeout wakeups" {
+    // A null timeout maps to poll(2)'s infinite wait. Advancing the monotonic
+    // clock cannot manufacture work after the first valid frame; only new
+    // stdout bytes or HUP can wake the stream worker.
+    for ([_]u64{ 1000, 1100, 11_000, 99_000, std.math.maxInt(u64) }) |now_ms| {
+        try std.testing.expectEqual(@as(?u64, null), firstFramePollTimeoutMs(1000, now_ms, true));
+    }
 }
 
 test "macOS adapter freezes command IDs seek units clamp and restart bounds" {
