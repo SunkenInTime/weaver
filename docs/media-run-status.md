@@ -198,6 +198,13 @@ This run will not change the submodule pointer.
   `refresh_failed` remains active, the subscribed provider now retries on its
   existing bounded 1 Hz poll; it creates no transport-only or idle timer. The
   native retry truth-table regression test and every exact-head gate pass.
+- The subsequent review correctly separated permanent failure from transient
+  retry. An oversized thumbnail resolves immediately as unavailable; other
+  unresolved refreshes retain the prior complete frame for three subscribed
+  polls, then publish refreshed metadata explicitly without art while
+  retaining the old cache path/pin. Later subscribed retries may still
+  recover and publish art. Tests prove the retry bound and the unavailable
+  frame state, so no permanent source can strand the prior media frame.
 - After that repair and the final restack, every changed layer was re-run
   locally. Layer 02: `npm test` PASS 62/62; layers 03-05: PASS 63/63. Every
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
@@ -249,7 +256,7 @@ fixes the three partial/new P1s and four P2s through layer 05:
 | F6 | 04 | Fixed: seek polls to a two-second deadline and requires read-back within ±2000 ms at the reported rate. |
 | F7 | 04 | Fixed: blank title is a session, unknown is stopped, and validated-rate position advances at 1 Hz. |
 | F8 | 04 | Fixed: decode/downsample/PNG/cache path; malformed art causes adapter loss. |
-| F9 | 02 | Fixed: failed refresh retains the prior Windows snapshot/pin; a replacement session retains the prior complete frame, retries transient failure at the subscribed 1 Hz cadence, and cannot pair old art with new metadata. |
+| F9 | 02 | Fixed: transient failure retains the prior complete Windows frame and retries at the subscribed 1 Hz cadence; definite/exhausted failure publishes refreshed metadata artless without clearing the prior cache pin, so stale pairing and indefinite retention are both impossible. |
 | F10 | 03 | Fixed: forced SDK mapping, binding/assignment tracing, and SDK-signature backstop with bypass tests. |
 | F11 | 03/04 | Fixed: both UDS directions use bounded writes and helper teardown escalates TERM-to-KILL. |
 | F12 | 03/04 | Fixed: platform calls run on bounded per-widget workers; macOS slot teardown never joins them on supervision. |
