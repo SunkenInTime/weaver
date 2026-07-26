@@ -212,11 +212,17 @@ fn addMacosAudio(module: *std.Build.Module, b: *std.Build, automation_seam: bool
         .flags = audio_flags,
     });
     module.addCSourceFile(.{
+        .file = b.path("src/macos_media.m"),
+        .flags = audio_flags,
+    });
+    module.addCSourceFile(.{
         .file = b.path("src/macos_system.c"),
         .flags = &.{ "-std=c11", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include },
     });
     module.addIncludePath(b.path("src"));
     module.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ b.sysroot.?, "System", "Library", "Frameworks" }) });
     module.linkFramework("CoreAudio", .{});
+    module.linkFramework("CoreGraphics", .{});
     module.linkFramework("Foundation", .{});
+    module.linkFramework("ImageIO", .{});
 }

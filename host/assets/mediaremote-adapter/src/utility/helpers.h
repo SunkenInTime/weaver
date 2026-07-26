@@ -16,6 +16,8 @@ void printErrf(NSString *format, ...);
 
 void fail(NSString *message);
 void failf(NSString *format, ...);
+void decline(NSString *message);
+void declinef(NSString *format, ...);
 
 NSString *formatError(NSError *error);
 NSString *serializeJsonDictionarySafe(NSDictionary *any, bool prettyPrint);

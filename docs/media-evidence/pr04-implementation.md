@@ -22,16 +22,22 @@ run; they show the matching `Satellites` track playing at 0:37 and paused at
   vendored under `host/assets/mediaremote-adapter`.
 - Windows host behavior remains green after the shared art cache was made
   portable.
-- Parser tests cover full/empty/non-diff frames, frame-v2 mapping, base64 art
-  publication, status, source identifier, position, and duration.
+- Parser tests cover full/empty/non-diff frames, blank-title sessions,
+  unknown playback state, timestamped frame-v2 mapping, 1 Hz position
+  advancement, source identifier, position, and duration.
+- A real 300×300 PNG fixture passes the macOS decode/downsample/PNG path and
+  publishes within the shared image budget. Invalid base64 is an adapter
+  protocol failure rather than a silent art omission.
 - Lifecycle tests cover a failed helper, one forced empty loss frame,
   unavailable diagnostics, bounded restart state, idle teardown, recovery,
-  command IDs, seek microseconds, duration clamping, and false ack on process
-  failure.
+  command IDs, seek microseconds, duration clamping, strict EOF residuals,
+  30-second stability reset, the 15.4 floor, and channel rejection on process
+  failure. Exit 2 alone represents an OS decline.
 - Each transport-capable widget owns one FIFO command worker. The host
   supervision loop only authorizes/enqueues and later writes completed acks,
   so a helper timeout cannot stall provider delivery, supervision, reload, or
-  shutdown handling.
+  shutdown handling. Metadata teardown escalates TERM to KILL after a bounded
+  grace window.
 - The release audit passes and the Native SDK submodule remains pinned.
 
 Final local commands:
@@ -79,3 +85,23 @@ PASS (semantic compile only)
 Performance claim: explicitly declined. Windows code paths remain green, but
 this run has no attended execution of Weaver's macOS adapter and therefore no
 honest macOS process-cost measurement.
+
+## Attended-Mac re-verification required
+
+The next attended session must run Weaver's implementation (not the standalone
+spike) and verify:
+
+1. real-player full metadata, blank-title session handling, status changes,
+   and smooth 1 Hz elapsed-time advancement;
+2. 300×300+ artwork renders from the normalized cache with malformed artwork
+   producing one empty/unavailable loss frame and recovery;
+3. play, pause, next, previous, a verified seek within ±2000 ms, and a
+   no-session seek resolving `false`;
+4. missing helper/framework, timeout, and signal death rejecting rather than
+   resolving `false`;
+5. partial-record EOF, helper crash, quit/relaunch, exponential backoff, and
+   TERM-to-KILL teardown;
+6. no helper spawn and unavailable diagnostics on macOS 15.3 or older, plus
+   direct execution at the 15.4 floor;
+7. Developer-ID hardened-runtime signing, secure timestamp, notarization,
+   quarantine, and Gatekeeper launch.

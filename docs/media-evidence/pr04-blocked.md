@@ -14,6 +14,16 @@ Weaver's layer-04 implementation produced a frame or delivered a command; that
 implementation remains **UNVERIFIED (needs attended Mac)** until its own live
 matrix is run.
 
+## 2026-07-25 adversarial-remediation addendum
+
+Layer 04 now includes strict EOF framing, truthful helper failure rejection,
+read-back-verified seek, timestamped 1 Hz timeline advancement, shared-budget
+artwork normalization, bounded TERM-to-KILL teardown, a 30-second stable
+restart reset, and a ProcessInfo macOS 15.4 runtime floor. Automated and static
+checks do not prove those changes against a real player. The implementation
+matrix remains **UNVERIFIED (needs attended Mac)**, and exact behavior at the
+15.4 floor remains **UNVERIFIED (needs attended Mac running 15.4)**.
+
 Date: 2026-07-25
 
 Decision: **BLOCKED — no PR 04 implementation or draft PR is opened.**

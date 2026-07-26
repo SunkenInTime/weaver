@@ -10,7 +10,7 @@
 
 #define WAIT_TIMEOUT_MILLIS 2000
 
-void waitForCommandCompletion() {
+bool waitForCommandCompletion() {
     id semaphore = dispatch_semaphore_create(0);
 
     g_mediaRemote.getNowPlayingApplicationPID(
@@ -20,7 +20,7 @@ void waitForCommandCompletion() {
 
     dispatch_time_t timeout =
         dispatch_time(DISPATCH_TIME_NOW, WAIT_TIMEOUT_MILLIS * NSEC_PER_MSEC);
-    dispatch_semaphore_wait(semaphore, timeout);
+    return dispatch_semaphore_wait(semaphore, timeout) == 0;
 }
 
 NSNumber *getElapsedTimeNow(NSDictionary *information) {

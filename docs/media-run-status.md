@@ -8,8 +8,8 @@ Last updated: 2026-07-25
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; round-2 repair locally green |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`5fbc620`) |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; adversarial repair locally green |
 | 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
@@ -84,35 +84,59 @@ This run will not change the submodule pointer.
   hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
   transport-only idle-zero, forced SDK resolution despite a hostile widget
   tsconfig, and local hook aliases.
-- Layer 03 round-2 repair: `npm test` PASS 63/63, `npm run typecheck`
-  PASS, runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS, host
-  `zig build test` PASS, and `weaver check examples/now-playing` PASS.
-  Direct semantic compilation of `runtime/src/provider_macos.zig` for
-  `aarch64-macos` also passes. New deterministic tests cover a connected host
-  that stops reading, the host and runtime cancel-before-read interleavings,
-  fatal shared-channel crash/restart semantics, and SDK-hook calls reached
-  through destructuring, deferred assignment, object properties, and a
-  re-export chain.
+- Layer 04 adversarial local gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, release audit PASS, every example directory with
+  `widget.tsx` passed `weaver check`, runtime test/build PASS, and Windows host
+  test/build PASS. Direct no-emit aarch64-macos semantic compiles of
+  `providers_macos.zig` and `macos_host.zig` PASS. These semantic compiles do
+  not compile/link the new Objective-C image normalizer and do not substitute
+  for macOS CI or attended execution.
+- Layer 04 adversarial tests cover adapter EOF residuals, blank-title
+  sessions, unknown playback state, timestamp-aware 1 Hz advancement, a real
+  300×300 PNG normalization fixture, malformed artwork, helper failure
+  rejection, exit-2 decline, no-session seek decline, 30-second restart
+  stability, and the 15.4 floor predicate.
 
 ## Blockers and unverified gates
 
 - None for the Windows stack.
-- The attended Mac route spike passed with real metadata and a delivered pause
-  command; its evidence enters the stack in layer 04. The round-2 adapter
-  changes still require hosted CI and an attended Mac before any implementation
-  behavior is claimed verified.
+- The attended route spike is PASSED per
+  `docs/media-evidence/pr04-mac-spike.md`; it does not prove the remediated
+  Weaver implementation.
+- The remediated macOS implementation remains **UNVERIFIED (needs attended
+  Mac)** for: real metadata and 1 Hz timeline advancement; 300×300+ art and
+  malformed-art loss/recovery; all five verbs and ±2000 ms verified seek;
+  no-session seek false; helper/framework/timeout/signal rejection; residual
+  EOF, crash, quit/relaunch, exponential backoff, and TERM-to-KILL teardown;
+  Developer-ID signing, timestamp, notarization, quarantine, and Gatekeeper.
+- Exact macOS 15.4-floor execution is separately **UNVERIFIED (needs attended
+  Mac running 15.4)**. The runtime ProcessInfo gate is implemented and tested
+  statically; no helper is spawned below the floor.
 
 ## Current work
 
-Round-2 remediation is in progress bottom-up. Layer 03 now bounds the macOS
-runtime-to-host command write, makes both Windows reader shutdown sequences
-race-free with persistent shutdown events, traces the SDK transport hook
-through all reviewed binding forms with the resolved-signature backstop, and
-restarts a widget through crash supervision after fatal failure of its shared
-provider channel. The layer is locally green; macOS runtime send behavior is
-compile- and seam-tested here but remains unattended-Mac unverified.
+The 15-finding adversarial remediation is implemented through layer 04:
+
+| Finding | Owning layer | Accepted state |
+|---|---|---|
+| F1 | 03 | Fixed: both endpoints require the launched child PID; real hijack tests added. |
+| F2 | 03/04 | Fixed: all command, runtime, and adapter readers discard/count EOF residuals. |
+| F3 | 03 | Fixed: subscription-only polling, reader wake, exact one-shot 3 s deadline. |
+| F4 | 03 | Fixed: nine-entry proven nack lane plus keyed four-pending ack slots and late-ack test. |
+| F5 | 04 | Fixed: helper/channel failures reject; only exit 2 OS decline resolves false. |
+| F6 | 04 | Fixed: seek requires bounded read-back within ±2000 ms accounting for advance. |
+| F7 | 04 | Fixed: blank title is a session, unknown is stopped, timestamped position advances at 1 Hz. |
+| F8 | 04 | Fixed: decode/downsample/PNG/cache path; malformed art causes adapter loss. |
+| F9 | 02 | Fixed: failed refresh retains the prior Windows art snapshot and pin. |
+| F10 | 03 | Fixed: forced SDK mapping and alias/re-export symbol tracing with bypass tests. |
+| F11 | 03/04 | Fixed: bounded endpoint writes and bounded TERM-to-KILL helper teardown. |
+| F12 | 03 | Fixed: Windows media calls run on a bounded per-widget worker. |
+| F13 | 04 | Fixed: restart reset requires a frame plus 30 s stable streaming. |
+| F14 | 04 | Fixed: ProcessInfo 15.4 runtime gate; exact-floor behavior remains unverified. |
+| F15 | 04/05 | Static-audit and blocked-record addenda fixed; `media-v2-results.md` addendum waits for layer-05 restack. |
 
 ## Next executable task
 
-Commit/push the layer-03 round-2 remediation, then restack layer 04 and add the
-first-frame watchdog, convergent seek read-back, and playback-rate timeline.
+Commit/push layer 04, let macOS CI compile/link its platform code, repair any
+CI defect, then restack layer 05 and finish the F15 results addendum plus the
+required Windows live art-flash/timeout re-verification.

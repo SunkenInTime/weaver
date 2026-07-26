@@ -1,4 +1,13 @@
 {
+  "addendum_2026_07_25": {
+    "acceptedState": "ROUTE_PASSED_IMPLEMENTATION_UNVERIFIED",
+    "implementation": "Layer 04 now supervises the vendored route with strict framing, truthful command outcomes, seek read-back, normalized artwork, bounded teardown/backoff, and a macOS 15.4 runtime gate.",
+    "implementationLiveGate": "UNVERIFIED_NEEDS_ATTENDED_MAC",
+    "macOS15_4Floor": "UNVERIFIED_NEEDS_ATTENDED_MAC_AT_15_4",
+    "routeEvidence": "docs/media-evidence/pr04-mac-spike.md",
+    "routeGate": "PASSED",
+    "supersedes": "The historical executionGate.status=BLOCKED object below is retained as the original static-audit output and is superseded by this dated addendum."
+  },
   "executionGate": {
     "deliveredCommand": false,
     "realMetadataFrame": false,

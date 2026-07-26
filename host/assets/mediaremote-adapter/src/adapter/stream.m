@@ -308,7 +308,7 @@ extern void adapter_stream() {
             return;
         }
         NSMutableDictionary *converted = convertNowPlayingInformation(
-            information, convert_micros, false, no_artwork);
+            information, convert_micros, true, no_artwork);
         // Transfer anything over from the existing live data.
         if (liveData[kMRAProcessIdentifier] != nil) {
             converted[kMRAProcessIdentifier] = liveData[kMRAProcessIdentifier];

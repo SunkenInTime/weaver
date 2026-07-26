@@ -34,7 +34,9 @@ void adapter_repeat(MRARepeatMode mode) {
 
     g_mediaRemote.setRepeatMode((int)mode);
 
-    waitForCommandCompletion();
+    if (!waitForCommandCompletion()) {
+        fail(@"MediaRemote command completion timed out");
+    }
 }
 
 static inline int repeat_0_mode() {

@@ -56,10 +56,12 @@ void adapter_send(MRACommand command) {
 
     bool result = g_mediaRemote.sendCommand(commandValue, nil);
     if (!result) {
-        failf(@"Failed to send command %d", command);
+        declinef(@"MediaRemote declined command %d", command);
     }
 
-    waitForCommandCompletion();
+    if (!waitForCommandCompletion()) {
+        fail(@"MediaRemote command completion timed out");
+    }
 }
 
 static inline int send_0_command() {
