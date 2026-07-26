@@ -357,6 +357,10 @@ const Host = struct {
     media_provider: *system_providers.MediaProvider,
     media_pipe_frames: u64 = 0,
     art_cache_root: []const u8,
+    /// Compile-time-only hosted seam. It exercises the authenticated UDS,
+    /// command framer, and ack writer without invoking a private-framework
+    /// helper on a player-less CI runner.
+    automation_seam: bool = false,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -457,6 +461,13 @@ const Host = struct {
             }
             while (endpoint.takeCommand()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
+                if (self.automation_seam) {
+                    if (!writeAutomationMediaAck(endpoint, command.id, &ack_buffer)) {
+                        channel_failed = true;
+                        break;
+                    }
+                    continue;
+                }
                 const queued = allowed and if (slot.platform.media_command_executor) |executor|
                     executor.submit(command)
                 else
@@ -516,7 +527,7 @@ const Host = struct {
             endpoint.deinit();
             slot.platform.endpoint = null;
         };
-        if (slot.wants_media_transport) {
+        if (slot.wants_media_transport and !self.automation_seam) {
             slot.platform.media_command_executor = try system_providers.MediaCommandExecutor.start(
                 self.io,
                 self.allocator,
@@ -825,6 +836,11 @@ const Host = struct {
     }
 };
 
+fn writeAutomationMediaAck(endpoint: *ProviderEndpoint, id: u64, buffer: *[64]u8) bool {
+    const ack = media_commands.formatAck(id, false, buffer) catch return false;
+    return endpoint.write(ack);
+}
+
 fn peerPid(stream: std.Io.net.Stream) ?posix.pid_t {
     var pid: c.pid_t = 0;
     var length: c.socklen_t = @sizeOf(c.pid_t);
@@ -944,6 +960,7 @@ fn run(init: std.process.Init) !void {
         .audio_authorization_marker = audio_authorization_marker,
         .media_provider = &media_provider,
         .art_cache_root = art_cache_root,
+        .automation_seam = c.weaver_macos_automation_seam() != 0,
     };
     defer host.audio_provider.deinit();
     try host.loadRegistry();
@@ -1283,4 +1300,50 @@ test "hosted media command override is compile gated" {
         system_providers.CommandOutcome.declined,
         automationCommandOutcome(true).?,
     );
+}
+
+test "hosted automation command crosses the authenticated socket and returns a declined ack" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-ack-test-{d}.sock", .{posix.system.getpid()});
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid());
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    defer stream.close(std.testing.io);
+
+    var accepted = false;
+    for (0..100) |_| {
+        endpoint.mutex.lockUncancelable(std.testing.io);
+        accepted = endpoint.stream != null;
+        endpoint.mutex.unlock(std.testing.io);
+        if (accepted) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(accepted);
+
+    var write_buffer: [256]u8 = undefined;
+    var writer = stream.writer(std.testing.io, &write_buffer);
+    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"pause\",\"id\":7}\n");
+    try writer.interface.flush();
+
+    var command: ?media_commands.Command = null;
+    for (0..100) |_| {
+        command = endpoint.takeCommand();
+        if (command != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expectEqual(@as(u64, 7), command.?.id);
+
+    var ack_buffer: [64]u8 = undefined;
+    try std.testing.expect(writeAutomationMediaAck(endpoint, command.?.id, &ack_buffer));
+    var read_buffer: [64]u8 = undefined;
+    var reader = stream.reader(std.testing.io, &read_buffer);
+    var ack_len: usize = 0;
+    while (ack_len < read_buffer.len and std.mem.indexOfScalar(u8, read_buffer[0..ack_len], '\n') == null) {
+        const read = try reader.interface.readSliceShort(read_buffer[ack_len..]);
+        try std.testing.expect(read > 0);
+        ack_len += read;
+    }
+    try std.testing.expectEqualStrings("{\"type\":\"media-ack\",\"id\":7,\"ok\":false}\n", read_buffer[0..ack_len]);
 }
