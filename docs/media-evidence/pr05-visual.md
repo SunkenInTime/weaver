@@ -77,6 +77,29 @@ live artwork, text, clock, and play state differ.
 The temporary seek diagnostic changed only the center text to
 `position/duration`; it was reverted before the final captures and commit.
 
+## Cross-session artwork atomicity recheck (2026-07-25)
+
+After the final layer-02 session-boundary repair was restacked, the real
+layer-05 artifact was launched again against Spotify. Other windows were
+minimized, the exact 340x358 desktop widget region was captured with
+`CopyFromScreen`, a real global Next media key was delivered, and every PNG
+below was opened and viewed at original resolution.
+
+| Capture | Artwork | Metadata | Result |
+|---|---|---|---|
+| `pr05-session-atomic-before.png` | pink mirrored cover | `FUCK THE SPEAKERZ` | PASS, complete old frame |
+| `pr05-session-atomic-0250ms.png` | same pink cover | same old title | PASS, complete old frame retained |
+| `pr05-session-atomic-0750ms.png` | same pink cover | same old title | PASS, complete old frame retained |
+| `pr05-session-atomic-1500ms.png` | replacement monochrome cover | `BLIND (RAVE MIX)` | PASS, replacement published together |
+| `pr05-session-atomic-2500ms.png` | replacement monochrome cover | `BLIND (RAVE MIX)` | PASS, settled replacement |
+
+Per-element result: shell, artwork viewport, overlays, title, clock, seek
+strip, and transport controls were present, correctly positioned, and styled
+in all five captures. The old title and cover remained paired while the
+replacement thumbnail resolved; the replacement title and cover first
+appeared together. No blank/fallback image, black frame, or old-cover/new-title
+combination was visible. Overall: **PASS**.
+
 ## Round-2 normalized-coordinate recheck (2026-07-25)
 
 The final shell was relaunched against the real Spotify session after replacing
