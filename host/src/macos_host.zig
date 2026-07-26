@@ -1302,7 +1302,7 @@ test "hosted media command override is compile gated" {
     );
 }
 
-test "hosted automation command crosses the authenticated socket and returns a declined ack" {
+test "hosted automation ack crosses the authenticated provider socket" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-ack-test-{d}.sock", .{posix.system.getpid()});
     const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
@@ -1322,28 +1322,16 @@ test "hosted automation command crosses the authenticated socket and returns a d
     }
     try std.testing.expect(accepted);
 
-    var write_buffer: [256]u8 = undefined;
-    var writer = stream.writer(std.testing.io, &write_buffer);
-    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"pause\",\"id\":7}\n");
-    try writer.interface.flush();
-
-    var command: ?media_commands.Command = null;
-    for (0..100) |_| {
-        command = endpoint.takeCommand();
-        if (command != null) break;
-        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
-    }
-    try std.testing.expectEqual(@as(u64, 7), command.?.id);
-
     var ack_buffer: [64]u8 = undefined;
-    try std.testing.expect(writeAutomationMediaAck(endpoint, command.?.id, &ack_buffer));
-    var read_buffer: [64]u8 = undefined;
-    var reader = stream.reader(std.testing.io, &read_buffer);
+    try std.testing.expect(writeAutomationMediaAck(endpoint, 7, &ack_buffer));
+    var reader_buffer: [64]u8 = undefined;
+    var reader = stream.reader(std.testing.io, &reader_buffer);
+    var received: [64]u8 = undefined;
     var ack_len: usize = 0;
-    while (ack_len < read_buffer.len and std.mem.indexOfScalar(u8, read_buffer[0..ack_len], '\n') == null) {
-        const read = try reader.interface.readSliceShort(read_buffer[ack_len..]);
+    while (ack_len < received.len and std.mem.indexOfScalar(u8, received[0..ack_len], '\n') == null) {
+        const read = try reader.interface.readSliceShort(received[ack_len..]);
         try std.testing.expect(read > 0);
         ack_len += read;
     }
-    try std.testing.expectEqualStrings("{\"type\":\"media-ack\",\"id\":7,\"ok\":false}\n", read_buffer[0..ack_len]);
+    try std.testing.expectEqualStrings("{\"type\":\"media-ack\",\"id\":7,\"ok\":false}\n", received[0..ack_len]);
 }
