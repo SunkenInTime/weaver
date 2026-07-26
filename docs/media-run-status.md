@@ -7,8 +7,8 @@ Last updated: 2026-07-25
 | Layer | Branch | Parent | State |
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`2eecd49` plus adversarial repair pending push) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; restack pending |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; adversarial repair in progress |
 | 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
 | 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
@@ -73,6 +73,17 @@ This run will not change the submodule pointer.
   for a 128 s target.
 - Layer 03 visual gate: PASS. Viewed captures and the per-element checklist
   are in `docs/media-evidence/pr03-visual.md`.
+- Layer 03 adversarial repair gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, every example directory with `widget.tsx` passed
+  `weaver check`, runtime `zig build test -Dweb-layer=exclude -Dtrace=off`
+  PASS, and host `zig build test` PASS. Direct semantic macOS compilation
+  passed for both `host/src/macos_host.zig` and
+  `runtime/src/provider_macos.zig`.
+- Layer 03 adversarial tests now cover a real mismatched-PID pipe rejection,
+  macOS peer-PID rejection, command and acknowledgement EOF residuals,
+  hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
+  transport-only idle-zero, forced SDK resolution despite a hostile widget
+  tsconfig, and local hook aliases.
 
 ## Blockers and unverified gates
 
@@ -83,10 +94,16 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-The 15-finding adversarial remediation is in progress bottom-up. Layer 02's F9
-repair is committed and published after its complete per-layer gate passed.
+The 15-finding adversarial remediation is in progress bottom-up. F9 is fixed,
+tested, committed, and pushed in layer 02. Layer 03 now contains the owning
+repairs for F1/F2/F3/F4/F10/F11/F12: PID-bound endpoints, strict EOF framing,
+reader wakeups and exact one-shot deadlines, keyed acknowledgements and a
+provably bounded nack lane, forced SDK symbol resolution, deadline-bounded
+endpoint writes, and an isolated deadline-bounded Windows command worker.
+macOS reader and endpoint changes pass semantic cross-compilation; the full
+layer gate passes.
 
 ## Next executable task
 
-Restack layer 03, then fix F1/F2/F3/F4/F10/F11/F12 at the
-transport-owning layer.
+Commit/push the layer-03 remediation, then restack layer 04 and repair
+F2/F5/F6/F7/F8/F11/F13/F14/F15.

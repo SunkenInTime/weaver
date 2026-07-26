@@ -168,6 +168,10 @@ pub const Engine = struct {
         return self.provider.isAvailable();
     }
 
+    pub fn nextMediaDeadlineMs(self: *const Engine) ?u64 {
+        return bridge.nextMediaDeadlineMs(&self.bridge_state);
+    }
+
     pub fn drainProviders(self: *Engine) Error!usize {
         self.beginTurn();
         defer self.endTurn();

@@ -691,19 +691,34 @@ The command object has exactly `command`, `verb`, optional `seekMs`, and `id`;
 `seek`. `seekMs` is present only for `seek`. The acknowledgement object has
 exactly `ack` and `ok`.
 
-One blocking host reader thread per widget validates framing and enqueues
-commands without calling platform media APIs or writing to the endpoint. The
-host supervision loop is the sole writer of provider frames and
-acknowledgements; it independently checks the declared capability, applies
-the rate limit, and dispatches the OS operation. Queue overflow drops the
-command and schedules a negative acknowledgement.
+The host accepts an endpoint only when the operating system reports that its
+peer PID is the child process launched for that widget slot. A mismatch is
+disconnected before any frame or command is served, and the endpoint is
+recreated or continues accepting the expected child.
+
+One blocking host reader thread per widget validates incremental newline
+framing and enqueues commands without calling platform media APIs or writing
+to the endpoint. EOF with a buffered partial record is a protocol failure;
+the residual is never executed. The host supervision loop is the sole writer
+of provider frames and acknowledgements; it independently checks the declared
+capability and rate limit. Platform operations run on a bounded command
+worker, so an OS API stall cannot block supervision. The negative-
+acknowledgement lane is sized for the four-command pending limit plus the
+five-command rate-limit burst; backpressure prevents accepting another
+command until its required acknowledgement can be represented.
 
 The runtime reader is the sole endpoint reader. It demultiplexes complete
-lines by top-level key: provider frames retain their four-entry drop-oldest
-queue, while acknowledgements use a separate non-dropping four-entry queue.
-Runtime writes are serialized by a send mutex, and the existing single
-provider dispatcher drains both lanes on the app loop. `native.mediaCommand`
-is absent unless the runtime manifest declares `media-transport`.
+newline-terminated records by top-level key; EOF residuals are discarded as
+protocol failures. Provider frames retain their four-entry drop-oldest queue.
+Acknowledgements are placed directly into one of four slots reserved by the
+pending command ID. An acknowledgement for an unknown, expired, or duplicate
+ID is counted and dropped without affecting current commands. Runtime writes
+are serialized by a send mutex, and reader arrival wakes the existing app-loop
+provider dispatcher. A transport-only widget creates no repeating provider
+timer. Each pending command arms the earliest exact three-second deadline as a
+one-shot timer; acknowledgement arrival settles it immediately.
+`native.mediaCommand` is absent unless the runtime manifest declares
+`media-transport`.
 
 The proven desktop adapter implements the verbs through system media request
 APIs. The unproven adapter carries the same duplex plumbing in this layer but

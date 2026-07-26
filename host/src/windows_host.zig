@@ -31,12 +31,111 @@ const max_widgets = supervisor.max_widgets;
 const max_path_bytes: usize = 2048;
 const invalid_handle = c.INVALID_HANDLE_VALUE;
 
+const MediaCommandResult = struct {
+    id: u64,
+    outcome: media.Provider.CommandOutcome,
+};
+
+/// One bounded worker belongs to one transport-capable widget. SMTC async
+/// waits never run on the global supervision loop, while FIFO remains local
+/// to that widget and the host loop remains the sole endpoint writer.
+const MediaCommandExecutor = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    provider: *media.Provider,
+    thread: std.Thread,
+    mutex: std.Io.Mutex = .init,
+    condition: std.Io.Condition = .init,
+    commands: [media_commands.queue_capacity]media_commands.Command = undefined,
+    command_head: usize = 0,
+    command_count: usize = 0,
+    results: [media_commands.queue_capacity]MediaCommandResult = undefined,
+    result_head: usize = 0,
+    result_count: usize = 0,
+    stopping: bool = false,
+
+    fn start(io: std.Io, allocator: std.mem.Allocator, provider: *media.Provider) !*MediaCommandExecutor {
+        const self = try allocator.create(MediaCommandExecutor);
+        errdefer allocator.destroy(self);
+        self.* = .{ .io = io, .allocator = allocator, .provider = provider, .thread = undefined };
+        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, threadMain, .{self});
+        return self;
+    }
+
+    fn deinit(self: *MediaCommandExecutor) void {
+        self.mutex.lockUncancelable(self.io);
+        self.stopping = true;
+        self.condition.broadcast(self.io);
+        self.mutex.unlock(self.io);
+        self.thread.join();
+        const allocator = self.allocator;
+        allocator.destroy(self);
+    }
+
+    fn submit(self: *MediaCommandExecutor, command: media_commands.Command) bool {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (self.stopping or self.command_count == self.commands.len) return false;
+        const index = (self.command_head + self.command_count) % self.commands.len;
+        self.commands[index] = command;
+        self.command_count += 1;
+        self.condition.signal(self.io);
+        return true;
+    }
+
+    fn takeResult(self: *MediaCommandExecutor) ?MediaCommandResult {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        if (self.result_count == 0) return null;
+        const result = self.results[self.result_head];
+        self.result_head = (self.result_head + 1) % self.results.len;
+        self.result_count -= 1;
+        self.condition.signal(self.io);
+        return result;
+    }
+
+    fn threadMain(self: *MediaCommandExecutor) void {
+        while (true) {
+            self.mutex.lockUncancelable(self.io);
+            while (self.command_count == 0 and !self.stopping) {
+                self.condition.waitUncancelable(self.io, &self.mutex);
+            }
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                return;
+            }
+            const command = self.commands[self.command_head];
+            self.command_head = (self.command_head + 1) % self.commands.len;
+            self.command_count -= 1;
+            self.mutex.unlock(self.io);
+
+            const result: MediaCommandResult = .{
+                .id = command.id,
+                .outcome = self.provider.command(command.verb, command.seek_ms),
+            };
+            self.mutex.lockUncancelable(self.io);
+            while (self.result_count == self.results.len and !self.stopping) {
+                self.condition.waitUncancelable(self.io, &self.mutex);
+            }
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                return;
+            }
+            const index = (self.result_head + self.result_count) % self.results.len;
+            self.results[index] = result;
+            self.result_count += 1;
+            self.mutex.unlock(self.io);
+        }
+    }
+};
+
 const WindowsSlotState = struct {
     process: c.HANDLE = null,
     pid: u32 = 0,
     pipe: c.HANDLE = invalid_handle,
     write_event: c.HANDLE = null,
     command_thread: ?std.Thread = null,
+    media_command_executor: ?*MediaCommandExecutor = null,
     command_queue: media_commands.Queue = .{},
     command_rate: media_commands.RateLimiter = .{},
     previous_process_ticks: u64 = 0,
@@ -245,7 +344,7 @@ const Host = struct {
         slot.platform.pid = process_info.dwProcessId;
         self.thread_sample_ms = 0;
         if (slot.platform.pipe != invalid_handle) {
-            if (!connectPipe(slot.platform.pipe, slot.platform.process, 5_000)) {
+            if (!connectPipe(slot.platform.pipe, slot.platform.process, slot.platform.pid, 5_000)) {
                 _ = c.TerminateProcess(slot.platform.process, 1);
                 return error.ConnectPipeFailed;
             }
@@ -255,6 +354,13 @@ const Host = struct {
                 commandReaderMain,
                 .{&slot.platform},
             );
+            if (slot.wants_media_transport) {
+                slot.platform.media_command_executor = try MediaCommandExecutor.start(
+                    self.io,
+                    self.allocator,
+                    &self.media_provider,
+                );
+            }
         }
         supervisor.markRunning(slot, now_ms, self.artifactMtime(slot.source()));
         slot.platform.previous_process_ticks = processTicks(slot.platform.process);
@@ -360,9 +466,12 @@ const Host = struct {
 
     fn closePipe(_: *Host, slot: *Slot) void {
         if (slot.platform.pipe == invalid_handle) return;
+        slot.platform.command_queue.stop();
         _ = c.CancelIoEx(slot.platform.pipe, null);
         if (slot.platform.command_thread) |thread| thread.join();
         slot.platform.command_thread = null;
+        if (slot.platform.media_command_executor) |executor| executor.deinit();
+        slot.platform.media_command_executor = null;
         _ = c.DisconnectNamedPipe(slot.platform.pipe);
         _ = c.CloseHandle(slot.platform.pipe);
         slot.platform.pipe = invalid_handle;
@@ -446,14 +555,6 @@ const Host = struct {
         return supervisor.hasSubscription(&self.slots, .media, self);
     }
 
-    fn hasMediaActivity(self: *const Host) bool {
-        if (self.hasMediaSubscribers()) return true;
-        for (self.slots) |slot| {
-            if (slot.used and slot.enabled and slot.wants_media_transport) return true;
-        }
-        return false;
-    }
-
     fn sampleAudio(self: *Host, now_ms: u64) void {
         const active = self.hasAudioSubscribers();
         self.audio_provider.setActive(active, now_ms);
@@ -470,7 +571,7 @@ const Host = struct {
     }
 
     fn sampleMedia(self: *Host, now_ms: u64) void {
-        const active = self.hasMediaActivity();
+        const active = self.hasMediaSubscribers();
         self.media_provider.setActive(active, now_ms);
         if (!active) return;
         const frame = self.media_provider.poll(now_ms) orelse return;
@@ -497,15 +598,66 @@ const Host = struct {
         var ack_buffer: [64]u8 = undefined;
         for (&self.slots) |*slot| {
             if (slot.platform.pipe == invalid_handle) continue;
+            var channel_failed = false;
+            if (slot.platform.media_command_executor) |executor| {
+                while (executor.takeResult()) |result| {
+                    switch (result.outcome) {
+                        .accepted, .declined => {
+                            const ack = media_commands.formatAck(
+                                result.id,
+                                result.outcome == .accepted,
+                                &ack_buffer,
+                            ) catch continue;
+                            if (!writePipe(&slot.platform, ack)) {
+                                channel_failed = true;
+                                break;
+                            }
+                        },
+                        .channel_failure => {
+                            channel_failed = true;
+                            break;
+                        },
+                    }
+                }
+            }
+            if (channel_failed) {
+                std.log.warn("closing failed media command channel for widget {s}", .{slot.name()});
+                self.closePipe(slot);
+                continue;
+            }
             while (slot.platform.command_queue.takeNack()) |id| {
                 const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
-                _ = writePipe(&slot.platform, ack);
+                if (!writePipe(&slot.platform, ack)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.closePipe(slot);
+                continue;
             }
             while (slot.platform.command_queue.take()) |command| {
                 const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
-                const ok = allowed and self.media_provider.command(command.verb, command.seek_ms, now_ms);
-                const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
-                _ = writePipe(&slot.platform, ack);
+                if (!allowed) {
+                    const ack = media_commands.formatAck(command.id, false, &ack_buffer) catch continue;
+                    if (!writePipe(&slot.platform, ack)) {
+                        channel_failed = true;
+                        break;
+                    }
+                    continue;
+                }
+                const executor = slot.platform.media_command_executor orelse {
+                    channel_failed = true;
+                    break;
+                };
+                if (!executor.submit(command)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.closePipe(slot);
+                continue;
             }
             if (slot.platform.command_queue.malformed.swap(false, .acq_rel)) {
                 std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
@@ -861,7 +1013,28 @@ fn writePipe(platform: *WindowsSlotState, bytes: []const u8) bool {
     return written == bytes.len;
 }
 
-fn connectPipe(pipe: c.HANDLE, process: c.HANDLE, timeout_ms: u64) bool {
+fn connectPipe(pipe: c.HANDLE, process: c.HANDLE, expected_pid: u32, timeout_ms: u64) bool {
+    const deadline = c.GetTickCount64() +| timeout_ms;
+    while (true) {
+        const now = c.GetTickCount64();
+        if (now >= deadline or !connectPipeOnce(pipe, process, deadline - now)) return false;
+        const actual_pid = namedPipeClientPid(pipe) orelse {
+            _ = c.DisconnectNamedPipe(pipe);
+            return false;
+        };
+        if (actual_pid == expected_pid) return true;
+        std.log.warn(
+            "rejecting provider pipe client pid={d}; expected widget pid={d}",
+            .{ actual_pid, expected_pid },
+        );
+        // Reset the sole pipe instance before accepting any bytes. The
+        // authorized child is the only process permitted to cross this
+        // endpoint boundary.
+        _ = c.DisconnectNamedPipe(pipe);
+    }
+}
+
+fn connectPipeOnce(pipe: c.HANDLE, process: c.HANDLE, timeout_ms: u64) bool {
     const event = c.CreateEventW(null, 0, 0, null) orelse return false;
     defer _ = c.CloseHandle(event);
     var overlapped: c.OVERLAPPED = std.mem.zeroes(c.OVERLAPPED);
@@ -888,6 +1061,12 @@ fn connectPipe(pipe: c.HANDLE, process: c.HANDLE, timeout_ms: u64) bool {
     return true;
 }
 
+fn namedPipeClientPid(pipe: c.HANDLE) ?u32 {
+    var pid: c.ULONG = 0;
+    if (c.GetNamedPipeClientProcessId(pipe, &pid) == 0) return null;
+    return @intCast(pid);
+}
+
 fn closeWindowsForProcess(pid: u32) void {
     const Callback = struct {
         fn call(window: c.HWND, process_id: c.LPARAM) callconv(.c) c.BOOL {
@@ -906,4 +1085,45 @@ test {
     _ = backoff;
     _ = media;
     _ = providers;
+}
+
+test "provider pipe rejects a connected client whose pid is not the launched child" {
+    var name_buffer: [160]u8 = undefined;
+    const name = try std.fmt.bufPrint(
+        &name_buffer,
+        "\\\\.\\pipe\\weaver-hijack-test-{d}-{d}",
+        .{ c.GetCurrentProcessId(), c.GetTickCount64() },
+    );
+    const name_w = try std.unicode.utf8ToUtf16LeAllocZ(std.testing.allocator, name);
+    defer std.testing.allocator.free(name_w);
+    const pipe = c.CreateNamedPipeW(
+        name_w.ptr,
+        c.PIPE_ACCESS_DUPLEX | c.FILE_FLAG_OVERLAPPED,
+        c.PIPE_TYPE_BYTE | c.PIPE_READMODE_BYTE | c.PIPE_WAIT,
+        1,
+        512,
+        512,
+        0,
+        null,
+    );
+    try std.testing.expect(pipe != invalid_handle);
+    defer _ = c.CloseHandle(pipe);
+
+    const Connector = struct {
+        fn run(path: [*:0]const u16) void {
+            const client = c.CreateFileW(path, c.GENERIC_READ | c.GENERIC_WRITE, 0, null, c.OPEN_EXISTING, 0, null);
+            if (client != invalid_handle) {
+                c.Sleep(500);
+                _ = c.CloseHandle(client);
+            }
+        }
+    };
+    const connector = try std.Thread.spawn(.{}, Connector.run, .{name_w.ptr});
+    defer connector.join();
+    try std.testing.expect(!connectPipe(
+        pipe,
+        c.GetCurrentProcess(),
+        c.GetCurrentProcessId() + 1,
+        200,
+    ));
 }

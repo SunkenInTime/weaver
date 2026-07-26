@@ -218,6 +218,40 @@ export default widget({ name: "Namespace", size: [160, 80] }, () => { const medi
       assert.match(result.stderr, /useMediaTransport\(\) requires capabilities: \["media-transport"\]/);
     }
 
+    writeFileSync(join(widget, "widget.tsx"), `import { useMediaTransport, widget } from "@weaver/sdk";
+const hook = useMediaTransport;
+export default widget({ name: "Const alias", size: [160, 80] }, () => { const media = hook(); return <button onPress={() => void media.play()}><text>Play</text></button>; });
+`);
+    const constAlias = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(constAlias.status, 1);
+    assert.match(constAlias.stderr, /useMediaTransport\(\) requires capabilities: \["media-transport"\]/);
+
+    writeFileSync(join(widget, "fake-sdk.d.ts"), `export declare function useMediaTransport(): { play(): Promise<boolean> };
+export declare function widget(config: unknown, render: () => unknown): unknown;
+`);
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": ["fake-sdk.d.ts"], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["**/*.ts", "**/*.tsx"],
+    }));
+    writeFileSync(join(widget, "widget.tsx"), `import { useMediaTransport, widget } from "@weaver/sdk";
+export default widget({ name: "Mapped fake", size: [160, 80] }, () => { const media = useMediaTransport(); return <button onPress={() => void media.play()}><text>Play</text></button>; });
+`);
+    const customMapping = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(customMapping.status, 1);
+    assert.match(customMapping.stderr, /useMediaTransport\(\) requires capabilities: \["media-transport"\]/);
+
+    writeFileSync(join(widget, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
+        jsx: "react-jsx", jsxImportSource: "@weaver/sdk", baseUrl: ".",
+        paths: { "@weaver/sdk": [join(process.cwd(), "sdk/index.d.ts")], "@weaver/sdk/jsx-runtime": [join(process.cwd(), "sdk/jsx-runtime.d.ts")] },
+      },
+      include: ["**/*.ts", "**/*.tsx"],
+    }));
     writeFileSync(join(widget, "controls.ts"), `import { useMediaTransport } from "@weaver/sdk";
 export function controls() { return useMediaTransport(); }
 `);

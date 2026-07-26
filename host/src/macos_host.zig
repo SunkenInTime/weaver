@@ -7,7 +7,11 @@ const provider_protocol = @import("provider_protocol.zig");
 const system_providers = @import("providers_macos.zig");
 
 const posix = std.posix;
-const c = @cImport({ @cInclude("macos_system.h"); });
+const c = @cImport({
+    @cInclude("macos_system.h");
+    @cInclude("sys/socket.h");
+    @cInclude("sys/un.h");
+});
 
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes = supervisor.max_path_bytes;
@@ -135,7 +139,8 @@ const ProviderEndpoint = struct {
     allocator: std.mem.Allocator,
     path: []u8,
     listener: std.Io.net.Server,
-    thread: std.Thread,
+    thread: ?std.Thread = null,
+    expected_pid: posix.pid_t = 0,
     mutex: std.Io.Mutex = .init,
     stream: ?std.Io.net.Stream = null,
     command_queue: media_commands.Queue = .{},
@@ -150,19 +155,24 @@ const ProviderEndpoint = struct {
         errdefer listener.deinit(io);
         const self = try allocator.create(ProviderEndpoint);
         errdefer allocator.destroy(self);
-        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener, .thread = undefined };
-        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, acceptMain, .{self});
+        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener };
         return self;
+    }
+
+    fn bind(self: *ProviderEndpoint, expected_pid: posix.pid_t) !void {
+        self.expected_pid = expected_pid;
+        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, acceptMain, .{self});
     }
 
     fn deinit(self: *ProviderEndpoint) void {
         self.mutex.lockUncancelable(self.io);
         self.stopping = true;
+        self.command_queue.stop();
         if (self.stream) |stream| stream.close(self.io);
         self.stream = null;
         self.mutex.unlock(self.io);
         self.listener.deinit(self.io);
-        self.thread.join();
+        if (self.thread) |thread| thread.join();
         std.Io.Dir.cwd().deleteFile(self.io, self.path) catch {};
         const allocator = self.allocator;
         allocator.free(self.path);
@@ -170,32 +180,83 @@ const ProviderEndpoint = struct {
     }
 
     fn acceptMain(self: *ProviderEndpoint) void {
-        const stream = self.listener.accept(self.io) catch return;
-        self.mutex.lockUncancelable(self.io);
-        if (self.stopping) {
+        while (true) {
+            const stream = self.listener.accept(self.io) catch return;
+            if (peerPid(stream) != self.expected_pid) {
+                std.log.warn(
+                    "rejecting provider socket client pid={?}; expected widget pid={d}",
+                    .{ peerPid(stream), self.expected_pid },
+                );
+                stream.close(self.io);
+                continue;
+            }
+            self.mutex.lockUncancelable(self.io);
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                stream.close(self.io);
+                return;
+            }
+            self.stream = stream;
             self.mutex.unlock(self.io);
-            stream.close(self.io);
-            return;
-        }
-        self.stream = stream;
-        self.mutex.unlock(self.io);
 
-        var read_buffer: [media_commands.max_line_bytes * 2]u8 = undefined;
-        var reader = stream.reader(self.io, &read_buffer);
-        while (reader.interface.takeDelimiter('\n') catch {
-            self.command_queue.malformed.store(true, .release);
-            return;
-        }) |line| self.command_queue.pushLine(line);
+            var reader_buffer: [512]u8 = undefined;
+            var reader = stream.reader(self.io, &reader_buffer);
+            var framer: media_commands.Framer = .{};
+            var chunk: [512]u8 = undefined;
+            while (true) {
+                const read = reader.interface.readSliceShort(&chunk) catch {
+                    framer.finish(&self.command_queue);
+                    return;
+                };
+                if (read == 0) {
+                    framer.finish(&self.command_queue);
+                    return;
+                }
+                if (!framer.feed(&self.command_queue, chunk[0..read])) return;
+            }
+        }
+    }
+
+    fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
+        stream.close(self.io);
+        self.stream = null;
     }
 
     pub fn write(self: *ProviderEndpoint, bytes: []const u8) bool {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         const stream = self.stream orelse return false;
-        var buffer: [8192]u8 = undefined;
-        var writer = stream.writer(self.io, &buffer);
-        writer.interface.writeAll(bytes) catch return false;
-        writer.interface.flush() catch return false;
+        const started_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds;
+        var offset: usize = 0;
+        while (offset < bytes.len) {
+            const sent = c.send(
+                stream.socket.handle,
+                bytes.ptr + offset,
+                bytes.len - offset,
+                c.MSG_DONTWAIT | c.MSG_NOSIGNAL,
+            );
+            if (sent > 0) {
+                offset += @intCast(sent);
+                continue;
+            }
+            switch (posix.errno(sent)) {
+                .INTR => continue,
+                .AGAIN => {},
+                else => {
+                    self.failStreamLocked(stream);
+                    return false;
+                },
+            }
+            const elapsed_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns;
+            if (elapsed_ns >= std.time.ns_per_s) {
+                self.failStreamLocked(stream);
+                return false;
+            }
+            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch {
+                self.failStreamLocked(stream);
+                return false;
+            };
+        }
         return true;
     }
 
@@ -415,6 +476,7 @@ const Host = struct {
             .pgid = 0,
         });
         slot.platform.process = child.id.?;
+        if (slot.platform.endpoint) |endpoint| try endpoint.bind(slot.platform.process.?);
         errdefer self.stopSlot(slot, false);
         try self.writeChildMarker(slot.platform.process.?);
         slot.platform.exit_code = null;
@@ -621,6 +683,19 @@ const Host = struct {
         cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
     }
 };
+
+fn peerPid(stream: std.Io.net.Stream) ?posix.pid_t {
+    var pid: c.pid_t = 0;
+    var length: c.socklen_t = @sizeOf(c.pid_t);
+    if (c.getsockopt(
+        stream.socket.handle,
+        c.SOL_LOCAL,
+        c.LOCAL_PEERPID,
+        &pid,
+        &length,
+    ) != 0) return null;
+    return pid;
+}
 
 pub fn main(init: std.process.Init) void {
     run(init) catch |err| {
@@ -862,4 +937,42 @@ test "runtime socket root is short, per-user, and data-root-specific" {
     try std.testing.expect(std.mem.startsWith(u8, first, "/tmp/weaver-"));
     try std.testing.expect(first.len + "/widget-ffffffffffffffffffffffffffffffff.sock".len <= std.Io.net.UnixAddress.max_len);
     try std.testing.expect(!std.mem.eql(u8, first, second));
+}
+
+test "provider socket peer pid rejects a same-user hijacker pid" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-peer-test-{d}.sock", .{posix.system.getpid()});
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid() + 1);
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    defer stream.close(std.testing.io);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(50), .awake);
+    endpoint.mutex.lockUncancelable(std.testing.io);
+    defer endpoint.mutex.unlock(std.testing.io);
+    try std.testing.expect(endpoint.stream == null);
+}
+
+test "provider socket discards an unterminated command at EOF" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-eof-test-{d}.sock", .{posix.system.getpid()});
+    var endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid());
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    {
+        defer stream.close(std.testing.io);
+        var write_buffer: [256]u8 = undefined;
+        var writer = stream.writer(std.testing.io, &write_buffer);
+        try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"play\",\"id\":1}");
+        try writer.interface.flush();
+    }
+    for (0..100) |_| {
+        if (endpoint.command_queue.malformed.load(.acquire)) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(endpoint.command_queue.malformed.load(.acquire));
+    try std.testing.expect(endpoint.takeCommand() == null);
 }

@@ -27,6 +27,7 @@ pub const Client = struct {
     connected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     disconnected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     next_command_id: u64 = 1,
+    wake: ?*const fn () void = null,
 
     pub fn init(self: *Client, io: std.Io, endpoint: ?[]const u8) !void {
         const path = endpoint orelse return;
@@ -56,6 +57,18 @@ pub const Client = struct {
 
     pub fn takeAck(self: *Client) ?protocol.Ack {
         return self.queues.takeAck();
+    }
+
+    pub fn registerAck(self: *Client, id: u64) bool {
+        return self.queues.registerAck(id);
+    }
+
+    pub fn unregisterAck(self: *Client, id: u64) void {
+        self.queues.unregisterAck(id);
+    }
+
+    pub fn setWake(self: *Client, wake: *const fn () void) void {
+        self.wake = wake;
     }
 
     pub fn isAvailable(self: *const Client) bool {
@@ -104,14 +117,25 @@ pub const Client = struct {
         defer {
             self.connected.store(0, .release);
             self.disconnected.store(1, .release);
+            if (self.wake) |wake| wake();
         }
         const stream = self.stream orelse return;
-        var buffer: [protocol.frame_line_capacity * 2]u8 = undefined;
-        var reader = stream.reader(self.io, &buffer);
-        while (reader.interface.takeDelimiter('\n') catch {
-            self.queues.ack_protocol_failed.store(1, .release);
-            return;
-        }) |line| self.queues.routeLine(line);
+        var reader_buffer: [4096]u8 = undefined;
+        var reader = stream.reader(self.io, &reader_buffer);
+        var framer: protocol.Framer = .{};
+        var chunk: [4096]u8 = undefined;
+        while (true) {
+            const read = reader.interface.readSliceShort(&chunk) catch {
+                framer.finish(&self.queues);
+                return;
+            };
+            if (read == 0) {
+                framer.finish(&self.queues);
+                return;
+            }
+            if (!framer.feed(&self.queues, chunk[0..read])) return;
+            if (self.wake) |wake| wake();
+        }
     }
 };
 
@@ -157,4 +181,39 @@ test "Unix provider transport frames lines and bounds its queue" {
         try std.testing.expectEqualStrings(expected, client.take(&output).?);
     }
     try std.testing.expect(client.take(&output) == null);
+}
+
+test "Unix provider transport rejects an unterminated ack at EOF" {
+    const Endpoint = struct {
+        io: std.Io,
+        listener: std.Io.net.Server,
+
+        fn run(self: *@This()) void {
+            const stream = self.listener.accept(self.io) catch return;
+            defer stream.close(self.io);
+            var buffer: [64]u8 = undefined;
+            var writer = stream.writer(self.io, &buffer);
+            writer.interface.writeAll("{\"ack\":7,\"ok\":true}") catch return;
+            writer.interface.flush() catch {};
+        }
+    };
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-eof-test-{d}.sock", .{std.posix.system.getpid()});
+    std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    const address = try std.Io.net.UnixAddress.init(path);
+    var endpoint: Endpoint = .{ .io = std.testing.io, .listener = try address.listen(std.testing.io, .{}) };
+    defer endpoint.listener.deinit(std.testing.io);
+    const server_thread = try std.Thread.spawn(.{}, Endpoint.run, .{&endpoint});
+    defer server_thread.join();
+    var client: Client = .{};
+    try client.init(std.testing.io, path);
+    defer client.deinit();
+    try std.testing.expect(client.registerAck(7));
+    for (0..100) |_| {
+        if (client.isDisconnected()) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(client.protocolFailed());
+    try std.testing.expect(client.takeAck() == null);
 }

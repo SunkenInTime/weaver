@@ -1177,16 +1177,35 @@ function validateMediaTransportCapability(project: SourceProject, errors: string
   const configRead = ts.readConfigFile(configPath, (path) => readFileSync(path, "utf8"));
   if (configRead.error) return; // The ordinary TypeScript invocation reports it.
   const parsed = ts.parseJsonConfigFileContent(configRead.config, ts.sys, project.directory, undefined, configPath);
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options });
-  const checker = program.getTypeChecker();
   const sdkDirectory = join(repoRoot, "sdk");
+  // Bundling owns these two specifiers regardless of widget-authored paths.
+  // Check must compile the same graph or a local compatible declaration can
+  // hide capability use that the bundle later binds to Weaver's real SDK.
+  const options: ts.CompilerOptions = {
+    ...parsed.options,
+    paths: {
+      ...parsed.options.paths,
+      "@weaver/sdk": [join(sdkDirectory, "index.d.ts")],
+      "@weaver/sdk/jsx-runtime": [join(sdkDirectory, "jsx-runtime.d.ts")],
+    },
+  };
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options });
+  const checker = program.getTypeChecker();
 
-  const resolvedSymbol = (node: ts.Node): ts.Symbol | undefined => {
+  const resolvedSymbol = (node: ts.Node, seen = new Set<ts.Symbol>()): ts.Symbol | undefined => {
     let symbol = checker.getSymbolAtLocation(node);
-    const seen = new Set<ts.Symbol>();
     while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !seen.has(symbol)) {
       seen.add(symbol);
       symbol = checker.getAliasedSymbol(symbol);
+    }
+    if (!symbol || seen.has(symbol)) return symbol;
+    seen.add(symbol);
+    for (const declaration of symbol.declarations ?? []) {
+      if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) continue;
+      const initializer = declaration.initializer;
+      if (ts.isIdentifier(initializer) || ts.isPropertyAccessExpression(initializer)) {
+        return resolvedSymbol(initializer, seen);
+      }
     }
     return symbol;
   };

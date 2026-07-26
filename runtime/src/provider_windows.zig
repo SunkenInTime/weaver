@@ -32,6 +32,7 @@ pub const Client = struct {
     connected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     disconnected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     next_command_id: u64 = 1,
+    wake: ?*const fn () void = null,
 
     pub fn init(self: *Client, io: std.Io, pipe_name: ?[]const u8) !void {
         self.io = io;
@@ -87,6 +88,18 @@ pub const Client = struct {
 
     pub fn takeAck(self: *Client) ?protocol.Ack {
         return self.queues.takeAck();
+    }
+
+    pub fn registerAck(self: *Client, id: u64) bool {
+        return self.queues.registerAck(id);
+    }
+
+    pub fn unregisterAck(self: *Client, id: u64) void {
+        self.queues.unregisterAck(id);
+    }
+
+    pub fn setWake(self: *Client, wake: *const fn () void) void {
+        self.wake = wake;
     }
 
     pub fn isAvailable(self: *const Client) bool {
@@ -156,6 +169,7 @@ pub const Client = struct {
         defer {
             self.connected.store(0, .release);
             self.disconnected.store(1, .release);
+            if (self.wake) |wake| wake();
         }
         const event = win.CreateEventW(null, 0, 0, null) orelse return;
         defer _ = win.CloseHandle(event);
@@ -180,6 +194,7 @@ pub const Client = struct {
                 return;
             }
             if (!framer.feed(&self.queues, chunk[0..read])) return;
+            if (self.wake) |wake| wake();
         }
     }
 };

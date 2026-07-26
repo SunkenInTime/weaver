@@ -12,6 +12,12 @@ pub const Ack = struct {
     ok: bool,
 };
 
+const AckSlot = struct {
+    id: u64 = 0,
+    value: ?Ack = null,
+    delivered: bool = false,
+};
+
 const AckWire = struct {
     ack: u64,
     ok: bool,
@@ -42,10 +48,36 @@ pub const Queues = struct {
     frames: [frame_queue_capacity]FrameEntry = [_]FrameEntry{.{}} ** frame_queue_capacity,
     frame_head: usize = 0,
     frame_count: usize = 0,
-    acks: [ack_queue_capacity]Ack = undefined,
-    ack_head: usize = 0,
-    ack_count: usize = 0,
+    acks: [ack_queue_capacity]AckSlot = [_]AckSlot{.{}} ** ack_queue_capacity,
     ack_protocol_failed: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+    unknown_ack_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    /// Registration happens on the app loop before the command is written.
+    /// One slot per live command makes the lane structurally non-lossy: with
+    /// the frozen four-pending cap, a known acknowledgement always has exactly
+    /// one reserved destination.
+    pub fn registerAck(self: *Queues, id: u64) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (&self.acks) |*slot| {
+            if (slot.id == id) return false;
+            if (slot.id == 0) {
+                slot.* = .{ .id = id };
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pub fn unregisterAck(self: *Queues, id: u64) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (&self.acks) |*slot| {
+            if (slot.id != id) continue;
+            slot.* = .{};
+            return;
+        }
+    }
 
     pub fn routeLine(self: *Queues, line: []const u8) void {
         const envelope = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, line, .{}) catch {
@@ -71,13 +103,16 @@ pub const Queues = struct {
             }
             self.mutex.lock();
             defer self.mutex.unlock();
-            if (self.ack_count == self.acks.len) {
-                self.ack_protocol_failed.store(1, .release);
+            for (&self.acks) |*slot| {
+                if (slot.id != parsed.value.ack) continue;
+                if (slot.value != null or slot.delivered) {
+                    _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
+                    return;
+                }
+                slot.value = .{ .id = parsed.value.ack, .ok = parsed.value.ok };
                 return;
             }
-            const index = (self.ack_head + self.ack_count) % self.acks.len;
-            self.acks[index] = .{ .id = parsed.value.ack, .ok = parsed.value.ok };
-            self.ack_count += 1;
+            _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
             return;
         }
         self.pushFrame(line);
@@ -112,11 +147,13 @@ pub const Queues = struct {
     pub fn takeAck(self: *Queues) ?Ack {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.ack_count == 0) return null;
-        const result = self.acks[self.ack_head];
-        self.ack_head = (self.ack_head + 1) % self.acks.len;
-        self.ack_count -= 1;
-        return result;
+        for (&self.acks) |*slot| {
+            const result = slot.value orelse continue;
+            slot.value = null;
+            slot.delivered = true;
+            return result;
+        }
+        return null;
     }
 };
 
@@ -153,6 +190,7 @@ pub const Framer = struct {
 
 test "interleaved frames coalesce while four acks never drop" {
     var queues: Queues = .{};
+    for (1..5) |id| try std.testing.expect(queues.registerAck(id));
     queues.routeLine("{\"provider\":\"cpu\",\"value\":{\"percent\":1}}");
     queues.routeLine("{\"ack\":1,\"ok\":true}");
     queues.routeLine("{\"provider\":\"cpu\",\"value\":{\"percent\":2}}");
@@ -176,6 +214,29 @@ test "interleaved frames coalesce while four acks never drop" {
     }) |expected| try std.testing.expectEqualDeep(expected, queues.takeAck().?);
 }
 
+test "late acknowledgements cannot crowd out replacement command IDs" {
+    var queues: Queues = .{};
+    for (1..5) |id| try std.testing.expect(queues.registerAck(id));
+    for (1..5) |id| queues.unregisterAck(id);
+    for (5..9) |id| try std.testing.expect(queues.registerAck(id));
+    for (1..5) |id| {
+        var line: [64]u8 = undefined;
+        queues.routeLine(try std.fmt.bufPrint(&line, "{{\"ack\":{d},\"ok\":true}}", .{id}));
+    }
+    for (5..9) |id| {
+        var line: [64]u8 = undefined;
+        queues.routeLine(try std.fmt.bufPrint(&line, "{{\"ack\":{d},\"ok\":true}}", .{id}));
+    }
+    try std.testing.expectEqual(@as(u64, 4), queues.unknown_ack_count.load(.acquire));
+    for (5..9) |id| {
+        const ack = queues.takeAck().?;
+        try std.testing.expectEqual(@as(u64, id), ack.id);
+        queues.unregisterAck(ack.id);
+    }
+    try std.testing.expect(queues.takeAck() == null);
+    try std.testing.expectEqual(@as(u8, 0), queues.ack_protocol_failed.load(.acquire));
+}
+
 test "partial framing stays outside demux and malformed ack poisons only ack lane" {
     var queues: Queues = .{};
     queues.routeLine("{\"ack\":1}");
@@ -187,6 +248,7 @@ test "partial framing stays outside demux and malformed ack poisons only ack lan
 
 test "runtime framing demuxes interleaved lines split across reads" {
     var queues: Queues = .{};
+    try std.testing.expect(queues.registerAck(9));
     var framer: Framer = .{};
     try std.testing.expect(framer.feed(&queues, "{\"provider\":\"media\",\"value\":{}}\n{\"ack\":"));
     try std.testing.expect(framer.feed(&queues, "9,\"ok\":true}\n"));

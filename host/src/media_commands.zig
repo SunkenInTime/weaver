@@ -2,7 +2,11 @@ const std = @import("std");
 
 pub const max_line_bytes: usize = 256;
 pub const queue_capacity: usize = 8;
-pub const nack_capacity: usize = 8;
+/// Four live runtime requests plus the complete five-command rate-limit burst
+/// can require negative acknowledgements before the host loop next drains.
+/// Beyond this proven lane bound the reader applies backpressure; it never
+/// accepts another command until the pending nack has a reserved slot.
+pub const nack_capacity: usize = 4 + max_verbs_per_second;
 pub const max_safe_id: u64 = 9_007_199_254_740_991;
 pub const max_verbs_per_second: usize = 5;
 
@@ -69,27 +73,39 @@ pub const Queue = struct {
     nack_head: usize = 0,
     nack_count: usize = 0,
     malformed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn pushLine(self: *Queue, line: []const u8) void {
         const command = parse(line) catch {
             self.malformed.store(true, .release);
             return;
         };
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        if (self.command_count == self.commands.len) {
+        var spins: usize = 0;
+        while (true) {
+            self.mutex.lock();
+            if (self.stopping.load(.acquire)) {
+                self.mutex.unlock();
+                return;
+            }
+            if (self.command_count < self.commands.len) {
+                const index = (self.command_head + self.command_count) % self.commands.len;
+                self.commands[index] = command;
+                self.command_count += 1;
+                self.mutex.unlock();
+                return;
+            }
             if (self.nack_count < self.nacks.len) {
                 const index = (self.nack_head + self.nack_count) % self.nacks.len;
                 self.nacks[index] = command.id;
                 self.nack_count += 1;
-            } else {
-                self.malformed.store(true, .release);
+                self.mutex.unlock();
+                return;
             }
-            return;
+            self.mutex.unlock();
+            spins += 1;
+            if (spins % 1024 == 0) std.Thread.yield() catch {};
+            std.atomic.spinLoopHint();
         }
-        const index = (self.command_head + self.command_count) % self.commands.len;
-        self.commands[index] = command;
-        self.command_count += 1;
     }
 
     pub fn take(self: *Queue) ?Command {
@@ -110,6 +126,10 @@ pub const Queue = struct {
         self.nack_head = (self.nack_head + 1) % self.nacks.len;
         self.nack_count -= 1;
         return result;
+    }
+
+    pub fn stop(self: *Queue) void {
+        self.stopping.store(true, .release);
     }
 };
 
@@ -206,6 +226,39 @@ test "command queue keeps FIFO and overflow IDs enter the nack lane" {
     for (1..queue_capacity + 1) |id| try std.testing.expectEqual(id, queue.take().?.id);
     try std.testing.expect(queue.take() == null);
     try std.testing.expectEqual(@as(u64, queue_capacity + 1), queue.takeNack().?);
+}
+
+test "host command queue accounts for every hostile burst command" {
+    const Producer = struct {
+        queue: *Queue,
+        done: *std.atomic.Value(bool),
+
+        fn run(self: @This()) void {
+            var line_buffer: [max_line_bytes]u8 = undefined;
+            for (1..65) |id| {
+                const line = std.fmt.bufPrint(
+                    &line_buffer,
+                    "{{\"command\":\"media\",\"verb\":\"play\",\"id\":{d}}}",
+                    .{id},
+                ) catch unreachable;
+                self.queue.pushLine(line);
+            }
+            self.done.store(true, .release);
+        }
+    };
+    var queue: Queue = .{};
+    var done = std.atomic.Value(bool).init(false);
+    const producer = try std.Thread.spawn(.{}, Producer.run, .{Producer{ .queue = &queue, .done = &done }});
+    var accounted: usize = 0;
+    while (!done.load(.acquire) or accounted < 64) {
+        while (queue.take()) |_| accounted += 1;
+        while (queue.takeNack()) |_| accounted += 1;
+        if (accounted == 64 and done.load(.acquire)) break;
+        std.Thread.yield() catch {};
+    }
+    producer.join();
+    try std.testing.expectEqual(@as(usize, 64), accounted);
+    try std.testing.expect(!queue.malformed.load(.acquire));
 }
 
 test "host command framing preserves partial and adjacent lines" {

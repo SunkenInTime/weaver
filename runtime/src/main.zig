@@ -43,6 +43,8 @@ pub const Model = struct {
     fetch_poll_armed: bool = false,
     provider_poll_armed: bool = false,
     provider_poll_interval_ms: u64 = 1000,
+    has_provider_subscriptions: bool = false,
+    media_deadline_ms: u64 = 0,
     provider_frames: u64 = 0,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
@@ -70,6 +72,7 @@ const max_images: usize = 16;
 const max_image_load_attempts: u8 = 3;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
+const media_deadline_key: u64 = 0x776d_6465_6164;
 const geometry_save_key: u64 = 0x7767_656f_6d65;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
 const ImageState = struct {
@@ -89,7 +92,7 @@ pub const Msg = union(enum) {
     right_press: native_sdk.canvas.WidgetPressEvent,
     slider: tree_mod.NodeId,
     canvas_frame: u64,
-    dev_reload,
+    external_wake: struct { provider: bool, dev_reload: bool },
     frame_moved: geometry_mod.Saved,
 };
 
@@ -103,8 +106,9 @@ var logged_present_path: bool = false;
 var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
 var requested_software_backend: bool = false;
 var diagnostic_runtime: ?*native_sdk.Runtime = null;
-var dev_reload_runtime = std.atomic.Value(usize).init(0);
+var wake_runtime = std.atomic.Value(usize).init(0);
 var dev_reload_pending = std.atomic.Value(bool).init(false);
+var provider_wake_pending = std.atomic.Value(bool).init(false);
 var backend_status_io: ?std.Io = null;
 var backend_status_path: ?[]const u8 = null;
 
@@ -145,6 +149,14 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             if (timer.key == provider_poll_key) {
                 drainProviderFrames(model, effects) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
+                };
+                syncTimers(model, effects);
+                return;
+            }
+            if (timer.key == media_deadline_key) {
+                model.media_deadline_ms = 0;
+                drainProviderFrames(model, effects) catch |err| {
+                    std.log.err("widget media deadline dispatch failed: {s}", .{@errorName(err)});
                 };
                 syncTimers(model, effects);
                 return;
@@ -208,10 +220,18 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
             };
             syncTimers(model, effects);
         },
-        .dev_reload => {
-            reloadIfChanged(model, effects) catch |err| {
-                std.log.err("dev hot swap failed; keeping previous bundle: {s}", .{@errorName(err)});
-            };
+        .external_wake => |wake| {
+            if (wake.provider) {
+                drainProviderFrames(model, effects) catch |err| {
+                    std.log.err("widget provider wake dispatch failed: {s}", .{@errorName(err)});
+                };
+            }
+            if (wake.dev_reload) {
+                reloadIfChanged(model, effects) catch |err| {
+                    std.log.err("dev hot swap failed; keeping previous bundle: {s}", .{@errorName(err)});
+                };
+            }
+            syncTimers(model, effects);
         },
     }
 }
@@ -407,7 +427,11 @@ fn syncTimers(model: *Model, effects: *Effects) void {
             break;
         }
     };
-    const needs_provider_timer = engine.hasHostProvider() and !(model.provider_poll_interval_ms <= 33 and has_fast_clock);
+    const needs_provider_timer = providerTimerNeeded(
+        model.has_provider_subscriptions,
+        model.provider_poll_interval_ms,
+        has_fast_clock,
+    );
     // Audio providers need a low-latency drain while a canvas is active, but
     // silence deliberately stops that clock. Polling the empty pipe ring at
     // 30 Hz was the measured 3.75-4.48% hosted-idle residual. A 1 Hz resume
@@ -426,6 +450,30 @@ fn syncTimers(model: *Model, effects: *Effects) void {
         effects.cancelTimer(provider_poll_key);
         model.provider_poll_armed = false;
     }
+    const deadline_ms = engine.nextMediaDeadlineMs();
+    if (deadline_ms) |deadline| {
+        if (model.media_deadline_ms != deadline) {
+            const now_ms = model.provider.nowMilliseconds();
+            effects.startTimer(.{
+                .key = media_deadline_key,
+                .interval_ms = mediaDeadlineDelay(deadline, now_ms),
+                .mode = .one_shot,
+                .on_fire = Effects.timerMsg(.timer),
+            });
+            model.media_deadline_ms = deadline;
+        }
+    } else if (model.media_deadline_ms != 0) {
+        effects.cancelTimer(media_deadline_key);
+        model.media_deadline_ms = 0;
+    }
+}
+
+fn providerTimerNeeded(has_subscriptions: bool, poll_interval_ms: u64, has_fast_clock: bool) bool {
+    return has_subscriptions and !(poll_interval_ms <= 33 and has_fast_clock);
+}
+
+fn mediaDeadlineDelay(deadline_ms: u64, now_ms: u64) u64 {
+    return @max(deadline_ms -| now_ms, 1);
 }
 
 /// Stable global keys map runtime layout feedback back to retained nodes:
@@ -509,11 +557,10 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
 /// therefore hot-swap without borrowing a GPU completion from animation,
 /// input, or resize.
 fn onFrameRequested(_: *const Model) ?Msg {
-    return takePendingDevReload();
-}
-
-fn takePendingDevReload() ?Msg {
-    return if (dev_reload_pending.swap(false, .acq_rel)) .dev_reload else null;
+    const provider = provider_wake_pending.swap(false, .acq_rel);
+    const dev = dev_reload_pending.swap(false, .acq_rel);
+    if (!provider and !dev) return null;
+    return .{ .external_wake = .{ .provider = provider, .dev_reload = dev } };
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
@@ -1104,6 +1151,8 @@ pub fn main(init: std.process.Init) !void {
         init.environ_map.get("WEAVER_HOST_ENDPOINT"),
     ));
     defer app_state.model.provider.deinit();
+    app_state.model.provider.setWake(notifyProviderWake);
+    app_state.model.has_provider_subscriptions = loaded.manifest.subscribe.len != 0;
     app_state.model.media_transport_enabled = for (loaded.manifest.capabilities) |capability| {
         if (std.mem.eql(u8, capability, "media-transport")) break true;
     } else false;
@@ -1135,9 +1184,12 @@ pub fn main(init: std.process.Init) !void {
     if (dev) try dev_reload_server.start(init.io, dev_signal_path, notifyDevReload);
     defer if (dev) {
         dev_reload_server.deinit();
-        dev_reload_runtime.store(0, .release);
         dev_reload_pending.store(false, .release);
     };
+    defer {
+        wake_runtime.store(0, .release);
+        provider_wake_pending.store(false, .release);
+    }
     var app = app_state.app();
     app.start_fn = startRendererDiagnostics;
     try runner.runWithOptions(app, .{
@@ -1209,8 +1261,10 @@ fn declaredGpuBackend(render_backend: []const u8, force_software: bool) native_s
 /// selection itself belongs to Native SDK and follows the declared backend.
 fn startRendererDiagnostics(_: *anyopaque, runtime: *native_sdk.Runtime) !void {
     diagnostic_runtime = runtime;
-    dev_reload_runtime.store(@intFromPtr(runtime), .release);
-    if (dev_reload_pending.load(.acquire)) try runtime.options.platform.services.requestFrame();
+    wake_runtime.store(@intFromPtr(runtime), .release);
+    if (dev_reload_pending.load(.acquire) or provider_wake_pending.load(.acquire)) {
+        try runtime.options.platform.services.requestFrame();
+    }
     if (!requested_software_backend) {
         std.log.info("widget renderer selected={s} presenter=host", .{if (@import("builtin").os.tag == .macos) "metal-composite" else "gpu"});
         return;
@@ -1220,11 +1274,20 @@ fn startRendererDiagnostics(_: *anyopaque, runtime: *native_sdk.Runtime) !void {
 
 fn notifyDevReload() void {
     dev_reload_pending.store(true, .release);
-    const runtime_address = dev_reload_runtime.load(.acquire);
+    requestExternalWake("dev hot-swap");
+}
+
+fn notifyProviderWake() void {
+    provider_wake_pending.store(true, .release);
+    requestExternalWake("provider");
+}
+
+fn requestExternalWake(label: []const u8) void {
+    const runtime_address = wake_runtime.load(.acquire);
     if (runtime_address == 0) return;
     const runtime: *native_sdk.Runtime = @ptrFromInt(runtime_address);
     runtime.options.platform.services.requestFrame() catch |err| {
-        std.log.err("dev hot-swap wake failed: {s}", .{@errorName(err)});
+        std.log.err("{s} wake failed: {s}", .{ label, @errorName(err) });
     };
 }
 
@@ -1289,7 +1352,12 @@ test "dev reload crosses requestFrame into the frame-requested hook exactly once
         fn frameRequested(context: *anyopaque, _: *native_sdk.Runtime) anyerror!void {
             const self: *@This() = @ptrCast(@alignCast(context));
             if (onFrameRequested(&self.model)) |msg| {
-                if (msg == .dev_reload) self.reloads += 1;
+                switch (msg) {
+                    .external_wake => |wake| if (wake.dev_reload) {
+                        self.reloads += 1;
+                    },
+                    else => {},
+                }
             }
         }
     };
@@ -1301,10 +1369,12 @@ test "dev reload crosses requestFrame into the frame-requested hook exactly once
     try harness.start(app);
 
     dev_reload_pending.store(false, .release);
-    dev_reload_runtime.store(@intFromPtr(&harness.runtime), .release);
+    provider_wake_pending.store(false, .release);
+    wake_runtime.store(@intFromPtr(&harness.runtime), .release);
     defer {
-        dev_reload_runtime.store(0, .release);
+        wake_runtime.store(0, .release);
         dev_reload_pending.store(false, .release);
+        provider_wake_pending.store(false, .release);
     }
     const notifier = try std.Thread.spawn(.{}, notifyDevReload, .{});
     notifier.join();
@@ -1315,6 +1385,17 @@ test "dev reload crosses requestFrame into the frame-requested hook exactly once
     try harness.runtime.dispatchPlatformEvent(app, frame_event);
     try std.testing.expectEqual(@as(usize, 1), app_state.reloads);
     try std.testing.expect(onFrameRequested(&app_state.model) == null);
+}
+
+test "transport-only capability arms no repeating provider timer" {
+    try std.testing.expect(!providerTimerNeeded(false, 1000, false));
+    try std.testing.expect(providerTimerNeeded(true, 1000, false));
+    try std.testing.expect(!providerTimerNeeded(true, 33, true));
+}
+
+test "media command deadline one-shot is exactly three seconds" {
+    try std.testing.expectEqual(@as(u64, 3000), mediaDeadlineDelay(3100, 100));
+    try std.testing.expectEqual(@as(u64, 1), mediaDeadlineDelay(3100, 3100));
 }
 
 test "corner radius projection preserves authored values and maps retained unset in-band" {

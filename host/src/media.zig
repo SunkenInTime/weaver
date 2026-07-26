@@ -139,9 +139,12 @@ pub const Provider = struct {
         return frame;
     }
 
-    pub fn command(self: *Provider, verb: media_commands.Verb, seek_ms: ?u64, now_ms: u64) bool {
-        if (self.session == null and now_ms >= self.next_open_ms) self.open(now_ms);
-        const session = self.session orelse return false;
+    pub const CommandOutcome = enum { accepted, declined, channel_failure };
+
+    /// Commands acquire the current SMTC session at dispatch time on a
+    /// dedicated worker. Transport capability alone therefore never opens or
+    /// polls the subscription provider.
+    pub fn command(_: *Provider, verb: media_commands.Verb, seek_ms: ?u64) CommandOutcome {
         const native_verb: c_int = switch (verb) {
             .play => native.WEAVER_MEDIA_COMMAND_PLAY,
             .pause => native.WEAVER_MEDIA_COMMAND_PAUSE,
@@ -149,7 +152,8 @@ pub const Provider = struct {
             .previous => native.WEAVER_MEDIA_COMMAND_PREVIOUS,
             .seek => native.WEAVER_MEDIA_COMMAND_SEEK,
         };
-        return native.weaver_media_command(session, native_verb, seek_ms orelse 0) != 0;
+        const result = native.weaver_media_command(native_verb, seek_ms orelse 0, 2500);
+        return if (result > 0) .accepted else if (result == 0) .declined else .channel_failure;
     }
 
     fn open(self: *Provider, now_ms: u64) void {

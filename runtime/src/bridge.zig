@@ -287,6 +287,10 @@ fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
         error.PendingLimit => fail(js, "MediaCommandPendingLimit"),
         else => fail(js, "MalformedMediaCommand"),
     };
+    if (!bridge_state.provider.registerAck(id)) {
+        bridge_state.media_tracker.remove(index);
+        return fail(js, "MediaCommandPendingLimit");
+    }
     var command_buffer: [256]u8 = undefined;
     const command = if (wire.seekMs) |seek_ms|
         std.fmt.bufPrint(
@@ -294,6 +298,7 @@ fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
             "{{\"command\":\"media\",\"verb\":\"{s}\",\"seekMs\":{d},\"id\":{d}}}",
             .{ wire.verb, seek_ms, id },
         ) catch {
+            bridge_state.provider.unregisterAck(id);
             bridge_state.media_tracker.remove(index);
             return fail(js, "MalformedMediaCommand");
         }
@@ -303,10 +308,12 @@ fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
             "{{\"command\":\"media\",\"verb\":\"{s}\",\"id\":{d}}}",
             .{ wire.verb, id },
         ) catch {
+            bridge_state.provider.unregisterAck(id);
             bridge_state.media_tracker.remove(index);
             return fail(js, "MalformedMediaCommand");
         };
     bridge_state.provider.send(command) catch {
+        bridge_state.provider.unregisterAck(id);
         bridge_state.media_tracker.remove(index);
         return fail(js, "MediaChannelUnavailable");
     };
@@ -804,7 +811,9 @@ pub fn dispatchProvider(ctx: *c.JSContext, bridge_state: *State, line: []const u
 }
 
 fn settleMedia(ctx: *c.JSContext, bridge_state: *State, index: usize, ok: ?bool, error_name: ?[]const u8) bool {
-    if (bridge_state.media_tracker.slots[index].id == 0) return true;
+    const id = bridge_state.media_tracker.slots[index].id;
+    if (id == 0) return true;
+    bridge_state.provider.unregisterAck(id);
     bridge_state.media_tracker.remove(index);
     const callback = bridge_state.media_callbacks[index];
     bridge_state.media_callbacks[index] = qjs.undefinedValue();
@@ -845,6 +854,10 @@ pub fn dispatchMediaAcks(ctx: *c.JSContext, bridge_state: *State) bool {
             !settleMedia(ctx, bridge_state, index, null, "MediaCommandTimeout")) return false;
     }
     return true;
+}
+
+pub fn nextMediaDeadlineMs(bridge_state: *const State) ?u64 {
+    return bridge_state.media_tracker.nextDeadline();
 }
 
 fn log(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {

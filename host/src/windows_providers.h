@@ -51,7 +51,7 @@ typedef struct WeaverMediaArtwork {
 WeaverMediaSession *weaver_media_create(void);
 void weaver_media_destroy(WeaverMediaSession *session);
 int weaver_media_poll(WeaverMediaSession *session, WeaverMediaState *state, WeaverMediaArtwork *artwork);
-int weaver_media_command(WeaverMediaSession *session, int command, uint64_t seek_ms);
+int weaver_media_command(int command, uint64_t seek_ms, uint32_t timeout_ms);
 void weaver_media_artwork_release(WeaverMediaArtwork *artwork);
 void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]);
 int weaver_media_test_dirty_coalescing(void);

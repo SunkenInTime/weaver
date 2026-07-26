@@ -537,20 +537,41 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
     }
 }
 
-extern "C" int weaver_media_command(WeaverMediaSession *state, int command, uint64_t seek_ms) {
-    if (!state || !state->manager) return 0;
+extern "C" int weaver_media_command(int command, uint64_t seek_ms, uint32_t timeout_ms) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     try {
-        const auto session = state->manager.GetCurrentSession();
+        const auto remaining = [&]() {
+            return std::max(
+                std::chrono::milliseconds(0),
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()));
+        };
+        auto manager_operation = winrt::Windows::Media::Control::
+            GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
+        if (manager_operation.wait_for(remaining()) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            manager_operation.Cancel();
+            return -1;
+        }
+        const auto manager = manager_operation.GetResults();
+        if (!manager) return -1;
+        const auto session = manager.GetCurrentSession();
         if (!session) return 0;
+        const auto await_command = [&](const auto &operation) -> int {
+            if (remaining().count() <= 0 ||
+                operation.wait_for(remaining()) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+                operation.Cancel();
+                return -1;
+            }
+            return operation.GetResults() ? 1 : 0;
+        };
         switch (command) {
             case WEAVER_MEDIA_COMMAND_PLAY:
-                return session.TryPlayAsync().get() ? 1 : 0;
+                return await_command(session.TryPlayAsync());
             case WEAVER_MEDIA_COMMAND_PAUSE:
-                return session.TryPauseAsync().get() ? 1 : 0;
+                return await_command(session.TryPauseAsync());
             case WEAVER_MEDIA_COMMAND_NEXT:
-                return session.TrySkipNextAsync().get() ? 1 : 0;
+                return await_command(session.TrySkipNextAsync());
             case WEAVER_MEDIA_COMMAND_PREVIOUS:
-                return session.TrySkipPreviousAsync().get() ? 1 : 0;
+                return await_command(session.TrySkipPreviousAsync());
             case WEAVER_MEDIA_COMMAND_SEEK: {
                 const auto timeline = session.GetTimelineProperties();
                 const int64_t duration_ms = std::max<int64_t>(
@@ -559,13 +580,13 @@ extern "C" int weaver_media_command(WeaverMediaSession *state, int command, uint
                         timeline.EndTime() - timeline.StartTime()).count());
                 if (duration_ms > 0) seek_ms = std::min<uint64_t>(seek_ms, static_cast<uint64_t>(duration_ms));
                 if (seek_ms > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / 10000)) return 0;
-                return session.TryChangePlaybackPositionAsync(static_cast<int64_t>(seek_ms * 10000)).get() ? 1 : 0;
+                return await_command(session.TryChangePlaybackPositionAsync(static_cast<int64_t>(seek_ms * 10000)));
             }
             default:
                 return 0;
         }
     } catch (...) {
-        return 0;
+        return -1;
     }
 }
 

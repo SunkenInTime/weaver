@@ -37,6 +37,15 @@ pub const Tracker = struct {
     pub fn remove(self: *Tracker, index: usize) void {
         self.slots[index] = .{};
     }
+
+    pub fn nextDeadline(self: *const Tracker) ?u64 {
+        var earliest: ?u64 = null;
+        for (self.slots) |slot| {
+            if (slot.id == 0) continue;
+            if (earliest == null or slot.deadline_ms < earliest.?) earliest = slot.deadline_ms;
+        }
+        return earliest;
+    }
 };
 
 test "pending tracker caps at four and never reuses a live id" {
@@ -53,6 +62,7 @@ test "ack lookup timeout and fail-all removal settle every slot exactly once" {
     var tracker: Tracker = .{};
     const first = try tracker.add(11, 100);
     const second = try tracker.add(12, 100);
+    try std.testing.expectEqual(@as(u64, 3100), tracker.nextDeadline().?);
     try std.testing.expectEqual(first, tracker.indexOf(11).?);
     try std.testing.expect(!tracker.expired(first, 3099));
     try std.testing.expect(tracker.expired(first, 3100));
