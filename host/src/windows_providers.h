@@ -32,10 +32,25 @@ typedef struct WeaverMediaState {
 
 typedef struct WeaverMediaSession WeaverMediaSession;
 
+typedef struct WeaverMediaArtwork {
+    uint8_t *bytes;
+    size_t length;
+    int changed;
+    int too_large;
+    int refresh_failed;
+    int session_changed;
+    int unavailable;
+} WeaverMediaArtwork;
+
 WeaverMediaSession *weaver_media_create(void);
 void weaver_media_destroy(WeaverMediaSession *session);
-int weaver_media_poll(WeaverMediaSession *session, WeaverMediaState *state);
+int weaver_media_poll(WeaverMediaSession *session, WeaverMediaState *state, WeaverMediaArtwork *artwork);
+void weaver_media_artwork_release(WeaverMediaArtwork *artwork);
 void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]);
+int weaver_media_test_dirty_coalescing(void);
+int weaver_media_test_event_lifetime(void);
+int weaver_media_test_refresh_retry(void);
+int weaver_media_test_refresh_failure_bound(void);
 
 #ifdef __cplusplus
 }

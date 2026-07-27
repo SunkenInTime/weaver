@@ -4,6 +4,7 @@ const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const geometry_mod = @import("geometry.zig");
 const dev_reload = @import("dev_reload.zig");
+const image_paths = @import("image_paths.zig");
 const js_engine = @import("js_engine.zig");
 const manifest_mod = @import("manifest.zig");
 const provider_mod = @import("provider.zig");
@@ -46,6 +47,11 @@ pub const Model = struct {
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
+    image_states: [max_images]ImageState = [_]ImageState{.{}} ** max_images,
+    image_state_count: usize = 0,
+    image_tree_generation: u64 = 0,
+    image_epoch: u64 = 1,
+    image_resolver: ?*const image_paths.Resolver = null,
     geometry: ?*const geometry_mod.Store = null,
     fonts: []const manifest_mod.Font = &.{},
     /// Last origin we consider settled (launch placement or the last
@@ -60,10 +66,20 @@ fn bridgeTimerCapacity() usize {
     return @import("bridge.zig").max_timers;
 }
 const max_images: usize = 16;
+const max_image_load_attempts: u8 = 3;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
 const geometry_save_key: u64 = 0x7767_656f_6d65;
 const ImageAsset = struct { id: u64 = 0, bytes: []const u8 = &.{} };
+const ImageState = struct {
+    id: tree_mod.NodeId = 0,
+    lifetime: u64 = 0,
+    epoch: u64 = 0,
+    observed: ?[:0]u8 = null,
+    observed_valid: bool = false,
+    load_failure_count: u8 = 0,
+    registered: bool = false,
+};
 
 pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
@@ -95,7 +111,9 @@ fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
         _ = effects.registerImageBytes(image.id, image.bytes) catch |err| {
             std.log.err("widget image {d} failed to decode/register: {s}", .{ image.id, @errorName(err) });
+            continue;
         };
+        if (findImageState(model, @intCast(image.id))) |state| state.registered = true;
     }
     syncTimers(model, effects);
 }
@@ -103,6 +121,9 @@ fn initEffects(model: *Model, effects: *Effects) void {
 /// One SDK timer delivery is one JS batch. All retained-tree ops complete
 /// before update returns, after which UiApp derives and presents once.
 fn update(model: *Model, msg: Msg, effects: *Effects) void {
+    defer synchronizeImages(model, effects) catch |err| {
+        std.log.err("widget image synchronization failed: {s}", .{@errorName(err)});
+    };
     switch (msg) {
         .timer => |timer| {
             if (timer.outcome != .fired) {
@@ -121,14 +142,14 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 return;
             }
             if (timer.key == provider_poll_key) {
-                drainProviderFrames(model) catch |err| {
+                drainProviderFrames(model, effects) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
                 syncTimers(model, effects);
                 return;
             }
             if (model.provider_poll_interval_ms <= 33) {
-                drainProviderFrames(model) catch |err| {
+                drainProviderFrames(model, effects) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
             }
@@ -177,7 +198,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         },
         .canvas_frame => |timestamp_ns| {
             if (model.provider_poll_interval_ms <= 33) {
-                drainProviderFrames(model) catch |err| {
+                drainProviderFrames(model, effects) catch |err| {
                     std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
                 };
             }
@@ -267,7 +288,7 @@ fn onWindowFrame(event: native_sdk.runtime.WindowFrameEvent) ?Msg {
     } };
 }
 
-fn drainProviderFrames(model: *Model) !void {
+fn drainProviderFrames(model: *Model, _: *Effects) !void {
     const count = try (model.engine orelse return).drainProviders();
     if (count == 0) return;
     model.provider_frames += count;
@@ -301,6 +322,8 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
         else => return err,
     };
     candidate_tree.generation = model.tree.generation +% 1;
+    model.image_epoch +%= 1;
+    if (model.image_epoch == 0) model.image_epoch = 1;
     model.tree.deinit();
     model.tree = candidate_tree;
     candidate_tree_moved = true;
@@ -770,7 +793,7 @@ fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const 
     for (&model.tree.nodes, 0..) |*node, index| {
         if (!node.alive or node.kind != .image) continue;
         const source = node.sourceSlice();
-        if (!isLocalAssetPath(source)) {
+        if (!image_paths.isLocalAssetPath(source)) {
             std.log.err("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path", .{});
             return error.RemoteImageUnsupported;
         }
@@ -783,11 +806,179 @@ fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const 
     }
 }
 
-fn isLocalAssetPath(source: []const u8) bool {
-    if (source.len == 0 or std.fs.path.isAbsolute(source) or std.mem.indexOf(u8, source, "://") != null) return false;
-    var components = std.mem.tokenizeAny(u8, source, "/\\");
-    while (components.next()) |component| if (std.mem.eql(u8, component, "..")) return false;
-    return true;
+fn seedImageStates(model: *Model) !void {
+    const resolver = model.image_resolver orelse return;
+    for (model.images[0..model.image_count]) |image| {
+        const id: tree_mod.NodeId = @intCast(image.id);
+        const node = try model.tree.nodeConst(id);
+        const resolved = try resolver.resolve(node.sourceSlice());
+        const state = try addImageState(model, id, node.lifetime);
+        state.observed = resolved.path;
+        state.observed_valid = true;
+    }
+    model.image_tree_generation = model.tree.generation;
+}
+
+fn deinitImageStates(model: *Model) void {
+    for (model.image_states[0..model.image_state_count]) |*state| {
+        if (state.observed) |observed| std.heap.page_allocator.free(observed);
+    }
+    model.image_state_count = 0;
+}
+
+fn findImageState(model: *Model, id: tree_mod.NodeId) ?*ImageState {
+    for (model.image_states[0..model.image_state_count]) |*state| {
+        if (state.id == id) return state;
+    }
+    return null;
+}
+
+fn addImageState(model: *Model, id: tree_mod.NodeId, lifetime: u64) !*ImageState {
+    if (model.image_state_count == model.image_states.len) return error.TooManyImages;
+    const state = &model.image_states[model.image_state_count];
+    state.* = .{ .id = id, .lifetime = lifetime, .epoch = model.image_epoch };
+    model.image_state_count += 1;
+    return state;
+}
+
+fn removeImageState(model: *Model, effects: *Effects, index: usize) void {
+    const state = &model.image_states[index];
+    if (state.registered) _ = effects.unregisterImage(state.id);
+    if (state.observed) |observed| std.heap.page_allocator.free(observed);
+    model.image_state_count -= 1;
+    if (index != model.image_state_count) model.image_states[index] = model.image_states[model.image_state_count];
+    model.image_states[model.image_state_count] = .{};
+}
+
+fn replaceObserved(state: *ImageState, observed: [:0]u8, valid: bool) void {
+    if (state.observed) |previous| std.heap.page_allocator.free(previous);
+    state.observed = observed;
+    state.observed_valid = valid;
+    state.load_failure_count = 0;
+}
+
+fn rememberRawSource(state: *ImageState, source: []const u8) !void {
+    replaceObserved(state, try std.heap.page_allocator.dupeZ(u8, source), false);
+}
+
+fn observedEquals(state: *const ImageState, source: []const u8, valid: bool) bool {
+    return state.observed_valid == valid and if (state.observed) |observed| std.mem.eql(u8, observed, source) else false;
+}
+
+fn recordImageLoadFailure(state: *ImageState, observed: [:0]u8) void {
+    const prior_failure_count = if (observedEquals(state, observed, true)) state.load_failure_count else 0;
+    replaceObserved(state, observed, true);
+    state.load_failure_count = @min(prior_failure_count + 1, max_image_load_attempts);
+}
+
+fn observedImageLoadSettled(state: *const ImageState, source: []const u8) bool {
+    if (!observedEquals(state, source, true)) return false;
+    return state.load_failure_count == 0 or state.load_failure_count >= max_image_load_attempts;
+}
+
+fn invalidImageSourceError(err: anyerror) bool {
+    return switch (err) {
+        error.InvalidImageSource,
+        error.ArtPathOutsideCache,
+        error.WidgetAssetEscapesRoot,
+        error.ArtPathTooLong,
+        => true,
+        else => false,
+    };
+}
+
+fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, node: *const tree_mod.Node) !void {
+    const resolver = model.image_resolver orelse return;
+    var state = findImageState(model, id) orelse try addImageState(model, id, node.lifetime);
+    const resolved = resolver.resolve(node.sourceSlice()) catch |err| {
+        if (observedEquals(state, node.sourceSlice(), false)) return;
+        if (invalidImageSourceError(err) and state.registered) {
+            _ = effects.unregisterImage(id);
+            state.registered = false;
+        }
+        try rememberRawSource(state, node.sourceSlice());
+        if (invalidImageSourceError(err)) {
+            std.log.err("image source rejected by widget/art-cache containment: {s}", .{@errorName(err)});
+        } else {
+            std.log.err("image source could not be resolved; keeping the prior image: {s}", .{@errorName(err)});
+        }
+        return;
+    };
+    if (observedImageLoadSettled(state, resolved.path)) {
+        std.heap.page_allocator.free(resolved.path);
+        return;
+    }
+    const bytes = std.Io.Dir.cwd().readFileAlloc(
+        model.io orelse return error.MissingIo,
+        resolved.path,
+        std.heap.page_allocator,
+        .limited(1024 * 1024),
+    ) catch |err| {
+        recordImageLoadFailure(state, resolved.path);
+        std.log.err("image reload read failed; keeping the prior image: {s}", .{@errorName(err)});
+        return;
+    };
+    defer std.heap.page_allocator.free(bytes);
+    _ = effects.registerImageBytes(id, bytes) catch |err| {
+        recordImageLoadFailure(state, resolved.path);
+        std.log.err("image reload decode/register failed; keeping the prior image: {s}", .{@errorName(err)});
+        return;
+    };
+    replaceObserved(state, resolved.path, true);
+    state.registered = true;
+}
+
+test "image reload failures retry twice then settle until the source changes" {
+    var state: ImageState = .{};
+    defer if (state.observed) |observed| std.heap.page_allocator.free(observed);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(@as(u8, 1), state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(@as(u8, 2), state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "first.img"));
+    try std.testing.expect(observedImageLoadSettled(&state, "first.img"));
+    try std.testing.expectEqual(max_image_load_attempts, state.load_failure_count);
+
+    recordImageLoadFailure(&state, try std.heap.page_allocator.dupeZ(u8, "second.img"));
+    try std.testing.expect(!observedImageLoadSettled(&state, "second.img"));
+    try std.testing.expectEqual(@as(u8, 1), state.load_failure_count);
+
+    replaceObserved(&state, try std.heap.page_allocator.dupeZ(u8, "second.img"), true);
+    try std.testing.expect(observedImageLoadSettled(&state, "second.img"));
+    try std.testing.expectEqual(@as(u8, 0), state.load_failure_count);
+}
+
+/// Runs after every app-loop turn, but the generation equality is the static
+/// fast path. A changed image is decoded before its same-ID resource is
+/// replaced; invalid/dead/reused nodes are unregistered explicitly.
+fn synchronizeImages(model: *Model, effects: *Effects) !void {
+    if (model.tree.generation == model.image_tree_generation) return;
+    const synchronized_generation = model.tree.generation;
+
+    var state_index: usize = 0;
+    while (state_index < model.image_state_count) {
+        const state = &model.image_states[state_index];
+        const node = model.tree.nodeConst(state.id) catch {
+            removeImageState(model, effects, state_index);
+            continue;
+        };
+        if (node.kind != .image or node.lifetime != state.lifetime or state.epoch != model.image_epoch) {
+            removeImageState(model, effects, state_index);
+            continue;
+        }
+        state_index += 1;
+    }
+
+    for (&model.tree.nodes, 0..) |*node, index| {
+        if (!node.alive or node.kind != .image) continue;
+        try synchronizeImageNode(model, effects, @intCast(index + 1), node);
+    }
+    model.image_tree_generation = synchronized_generation;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -869,6 +1060,13 @@ pub fn main(init: std.process.Init) !void {
     }};
     const scene: native_sdk.ShellConfig = .{ .windows = &shell_windows };
     const fonts = try loadFonts(init.io, allocator, directory, loaded.manifest.fonts);
+    var image_resolver = try image_paths.Resolver.init(
+        init.io,
+        std.heap.page_allocator,
+        directory,
+        init.environ_map.get("WEAVER_ART_CACHE"),
+    );
+    defer image_resolver.deinit();
 
     var tokens = native_sdk.canvas.DesignTokens.theme(.{ .pack = .geist, .color_scheme = .dark });
     tokens.colors.background = native_sdk.canvas.Color.rgba8(0, 0, 0, 0);
@@ -888,8 +1086,10 @@ pub fn main(init: std.process.Init) !void {
     });
     defer app_state.destroy();
     defer app_state.model.tree.deinit();
+    defer deinitImageStates(&app_state.model);
     app_state.model.geometry = &geometry_store;
     app_state.model.fonts = loaded.manifest.fonts;
+    app_state.model.image_resolver = &image_resolver;
     if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
     try app_state.model.provider.init(init.io, platform.providerEndpoint(
         init.environ_map.get("WEAVER_HOST_PIPE"),
@@ -909,6 +1109,7 @@ pub fn main(init: std.process.Init) !void {
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
     try loadLocalImages(init.io, allocator, directory, &app_state.model);
+    try seedImageStates(&app_state.model);
 
     requested_software_backend = renderer_backend == .software;
     const dev_signal_path = try std.fs.path.join(allocator, &.{ directory, dev_reload.signal_file_name });

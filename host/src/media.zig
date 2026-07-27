@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const art_cache = @import("art_cache.zig");
 
 const native = @cImport({
     @cInclude("windows_providers.h");
@@ -42,6 +44,8 @@ pub const Frame = struct {
     status: Status = .stopped,
     source_app: [max_source_app_bytes]u8 = @splat(0),
     source_app_len: usize = 0,
+    art_path: [max_art_path_bytes]u8 = @splat(0),
+    art_path_len: usize = 0,
     position_ms: u64 = 0,
     duration_ms: u64 = 0,
 
@@ -57,12 +61,21 @@ pub const Frame = struct {
     pub fn sourceAppSlice(self: *const Frame) []const u8 {
         return self.source_app[0..self.source_app_len];
     }
+    pub fn artPathSlice(self: *const Frame) []const u8 {
+        return self.art_path[0..self.art_path_len];
+    }
 };
 
 pub const Provider = struct {
     session: ?*native.WeaverMediaSession = null,
+    cache: ?*art_cache.Cache = null,
     next_open_ms: u64 = 0,
     next_poll_ms: u64 = 0,
+    current_art_path: [max_art_path_bytes]u8 = @splat(0),
+    current_art_path_len: usize = 0,
+    current_art_matches_session: bool = false,
+    awaiting_session_art_resolution: bool = false,
+    refresh_failure_logged: bool = false,
 
     pub fn deinit(self: *Provider) void {
         self.close();
@@ -87,12 +100,28 @@ pub const Provider = struct {
         if (now_ms < self.next_poll_ms) return null;
         self.next_poll_ms = now_ms + 1000;
         var source: native.WeaverMediaState = undefined;
-        const result = native.weaver_media_poll(self.session, &source);
+        var artwork: native.WeaverMediaArtwork = undefined;
+        const result = native.weaver_media_poll(self.session, &source, &artwork);
+        defer native.weaver_media_artwork_release(&artwork);
         if (result < 0) {
             self.close();
             self.next_open_ms = now_ms + 1000;
             return null;
         }
+        if (artwork.refresh_failed != 0) {
+            if (!self.refresh_failure_logged) {
+                std.log.warn("SMTC media properties or thumbnail refresh failed; waiting for the next change event", .{});
+                self.refresh_failure_logged = true;
+            }
+        } else {
+            self.refresh_failure_logged = false;
+        }
+        self.applyArtwork(&artwork);
+        // A replacement session is published atomically with its artwork
+        // outcome. Until that outcome is known, returning null preserves the
+        // prior complete frame instead of pairing old art with new metadata or
+        // flashing a blank image.
+        if (self.awaiting_session_art_resolution) return null;
         if (result == 0) return .{};
         var frame: Frame = .{
             .status = statusFromNative(source.status),
@@ -103,6 +132,9 @@ pub const Provider = struct {
         copyText(&frame.artist, &frame.artist_len, std.mem.sliceTo(&source.artist, 0));
         copyText(&frame.album, &frame.album_len, std.mem.sliceTo(&source.album, 0));
         copyText(&frame.source_app, &frame.source_app_len, std.mem.sliceTo(&source.source_app, 0));
+        if (self.current_art_matches_session) {
+            copyText(&frame.art_path, &frame.art_path_len, self.current_art_path[0..self.current_art_path_len]);
+        }
         return frame;
     }
 
@@ -110,6 +142,7 @@ pub const Provider = struct {
         self.session = native.weaver_media_create();
         if (self.session != null) {
             self.next_poll_ms = now_ms;
+            self.awaiting_session_art_resolution = true;
             return;
         }
         self.next_open_ms = now_ms + 1000;
@@ -118,6 +151,72 @@ pub const Provider = struct {
     fn close(self: *Provider) void {
         if (self.session) |session| native.weaver_media_destroy(session);
         self.session = null;
+        // Keep the durable cache snapshot pinned across a transient provider
+        // failure. A subsequently opened session must resolve its own artwork
+        // before the host replaces the prior complete frame.
+        self.current_art_matches_session = false;
+        self.awaiting_session_art_resolution = true;
+    }
+
+    /// A transient refresh or publication failure must retain both the prior
+    /// path and the cache pin. A session boundary makes that snapshot ineligible
+    /// for frames until the replacement publishes art or confirms no art. The
+    /// snapshot itself is cleared only on a successful no-art observation.
+    fn applyArtwork(self: *Provider, artwork: *const native.WeaverMediaArtwork) void {
+        if (artwork.session_changed != 0) {
+            self.current_art_matches_session = false;
+            self.awaiting_session_art_resolution = true;
+        }
+        if (artwork.unavailable != 0) {
+            if (!builtin.is_test) {
+                if (artwork.too_large != 0) {
+                    std.log.warn("SMTC thumbnail exceeds the 1 MiB art-cache limit; publishing metadata without stale art", .{});
+                } else {
+                    std.log.warn("SMTC artwork remains unavailable after three subscribed polls; publishing metadata without stale art", .{});
+                }
+            }
+            // Keep the durable prior path and cache pin untouched, but do not
+            // associate them with refreshed metadata. A later successful retry
+            // can make artwork eligible again.
+            self.resolveArtworkUnavailable();
+            return;
+        }
+        if (artwork.refresh_failed != 0) {
+            self.current_art_matches_session = false;
+            self.awaiting_session_art_resolution = true;
+            return;
+        }
+        if (artwork.changed == 0) return;
+        if (artwork.bytes != null and artwork.length > 0) {
+            const cache = self.cache orelse {
+                self.resolveArtworkUnavailable();
+                return;
+            };
+            const publication = (cache.publish(artwork.bytes[0..artwork.length]) catch |err| {
+                std.log.err("media artwork cache publication failed; publishing metadata without stale art: {s}", .{@errorName(err)});
+                self.resolveArtworkUnavailable();
+                return;
+            }) orelse {
+                self.resolveArtworkUnavailable();
+                return;
+            };
+            @memcpy(self.current_art_path[0..publication.path_len], publication.path[0..publication.path_len]);
+            self.current_art_path_len = publication.path_len;
+            self.current_art_matches_session = true;
+            self.awaiting_session_art_resolution = false;
+            return;
+        }
+        self.current_art_path_len = 0;
+        self.current_art_matches_session = true;
+        self.awaiting_session_art_resolution = false;
+        if (self.cache) |cache| cache.clearPublished();
+    }
+
+    fn resolveArtworkUnavailable(self: *Provider) void {
+        // Retain the durable prior path and pin for recovery/housekeeping, but
+        // make the refreshed metadata frame explicitly artless.
+        self.current_art_matches_session = false;
+        self.awaiting_session_art_resolution = false;
     }
 };
 
@@ -141,6 +240,10 @@ pub fn formatFrame(frame: *const Frame, output: []u8) ![]const u8 {
     try json.write(frame.status.wire());
     try json.objectField("sourceApp");
     try json.write(frame.sourceAppSlice());
+    if (frame.art_path_len > 0) {
+        try json.objectField("artPath");
+        try json.write(frame.artPathSlice());
+    }
     try json.objectField("positionMs");
     try json.write(frame.position_ms);
     try json.objectField("durationMs");
@@ -183,15 +286,15 @@ test "media frame bound covers maximum escaped fields and future art path" {
     frame.album_len = frame.album.len;
     @memset(&frame.source_app, 0x01);
     frame.source_app_len = frame.source_app.len;
+    @memset(&frame.art_path, 0x01);
+    frame.art_path_len = frame.art_path.len;
     var output: [max_media_frame_bytes]u8 = undefined;
     const encoded = try formatFrame(&frame, &output);
-    const fixed_without_art =
-        "{\"provider\":\"media\",\"value\":{\"title\":\"\",\"artist\":\"\",\"album\":\"\",\"playing\":false,\"status\":\"stopped\",\"sourceApp\":\"\",\"positionMs\":18446744073709551615,\"durationMs\":18446744073709551615}}\n";
     try std.testing.expectEqual(
-        fixed_without_art.len + max_json_escape_bytes * (3 * max_text_bytes + max_source_app_bytes),
+        max_media_frame_fixed.len + max_json_escape_bytes * (3 * max_text_bytes + max_source_app_bytes + max_art_path_bytes),
         encoded.len,
     );
-    try std.testing.expect(encoded.len <= max_media_frame_bytes);
+    try std.testing.expectEqual(max_media_frame_bytes, encoded.len);
     try std.testing.expect(std.mem.indexOf(u8, encoded, "\\u0001") != null);
 }
 
@@ -226,4 +329,113 @@ test "native playback status maps to the frozen tri-state" {
     try std.testing.expectEqual(Status.paused, statusFromNative(native.WEAVER_MEDIA_STATUS_PAUSED));
     try std.testing.expectEqual(Status.stopped, statusFromNative(native.WEAVER_MEDIA_STATUS_STOPPED));
     try std.testing.expectEqual(Status.stopped, statusFromNative(99));
+}
+
+test "native media dirty flags start dirty and coalesce duplicate events" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
+}
+
+test "native media event callbacks stop at the shared lifetime fence" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_event_lifetime());
+}
+
+test "native media retries a consumed transient refresh failure" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_retry());
+}
+
+test "native media bounds unresolved artwork before publishing metadata without it" {
+    try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_failure_bound());
+}
+
+test "art refresh failure retains prior path and cache pin until genuine no-art" {
+    const root = ".zig-cache/weaver-media-art-refresh-retention";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    const initial = (try cache.publish("prior-art")).?;
+    var provider: Provider = .{ .cache = &cache };
+    @memcpy(provider.current_art_path[0..initial.path_len], initial.path[0..initial.path_len]);
+    provider.current_art_path_len = initial.path_len;
+    provider.current_art_matches_session = true;
+
+    var failed: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    failed.changed = 1;
+    failed.refresh_failed = 1;
+    provider.applyArtwork(&failed);
+    try std.testing.expectEqualStrings(initial.pathSlice(), provider.current_art_path[0..provider.current_art_path_len]);
+    try std.testing.expect(!provider.current_art_matches_session);
+    try std.testing.expect(provider.awaiting_session_art_resolution);
+    try std.testing.expect(cache.published);
+    try std.testing.expectEqualSlices(u8, &initial.hash, &cache.published_hash);
+
+    var no_art: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    no_art.changed = 1;
+    provider.applyArtwork(&no_art);
+    try std.testing.expectEqual(@as(usize, 0), provider.current_art_path_len);
+    try std.testing.expect(provider.current_art_matches_session);
+    try std.testing.expect(!cache.published);
+}
+
+test "session replacement refresh failure suppresses prior art without unpinning it" {
+    const root = ".zig-cache/weaver-media-art-session-boundary";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    const initial = (try cache.publish("prior-session-art")).?;
+    var provider: Provider = .{ .cache = &cache };
+    @memcpy(provider.current_art_path[0..initial.path_len], initial.path[0..initial.path_len]);
+    provider.current_art_path_len = initial.path_len;
+    provider.current_art_matches_session = true;
+
+    var failed: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    failed.changed = 1;
+    failed.refresh_failed = 1;
+    failed.session_changed = 1;
+    provider.applyArtwork(&failed);
+
+    try std.testing.expect(!provider.current_art_matches_session);
+    try std.testing.expect(provider.awaiting_session_art_resolution);
+    try std.testing.expectEqualStrings(initial.pathSlice(), provider.current_art_path[0..provider.current_art_path_len]);
+    try std.testing.expect(cache.published);
+    try std.testing.expectEqualSlices(u8, &initial.hash, &cache.published_hash);
+
+    var replacement: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    replacement.changed = 1;
+    replacement.bytes = @constCast("replacement-art".ptr);
+    replacement.length = "replacement-art".len;
+    provider.applyArtwork(&replacement);
+    try std.testing.expect(provider.current_art_matches_session);
+    try std.testing.expect(!provider.awaiting_session_art_resolution);
+    try std.testing.expect(!std.mem.eql(
+        u8,
+        initial.pathSlice(),
+        provider.current_art_path[0..provider.current_art_path_len],
+    ));
+}
+
+test "permanent artwork failure publishes metadata without stale art" {
+    const root = ".zig-cache/weaver-media-art-unavailable";
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    var cache = try art_cache.Cache.init(std.testing.io, std.testing.allocator, root);
+    defer cache.deinit();
+    const initial = (try cache.publish("prior-art")).?;
+    var provider: Provider = .{ .cache = &cache };
+    @memcpy(provider.current_art_path[0..initial.path_len], initial.path[0..initial.path_len]);
+    provider.current_art_path_len = initial.path_len;
+    provider.current_art_matches_session = true;
+
+    var unavailable: native.WeaverMediaArtwork = std.mem.zeroes(native.WeaverMediaArtwork);
+    unavailable.changed = 1;
+    unavailable.refresh_failed = 1;
+    unavailable.unavailable = 1;
+    provider.applyArtwork(&unavailable);
+
+    try std.testing.expect(!provider.current_art_matches_session);
+    try std.testing.expect(!provider.awaiting_session_art_resolution);
+    try std.testing.expectEqualStrings(initial.pathSlice(), provider.current_art_path[0..provider.current_art_path_len]);
+    try std.testing.expect(cache.published);
+    try std.testing.expectEqualSlices(u8, &initial.hash, &cache.published_hash);
 }

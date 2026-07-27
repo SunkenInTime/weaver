@@ -6,11 +6,11 @@ Last updated: 2026-07-25
 
 | Layer | Branch | Parent | State |
 |---|---|---|---|
-| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`ce7e60b`) |
-| 02/05 | `media/02-album-art` | layer 01 | NOT STARTED |
-| 03/05 | `media/03-transport` | layer 02 | NOT STARTED |
-| 04/05 | `media/04-macos-adapter` | layer 03 | SPIKE-GATED / NOT STARTED |
-| 05/05 | `media/05-noro-gate` | layer 04 if proven, otherwise layer 03 | NOT STARTED |
+| 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`2eecd49` plus adversarial repair pending push) |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; restack pending |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -33,6 +33,26 @@ This run will not change the submodule pointer.
   provider poll; live title, artist, source ID, and timeline rendered.
 - Layer 01 visual gate: PASS. Viewed captures and per-element checklist are in
   `docs/media-evidence/pr01-visual.md`.
+- Layer 02 recovered-work verification: host `zig build test` and runtime
+  `zig build test -Dweb-layer=exclude -Dtrace=off`: PASS after the unattended
+  session was resumed.
+- Layer 02 SDK/example gates: `npm test` PASS 62/62, `npm run typecheck` PASS,
+  `weaver check examples/now-playing` PASS.
+- Layer 02 production builds: host `zig build` PASS; runtime
+  `zig build -Dweb-layer=exclude -Dtrace=off` PASS.
+- Layer 02 live/visual gate: PASS after repairing the observed 300×300
+  `ImageTooLarge` failure with bounded host-side normalization. Viewed settled,
+  track-change, and pause captures plus per-element results are in
+  `docs/media-evidence/pr02-visual.md`.
+- Layer 02 static-image ReleaseFast A/B: PASS. Parent and layer 02 each used
+  0.000 ms process CPU over matched ~60.014 s windows after 41–42 s settles.
+  Private memory ended at 42.684 MiB parent / 41.570 MiB layer 02. Raw values
+  and the bounded claim are recorded with the visual evidence.
+- Adversarial finding F9 repaired at its owning layer: transient thumbnail
+  refresh, normalization, size, and cache-publication failures retain the
+  prior art path and cache pin. Only a successful replacement or a confirmed
+  no-art state changes the snapshot. The new retention/no-art test and
+  `host: zig build test` pass.
 
 ## Blockers and unverified gates
 
@@ -43,11 +63,10 @@ This run will not change the submodule pointer.
 
 ## Current work
 
-Layer 01 is committed, pushed, and open as draft PR
-`https://github.com/SunkenInTime/weaver/pull/32`.
+The 15-finding adversarial remediation is in progress bottom-up. Layer 02's F9
+repair is committed and published after its complete per-layer gate passed.
 
 ## Next executable task
 
-Create `media/02-album-art` from layer 01 and trace SMTC thumbnail ownership,
-host cache lifecycle, runtime path containment, and dynamic image
-re-registration before editing.
+Restack layer 03, then fix F1/F2/F3/F4/F10/F11/F12 at the
+transport-owning layer.

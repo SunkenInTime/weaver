@@ -584,5 +584,64 @@ timeline values. Host formatting, host dedupe storage, and runtime line
 accumulators use this same bound. Encoding failure is logged and never silently
 dropped.
 
-Album art and media transport are deliberately absent at this layer; they land
-in subsequent v0.5 stack amendments.
+Media transport is deliberately absent at this layer; it lands in a subsequent
+v0.5 stack amendment.
+
+## PR 02: album art and dynamic image sources
+
+`MediaData` gains one optional field:
+
+```ts
+interface MediaData {
+  artPath?: string;
+}
+```
+
+The field is absent when the platform or current session supplies no artwork.
+When present it is an opaque absolute path into the host-owned art cache.
+Widgets must use conditional rendering because `<image>.src` remains required:
+
+```tsx
+{media.artPath
+  ? <image src={media.artPath} fit="cover" />
+  : <panel class="bg-zinc-800" />}
+```
+
+weaverd is the cache's sole writer. On hosts with per-user LocalAppData, the
+root is `%LOCALAPPDATA%\weaver\artcache`, inheriting that access boundary; the
+runtime receives that one root in `WEAVER_ART_CACHE` only for widgets
+subscribed to media. Filenames are lowercase SHA-256 hex plus `.img`.
+Inputs over 1 MiB are skipped. A new file is written to a unique exclusive
+temporary file, flushed and synchronized, then atomically renamed without
+replacement. Temporary files are removed on failure and startup. Only a
+complete successfully published file can enter a provider frame. Successful
+publication updates the LRU timestamp; pruning retains at most 32 images and
+never removes the currently published hash.
+
+The widget profile reserves 256 KiB of decoded RGBA per registered image.
+Host artwork whose decoded dimensions exceed that fixed slot is aspect-fit
+downsampled with the host image decoder to at most 256×256 and encoded as PNG
+before publication. The 1 MiB limit applies to both the original provider
+payload and the normalized cache file. This transformation never expands a
+runtime memory bound or touches the Native SDK dependency.
+
+SMTC manager/session property events only set coalescing dirty flags. The
+existing one-second host poll consumes those flags, refreshes metadata and art,
+and continues to sample playback/timeline state. Event callbacks never perform
+I/O or block. Refresh failure clears the consumed flag, preserves the prior
+snapshot, logs once, and retries only after another property change.
+
+Static widget images keep their startup load and registration path. After each
+JS turn that can mutate the retained tree, the runtime compares image node
+lifetimes and normalized sources. A changed source is read and decoded before
+replacing the same node/resource ID, so a transient read or decode failure
+keeps the prior image. Removed, non-image, invalid-source, hot-swapped, and
+reused-ID nodes unregister stale resources. An unchanged tree exits by one
+generation comparison.
+
+The runtime canonicalizes the widget root and host art-cache root once. Widget
+assets must remain within the widget root. Host art paths must be ordinary
+drive-absolute paths within the cache at a case-insensitive component boundary.
+Drive-relative, rooted-current-drive, UNC, device-namespace, `..`, missing, and
+prefix-collision paths are rejected. Widgets cannot nominate an additional
+readable root.

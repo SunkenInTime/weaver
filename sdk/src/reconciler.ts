@@ -45,6 +45,7 @@ export interface MediaData {
   status: "playing" | "paused" | "stopped";
   playing: boolean;
   sourceApp: string;
+  artPath?: string;
   positionMs: number;
   durationMs: number;
 }
@@ -511,7 +512,8 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
     next.max = props.max;
   } else if (instance.type === "image") {
     if (typeof props.src !== "string" || props.src.length === 0) throw new Error("<image> requires a local src string");
-    if (/^[a-z][a-z0-9+.-]*:/i.test(props.src) || props.src.startsWith("//")) {
+    const windowsAbsolute = /^[a-z]:[\\/]/i.test(props.src);
+    if ((!windowsAbsolute && /^[a-z][a-z0-9+.-]*:/i.test(props.src)) || props.src.startsWith("//")) {
       throw new Error("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path");
     }
     next.src = props.src;

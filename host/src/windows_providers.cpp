@@ -7,16 +7,22 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
+#include <wincodec.h>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Media.Control.h>
+#include <winrt/Windows.Storage.Streams.h>
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <string>
+#include <vector>
 
 struct WeaverAudioCapture {
     IMMDeviceEnumerator *enumerator = nullptr;
@@ -152,11 +158,161 @@ extern "C" int weaver_audio_poll(WeaverAudioCapture *state, float *mono, size_t 
     return 0;
 }
 
+constexpr size_t max_artwork_bytes = 1024 * 1024;
+constexpr uint64_t max_artwork_pixel_bytes = 256 * 1024;
+constexpr uint32_t max_artwork_refresh_attempts = 3;
+
+static bool normalized_artwork_bytes(
+    const uint8_t *source,
+    size_t source_length,
+    std::vector<uint8_t> &output) {
+    try {
+        winrt::com_ptr<IWICImagingFactory> factory;
+        winrt::check_hresult(CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(factory.put())));
+        winrt::com_ptr<IWICStream> input;
+        winrt::check_hresult(factory->CreateStream(input.put()));
+        winrt::check_hresult(input->InitializeFromMemory(
+            const_cast<BYTE *>(source),
+            static_cast<DWORD>(source_length)));
+        winrt::com_ptr<IWICBitmapDecoder> decoder;
+        winrt::check_hresult(factory->CreateDecoderFromStream(
+            input.get(),
+            nullptr,
+            WICDecodeMetadataCacheOnLoad,
+            decoder.put()));
+        winrt::com_ptr<IWICBitmapFrameDecode> frame;
+        winrt::check_hresult(decoder->GetFrame(0, frame.put()));
+        UINT width = 0;
+        UINT height = 0;
+        winrt::check_hresult(frame->GetSize(&width, &height));
+        if (width == 0 || height == 0) return false;
+        if (static_cast<uint64_t>(width) * height * 4 <= max_artwork_pixel_bytes) {
+            output.assign(source, source + source_length);
+            return true;
+        }
+
+        const double scale = 256.0 / static_cast<double>(std::max(width, height));
+        const UINT target_width = std::max<UINT>(1, static_cast<UINT>(width * scale));
+        const UINT target_height = std::max<UINT>(1, static_cast<UINT>(height * scale));
+        winrt::com_ptr<IWICBitmapScaler> scaler;
+        winrt::check_hresult(factory->CreateBitmapScaler(scaler.put()));
+        winrt::check_hresult(scaler->Initialize(
+            frame.get(),
+            target_width,
+            target_height,
+            WICBitmapInterpolationModeFant));
+        winrt::com_ptr<IWICFormatConverter> converter;
+        winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
+        winrt::check_hresult(converter->Initialize(
+            scaler.get(),
+            GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom));
+
+        winrt::com_ptr<IStream> output_stream;
+        winrt::check_hresult(CreateStreamOnHGlobal(nullptr, TRUE, output_stream.put()));
+        winrt::com_ptr<IWICBitmapEncoder> encoder;
+        winrt::check_hresult(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, encoder.put()));
+        winrt::check_hresult(encoder->Initialize(output_stream.get(), WICBitmapEncoderNoCache));
+        winrt::com_ptr<IWICBitmapFrameEncode> output_frame;
+        winrt::com_ptr<IPropertyBag2> properties;
+        winrt::check_hresult(encoder->CreateNewFrame(output_frame.put(), properties.put()));
+        winrt::check_hresult(output_frame->Initialize(properties.get()));
+        winrt::check_hresult(output_frame->SetSize(target_width, target_height));
+        WICPixelFormatGUID pixel_format = GUID_WICPixelFormat32bppBGRA;
+        winrt::check_hresult(output_frame->SetPixelFormat(&pixel_format));
+        if (pixel_format != GUID_WICPixelFormat32bppBGRA) return false;
+        winrt::check_hresult(output_frame->WriteSource(converter.get(), nullptr));
+        winrt::check_hresult(output_frame->Commit());
+        winrt::check_hresult(encoder->Commit());
+
+        HGLOBAL memory = nullptr;
+        winrt::check_hresult(GetHGlobalFromStream(output_stream.get(), &memory));
+        const SIZE_T length = GlobalSize(memory);
+        if (length == 0 || length > max_artwork_bytes) return false;
+        const void *bytes = GlobalLock(memory);
+        if (!bytes) return false;
+        output.assign(
+            static_cast<const uint8_t *>(bytes),
+            static_cast<const uint8_t *>(bytes) + length);
+        GlobalUnlock(memory);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+struct WeaverMediaDirtyFlags {
+    std::atomic<bool> session{true};
+    std::atomic<bool> properties{true};
+
+    void mark_session() {
+        session.store(true, std::memory_order_release);
+    }
+
+    void mark_properties() {
+        properties.store(true, std::memory_order_release);
+    }
+
+    bool take_session() {
+        return session.exchange(false, std::memory_order_acq_rel);
+    }
+
+    bool take_properties() {
+        return properties.exchange(false, std::memory_order_acq_rel);
+    }
+};
+
+struct WeaverMediaEventState {
+    std::atomic<bool> active{true};
+    WeaverMediaDirtyFlags dirty;
+};
+
+static void mark_session_if_alive(const std::weak_ptr<WeaverMediaEventState> &weak_events) {
+    const auto events = weak_events.lock();
+    if (events && events->active.load(std::memory_order_acquire)) events->dirty.mark_session();
+}
+
+static void mark_properties_if_alive(const std::weak_ptr<WeaverMediaEventState> &weak_events) {
+    const auto events = weak_events.lock();
+    if (events && events->active.load(std::memory_order_acquire)) events->dirty.mark_properties();
+}
+
 struct WeaverMediaSession {
     winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
+    winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession current{nullptr};
+    winrt::event_token manager_token{};
+    winrt::event_token properties_token{};
+    bool manager_subscribed = false;
+    bool properties_subscribed = false;
+    std::shared_ptr<WeaverMediaEventState> events = std::make_shared<WeaverMediaEventState>();
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string source_app;
+    bool refresh_failed = false;
+    uint32_t refresh_failure_count = 0;
     bool apartment_initialized = false;
 
     ~WeaverMediaSession() {
+        events->active.store(false, std::memory_order_release);
+        try {
+            if (properties_subscribed && current) current.MediaPropertiesChanged(properties_token);
+        } catch (...) {
+        }
+        try {
+            if (manager_subscribed && manager) manager.CurrentSessionChanged(manager_token);
+        } catch (...) {
+        }
+        properties_subscribed = false;
+        manager_subscribed = false;
+        current = nullptr;
         manager = nullptr;
         if (apartment_initialized) winrt::uninit_apartment();
     }
@@ -190,6 +346,100 @@ static std::string source_app_name(const winrt::hstring &source_id) {
     }
 }
 
+static void clear_cached_properties(WeaverMediaSession *state) {
+    state->title.clear();
+    state->artist.clear();
+    state->album.clear();
+    state->source_app.clear();
+}
+
+static void rebind_current_session(WeaverMediaSession *state) {
+    if (state->properties_subscribed && state->current) {
+        state->current.MediaPropertiesChanged(state->properties_token);
+    }
+    state->properties_subscribed = false;
+    state->current = nullptr;
+    clear_cached_properties(state);
+    state->refresh_failed = false;
+    state->refresh_failure_count = 0;
+    state->current = state->manager.GetCurrentSession();
+    if (state->current) {
+        state->source_app = source_app_name(state->current.SourceAppUserModelId());
+        const std::weak_ptr<WeaverMediaEventState> weak_events = state->events;
+        state->properties_token = state->current.MediaPropertiesChanged(
+            [weak_events](const auto &, const auto &) {
+                mark_properties_if_alive(weak_events);
+            });
+        state->properties_subscribed = true;
+    }
+    state->events->dirty.mark_properties();
+}
+
+static bool should_refresh_properties(bool dirty, bool refresh_failed) {
+    // The host calls this provider at most once per second and only while a
+    // widget subscribes to media. Retrying here therefore recovers a consumed
+    // transient first-refresh failure without creating an idle poll path.
+    return dirty || refresh_failed;
+}
+
+static uint32_t next_refresh_failure_count(uint32_t current) {
+    return std::min(current + 1, max_artwork_refresh_attempts);
+}
+
+static bool refresh_retry_exhausted(uint32_t count) {
+    return count >= max_artwork_refresh_attempts;
+}
+
+static bool read_thumbnail(
+    const winrt::Windows::Storage::Streams::IRandomAccessStreamReference &reference,
+    WeaverMediaArtwork *artwork) {
+    if (!reference) {
+        artwork->changed = 1;
+        return true;
+    }
+    try {
+        auto open = reference.OpenReadAsync();
+        if (open.wait_for(std::chrono::seconds(2)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            open.Cancel();
+            return false;
+        }
+        const auto stream = open.GetResults();
+        const uint64_t size = stream.Size();
+        if (size > max_artwork_bytes) {
+            artwork->too_large = 1;
+            artwork->unavailable = 1;
+            artwork->changed = 1;
+            return true;
+        }
+        if (size == 0) {
+            artwork->changed = 1;
+            return true;
+        }
+        const auto input = stream.GetInputStreamAt(0);
+        winrt::Windows::Storage::Streams::DataReader reader(input);
+        auto load = reader.LoadAsync(static_cast<uint32_t>(size));
+        if (load.wait_for(std::chrono::seconds(2)) != winrt::Windows::Foundation::AsyncStatus::Completed) {
+            load.Cancel();
+            return false;
+        }
+        const uint32_t loaded = load.GetResults();
+        if (loaded != size) return false;
+        std::vector<uint8_t> raw(loaded);
+        reader.ReadBytes(winrt::array_view<uint8_t>(raw));
+        std::vector<uint8_t> normalized;
+        if (!normalized_artwork_bytes(raw.data(), raw.size(), normalized)) return false;
+        auto bytes = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[normalized.size()]);
+        if (!bytes) return false;
+        std::memcpy(bytes.get(), normalized.data(), normalized.size());
+        artwork->bytes = bytes.release();
+        artwork->length = normalized.size();
+        artwork->changed = 1;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 extern "C" void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]) {
     if (!output) return;
     const std::string selected = select_source_app(raw_id ? raw_id : "", resolved_name ? resolved_name : "");
@@ -204,6 +454,12 @@ extern "C" WeaverMediaSession *weaver_media_create(void) {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         state->apartment_initialized = true;
         state->manager = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+        const std::weak_ptr<WeaverMediaEventState> weak_events = state->events;
+        state->manager_token = state->manager.CurrentSessionChanged(
+            [weak_events](const auto &, const auto &) {
+                mark_session_if_alive(weak_events);
+            });
+        state->manager_subscribed = true;
         return state.release();
     } catch (...) {
         return nullptr;
@@ -212,17 +468,50 @@ extern "C" WeaverMediaSession *weaver_media_create(void) {
 
 extern "C" void weaver_media_destroy(WeaverMediaSession *session) { delete session; }
 
-extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *output) {
-    if (!state || !output) return -1;
+extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *output, WeaverMediaArtwork *artwork) {
+    if (!state || !output || !artwork) return -1;
     std::memset(output, 0, sizeof(*output));
+    std::memset(artwork, 0, sizeof(*artwork));
     try {
-        const auto session = state->manager.GetCurrentSession();
+        const bool session_changed = state->events->dirty.take_session();
+        if (session_changed) {
+            rebind_current_session(state);
+            artwork->changed = 1;
+            artwork->session_changed = 1;
+        }
+        const auto session = state->current;
         if (!session) return 0;
-        const auto properties = session.TryGetMediaPropertiesAsync().get();
-        copy_text(output->title, properties.Title());
-        copy_text(output->artist, properties.Artist());
-        copy_text(output->album, properties.AlbumTitle());
-        copy_text(output->source_app, source_app_name(session.SourceAppUserModelId()));
+        const bool properties_dirty = state->events->dirty.take_properties();
+        if (should_refresh_properties(properties_dirty, state->refresh_failed)) {
+            bool refresh_succeeded = false;
+            try {
+                const auto properties = session.TryGetMediaPropertiesAsync().get();
+                state->title = winrt::to_string(properties.Title());
+                state->artist = winrt::to_string(properties.Artist());
+                state->album = winrt::to_string(properties.AlbumTitle());
+                refresh_succeeded = read_thumbnail(properties.Thumbnail(), artwork);
+            } catch (...) {
+                refresh_succeeded = false;
+            }
+            state->refresh_failed = !refresh_succeeded;
+            if (refresh_succeeded) {
+                state->refresh_failure_count = 0;
+            } else {
+                state->refresh_failure_count = next_refresh_failure_count(state->refresh_failure_count);
+                if (refresh_retry_exhausted(state->refresh_failure_count)) {
+                    // Resolve refreshed metadata without stale art after a
+                    // bounded window. Later subscribed polls keep retrying, so
+                    // a recovered source can still publish artwork.
+                    artwork->unavailable = 1;
+                    artwork->changed = 1;
+                }
+            }
+        }
+        artwork->refresh_failed = state->refresh_failed ? 1 : 0;
+        copy_text(output->title, state->title);
+        copy_text(output->artist, state->artist);
+        copy_text(output->album, state->album);
+        copy_text(output->source_app, state->source_app);
         const auto playback = session.GetPlaybackInfo();
         switch (playback.PlaybackStatus()) {
             case winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing:
@@ -245,4 +534,54 @@ extern "C" int weaver_media_poll(WeaverMediaSession *state, WeaverMediaState *ou
     } catch (...) {
         return -2;
     }
+}
+
+extern "C" void weaver_media_artwork_release(WeaverMediaArtwork *artwork) {
+    if (!artwork) return;
+    delete[] artwork->bytes;
+    std::memset(artwork, 0, sizeof(*artwork));
+}
+
+extern "C" int weaver_media_test_dirty_coalescing(void) {
+    WeaverMediaDirtyFlags dirty;
+    if (!dirty.take_session() || dirty.take_session()) return 0;
+    if (!dirty.take_properties() || dirty.take_properties()) return 0;
+    dirty.mark_properties();
+    dirty.mark_properties();
+    return dirty.take_properties() && !dirty.take_properties();
+}
+
+extern "C" int weaver_media_test_event_lifetime(void) {
+    auto events = std::make_shared<WeaverMediaEventState>();
+    const std::weak_ptr<WeaverMediaEventState> weak_events = events;
+    if (!events->dirty.take_session() || !events->dirty.take_properties()) return 0;
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    if (!events->dirty.take_session() || !events->dirty.take_properties()) return 0;
+    events->active.store(false, std::memory_order_release);
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    if (events->dirty.take_session() || events->dirty.take_properties()) return 0;
+    events.reset();
+    mark_session_if_alive(weak_events);
+    mark_properties_if_alive(weak_events);
+    return weak_events.expired() ? 1 : 0;
+}
+
+extern "C" int weaver_media_test_refresh_retry(void) {
+    if (should_refresh_properties(false, false)) return 0;
+    if (!should_refresh_properties(true, false)) return 0;
+    if (!should_refresh_properties(false, true)) return 0;
+    return should_refresh_properties(true, true) ? 1 : 0;
+}
+
+extern "C" int weaver_media_test_refresh_failure_bound(void) {
+    uint32_t count = 0;
+    count = next_refresh_failure_count(count);
+    if (refresh_retry_exhausted(count)) return 0;
+    count = next_refresh_failure_count(count);
+    if (refresh_retry_exhausted(count)) return 0;
+    count = next_refresh_failure_count(count);
+    if (!refresh_retry_exhausted(count)) return 0;
+    return next_refresh_failure_count(count) == max_artwork_refresh_attempts ? 1 : 0;
 }
