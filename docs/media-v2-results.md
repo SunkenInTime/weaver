@@ -2,6 +2,25 @@
 
 Date: 2026-07-25
 
+## 2026-07-26 attended-Mac final addendum
+
+The remediated Weaver implementation is now **ATTENDED PASS WITH ONE RATE
+GAP**, superseding the round-3 “not yet completed” and “needs attended Mac”
+statements below. On an M2 Mac running macOS 26.5.1, real metadata, artwork,
+transport, honest seek/no-session false, helper and player lifecycle,
+idle-zero, Noro controls/pixels, channel recovery, drag, and persistence all
+passed. The only attended product check not run was a real payload reporting
+`playbackRate: 2`; that behavior remains unit-covered.
+
+The attended run found four live-only defects. The accepted stack now uses
+short `posix.read` calls for persistent adapter/command/ack streams, one Zig
+awake-clock domain for provider watchdog supervision, and a transparent
+312x12 Noro seek target over the unchanged 312x3 pixels. The Windows paused
+pre/fixed A/B had identical SHA-256 and zero differing pixels, and a real
+pointer click visibly sought the Spotify session. Full evidence is in
+`docs/media-evidence/pr05-mac-verify.md` and
+`docs/media-evidence/pr05-visual.md`.
+
 ## 2026-07-26 round-3 addendum
 
 The Objective-C helper tests and hosted macOS session passed on the completed

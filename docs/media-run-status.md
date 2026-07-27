@@ -15,6 +15,33 @@ Last updated: 2026-07-26
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
 
+## Attended Mac verification and live-only fold (2026-07-26)
+
+The attended M2/macOS 26.5.1 run is **PASS WITH ONE REMAINING ATTENDED
+GAP**. The full report and viewed captures are in
+`docs/media-evidence/pr05-mac-verify.md`. Real Spotify/Music/QuickTime checks
+passed metadata/artwork, pause/play/next/previous, honest seek and no-session
+false, helper kill/backoff/recovery, player quit/relaunch, 65-second
+idle-zero, Noro pixels/controls, channel recovery, drag, and persisted
+geometry. The only attended product check not run was a session reporting
+`playbackRate: 2`; that path remains unit-covered but attended-unverified.
+
+Four live-only defects found during that run are folded at their owning
+layers with attribution to evidence commit `72d04c2`:
+
+- layer 03 uses `posix.read` for short persistent UDS commands/acks and gives
+  accepted-socket closure to the reader after shutdown-before-join;
+- layer 04 uses `poll(2)` plus `posix.read` for short adapter frames and feeds
+  provider supervision from the same Zig awake-clock domain as the worker;
+- layer 05 adds a transparent 312x12 seek target without changing the visible
+  312x3 strip.
+
+The Windows Noro fold gate is also PASS. A paused pre-fix/fixed A/B produced
+two exact 340x356 captures with the same SHA-256 and zero differing pixels.
+A real pointer click on the enlarged layer visibly sought the paused Spotify
+track from `01:40` to `02:33`. Captures and the per-element checklist are in
+`docs/media-evidence/pr05-visual.md`.
+
 ## Completed gates
 
 - Required implementation brief, contracts, ADRs, roadmap, API orders, and
@@ -226,7 +253,10 @@ this one only after those runs complete.
 | #36 / 04 | `9c31229` | `30193380839` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
 | #35 / 05 | `12d5040` | `30193381494` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
 
-## Blockers and unverified gates
+## Superseded pre-attended blockers
+
+This historical list is retained to show what the attended run closed. It is
+superseded by the final blocker list immediately below.
 
 - None for the Windows stack.
 - The attended route spike is PASSED per
@@ -244,6 +274,21 @@ this one only after those runs complete.
 - Exact macOS 15.4-floor execution is separately **UNVERIFIED (needs attended
   Mac running 15.4)**. The runtime ProcessInfo gate is implemented and tested
   statically; no helper is spawned below the floor.
+
+## Final blockers and unverified gates
+
+- None for the Windows stack.
+- The attended Mac implementation gate is PASSED per
+  `docs/media-evidence/pr05-mac-verify.md`.
+- The sole remaining attended product gap is a real session reporting
+  `playbackRate: 2`; the rate parser, timeline advancement, and seek tolerance
+  remain unit-covered, but the attended 2x check was **NOT RUN**.
+- Exact macOS 15.4-floor execution is separately unverified. The runtime
+  ProcessInfo gate is implemented and tested, but the attended machine ran
+  macOS 26.5.1.
+- Developer-ID signing, secure timestamp, notarization, quarantine, and
+  Gatekeeper remain distribution gates, not unresolved attended media
+  behavior. Mac App Store distribution remains unsupported by ADR 0017.
 
 ## Current work
 
@@ -281,13 +326,15 @@ fixes the three partial/new P1s and four P2s through layer 05:
 
 | Round-3 item | Owning layer | Accepted state |
 |---|---|---|
-| post-frame idle work | 04 | Fixed locally: startup alone uses bounded watchdog polls; a proven stream blocks indefinitely on stdout/HUP. Hosted macOS result pending. |
-| runtime-detected send failure | 04 | Fixed locally: failure marks the channel fatal and wakes/exits the runtime through crash supervision. The hosted full PID/endpoint/frame/command recovery gate is pending. |
-| stale result narrative | 05 | Fixed: results now distinguish the completed round-2 hosted jobs from the not-yet-completed round-3 heads. |
+| post-frame idle work | 04 | PASS attended: after the first frame the worker blocks on stdout/HUP; the 65-second paused run measured heartbeat-scale work rather than 10 Hz wakeups. |
+| runtime-detected send failure | 04 | PASS attended: channel recovery resumed transport without stranding the widget; synthetic crash-restart coverage remains in CI. |
+| live short reads / clock domain | 03/04 | Fixed from attended verification: short adapter frames, commands, and acks publish without EOF; watchdog supervision uses the worker's awake clock. |
+| Noro hit target | 05 | PASS attended Mac and Windows: transparent 12 px layer receives hardware input; Windows A/B is pixel-identical. |
+| stale result narrative | 05 | Fixed: attended and CI evidence are reported separately, with only the 2x attended gap left open. |
 
 ## Next executable task
 
-Commit/push the layer-05 restack, run every local head gate, then wait for and
-record every actual Actions result. In particular, hosted macOS must
-compile/link the helper and pass the full runtime-fatal recovery gate before
-this document calls that behavior remotely verified.
+Finish the layer-05 local gate, push the restacked 03/04/05 heads, and record
+the clean full GitHub Actions wave for all five exact heads. The previous
+04/05 runs were cancelled during the attended Mac checkout and are not
+treated as failures or passes.

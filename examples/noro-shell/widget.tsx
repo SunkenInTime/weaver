@@ -47,22 +47,23 @@ export default widget({
               <text class="grow text-center truncate text-[13px] tracking-wide text-[#ffffff] font-[Cozette-Subset]">{media.title ? media.title.toUpperCase() : "OPEN PLAYER"}</text>
               <text class="w-[88px] text-right text-[13px] text-[#ffffff] font-[Cozette-Subset]">{clock(time.hh, time.mm)}</text>
             </row>
+            <row class="w-full h-[3px] bg-[#ffffff]/5">
+              {Array.from({ length: progressSegments }, (_, index) => (
+                index < filledSegments
+                  ? <panel class="w-[13px] h-full bg-[#ffffff]" />
+                  : <panel class="w-[13px] h-full" />
+              ))}
+            </row>
+          </column>
+          <column class="size-full justify-end">
             <button
-              class="w-full h-[3px] bg-[#ffffff]/5"
+              class="w-full h-[12px] bg-transparent"
               onPress={(event) => {
                 if (media.durationMs <= 0) return;
                 const normalized = Math.max(0, Math.min(1, event?.u ?? 0));
                 void transport.seek(Math.round(normalized * media.durationMs));
               }}
-            >
-              <row class="size-full">
-                {Array.from({ length: progressSegments }, (_, index) => (
-                  index < filledSegments
-                    ? <panel class="w-[13px] h-full bg-[#ffffff]" />
-                    : <panel class="w-[13px] h-full" />
-                ))}
-              </row>
-            </button>
+            />
           </column>
         </stack>
 

@@ -153,3 +153,43 @@ light (2026-07-26). `widget.tsx` now renders the red dot only when
 live against Spotify and viewed: `pr05-rec-dot-playing.png` (dot present,
 pause glyph) and `pr05-rec-dot-paused.png` (no dot, no placeholder artifact,
 play glyph).
+
+## Attended-Mac hit-target fold: Windows visual/click gate (2026-07-26)
+
+The attended-Mac verification found that painted descendants could win
+hit-testing over the 312x3 seek control. The folded fix keeps the visible
+metadata/progress column byte-for-byte in its original layout and adds a
+separate transparent 312x12 button layer over the bottom of the artwork.
+This Windows gate used the real ReleaseFast runtime/host, `weaver dev
+examples/noro-shell`, and a live Spotify session.
+
+For the visual A/B, Spotify was paused at `01:40`. The exact 340x356 widget
+region was captured once with the old 3 px button and once with the corrected
+transparent overlay. Both captures were opened and viewed at original
+resolution:
+
+- `pr05-win-hit-overlay-ab-prefix.png`
+- `pr05-win-hit-overlay-ab-postfix.png`
+
+Both PNGs have SHA-256
+`9D00225554F91E4D59505CAA5C9F3D9CAC5B8E6CB53C2C58F168037C5A53E54B`.
+A per-pixel comparison found `0 / 121040` differing pixels. The temporary
+pre-fix source was removed; the committed source is the corrected overlay.
+
+A real Windows pointer down/up was then delivered at screen coordinate
+`(2011,218)`, 75% across the transparent seek target. The paused live position
+visibly moved from `01:40` to `02:33`; the settled result is the viewed
+`pr05-win-hit-overlay-final.png`. This proves the enlarged layer receives a
+hardware click and dispatches the live seek path.
+
+| Element | Present | Positioned | Styled | Correct data | Result |
+|---|---:|---:|---:|---:|---|
+| 340x356 shell | PASS | PASS | PASS | N/A | PASS |
+| Artwork, grain/grid, REC indicator | PASS | PASS | PASS | PASS, live Spotify | PASS |
+| Elapsed/title/clock baseline | PASS | PASS | PASS | PASS | PASS |
+| Visible 312x3 segmented strip | PASS | PASS | PASS | PASS | PASS |
+| Transparent 312x12 hit target | PASS | PASS | PASS, invisible | PASS, real click | PASS |
+| Separator and transport controls | PASS | PASS | PASS | PASS | PASS |
+
+Overall result: **PASS**. The hit-target change is pixel-identical to the
+pre-fix shell while restoring reliable hardware interaction.
