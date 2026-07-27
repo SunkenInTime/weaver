@@ -1,6 +1,6 @@
 # Media v2 unattended run status
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 ## Stack map
 
@@ -8,9 +8,9 @@ Last updated: 2026-07-26
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`4dcf19c`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`e8748fb`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`56788f5`) |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36 (`b5f4b02`) |
-| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; final implementation/evidence head `e28ccef`, Dara's REC-dot commit preserved |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`7da433e`) |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36 (`ddcbc9e`) |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; final implementation/evidence head `cdff961`, Dara's REC-dot commit preserved |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -52,6 +52,28 @@ directly instead of racing an unrelated debounced `useStorage` write after
 the product contract (new PID, fresh endpoint, resumed frame, successful
 subsequent command) has already passed. The attended report remains the
 ground truth for sustained live recovery.
+
+## Final acknowledgement backpressure repair (2026-07-27)
+
+Greptile's final PR #36 P1 was valid: macOS acknowledgement writes could
+retry for one second per backpressured widget on the shared supervision loop.
+Owning-layer commit `7da433e` replaces that loop with exactly one
+`send(MSG_DONTWAIT | MSG_NOSIGNAL)`. A partial write, EAGAIN, or other error
+marks the per-widget endpoint stopping before shutdown and returns failure
+into the existing channel-failure/crash-restart path. No retry, sleep, or new
+delivery mechanism runs on the loop.
+
+The regression forces the exact production send primitive's backpressure
+result at compile time and proves the next unrelated widget supervision turn
+occurs within 100 ms. This avoids depending on platform socket-buffer sizing
+while still pinning the nonblocking control flow. An earlier real-buffer
+fixture exposed an accept-thread teardown race during CI; the accepted
+production fix (mark stopping before shutdown) remains, while the
+OS-dependent fixture was replaced by the deterministic seam.
+
+All five exact implementation heads passed a fresh complete Actions wave,
+including hosted Apple-silicon sessions. Greptile re-reviewed PR #36 head
+`ddcbc9e` at **5/5**, said it appears safe to merge, and reported no P1s.
 
 ## Completed gates
 
@@ -249,6 +271,11 @@ ground truth for sustained live recovery.
   locally. Layer 02: `npm test` PASS 62/62; layers 03-05: PASS 63/63. Every
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
   18 `weaver check` example gates.
+- Final acknowledgement-backpressure gate: layer 03/04/05 local heads passed
+  `npm test` 63/63, `npm run typecheck`, release audit, runtime
+  `zig build test -Dweb-layer=exclude -Dtrace=off`, host `zig build test`,
+  and all 18 `weaver check` examples. The macOS headless jobs executed the
+  deterministic backpressure/supervision test on both architectures.
 
 ## Final implementation-head GitHub Actions results
 
@@ -258,11 +285,11 @@ and the hosted Apple-silicon session.
 
 | PR | Head evidenced | Actions run | Jobs |
 |---|---|---|---|
-| #32 / 01 | `4dcf19c` | `30173553577` attempt 2 | PASS: all four jobs |
-| #33 / 02 | `e8748fb` | `30211809074` attempt 2 | PASS: all four jobs |
-| #34 / 03 | `56788f5` | `30238087379` | PASS: all four jobs |
-| #36 / 04 | `b5f4b02` | `30239391686` | PASS: all four jobs |
-| #35 / 05 | `e28ccef` | `30239499896` | PASS: all four jobs |
+| #32 / 01 | `4dcf19c` | `30173553577` attempt 3 | PASS: all four jobs |
+| #33 / 02 | `e8748fb` | `30211809074` attempt 3 | PASS: all four jobs |
+| #34 / 03 | `7da433e` | `30300691042` | PASS: all four jobs |
+| #36 / 04 | `ddcbc9e` | `30300703540` | PASS: all four jobs |
+| #35 / 05 | `cdff961` | `30300706695` | PASS: all four jobs |
 
 The layer-05 status-only commit that contains this table changes no
 implementation or evidence. Its post-push exact-head CI result is recorded in
@@ -346,6 +373,11 @@ fixes the three partial/new P1s and four P2s through layer 05:
 | live short reads / clock domain | 03/04 | Fixed from attended verification: short adapter frames, commands, and acks publish without EOF; watchdog supervision uses the worker's awake clock. |
 | Noro hit target | 05 | PASS attended Mac and Windows: transparent 12 px layer receives hardware input; Windows A/B is pixel-identical. |
 | stale result narrative | 05 | Fixed: attended and CI evidence are reported separately, with only the 2x attended gap left open. |
+
+| Final targeted item | Owning layer | Accepted state |
+|---|---|---|
+| acknowledgement backpressure | 03 | Fixed: one nonblocking send attempt on the shared loop; failure stops/shuts down the per-widget channel and uses the existing crash-restart path. The unrelated-widget latency test passes on both macOS architectures. |
+| PR #36 review gate | 04 | PASS: exact head `ddcbc9e` is fully green and Greptile re-scored it 5/5 with zero P1s. |
 
 ## Next executable task
 
