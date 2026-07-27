@@ -431,8 +431,6 @@ pub const MediaProvider = struct {
             }
             var malformed = false;
             var saw_frame = false;
-            var reader_buffer: [64 * 1024]u8 = undefined;
-            var reader = child.stdout.?.reader(self.io, &reader_buffer);
             var pending: [media_stream_line_bytes]u8 = undefined;
             var pending_len: usize = 0;
             var chunk: [64 * 1024]u8 = undefined;
@@ -460,7 +458,12 @@ pub const MediaProvider = struct {
                     break;
                 }
                 if (ready == 0) continue;
-                const read = reader.interface.readSliceShort(&chunk) catch {
+                // poll(2) proves that at least one byte or EOF is ready. Read
+                // only what the pipe currently has: Reader.readSliceShort
+                // instead waits for all 64 KiB or EOF, which strands a valid
+                // newline-terminated adapter frame smaller than this buffer
+                // while the long-lived helper remains open.
+                const read = readAdapterStdout(child.stdout.?.handle, &chunk) catch {
                     malformed = true;
                     break;
                 };
@@ -481,7 +484,8 @@ pub const MediaProvider = struct {
                         pending[start..end],
                         frame_now_ms,
                         realEpochMicroseconds(self.io),
-                    ) catch {
+                    ) catch |err| {
+                        std.log.warn("macOS media adapter frame rejected: {s}", .{@errorName(err)});
                         malformed = true;
                         break;
                     };
@@ -503,11 +507,15 @@ pub const MediaProvider = struct {
                 }
             }
             if (malformed and child.id != null) child.kill(self.io);
-            if (child.id != null) _ = child.wait(self.io) catch {};
+            const child_term = if (child.id != null) child.wait(self.io) catch null else null;
             self.child_pid.store(0, .release);
             self.attempt_state.store(0, .release);
             self.attempt_started_ms.store(0, .release);
             if (self.stopping.load(.acquire)) break;
+            std.log.warn(
+                "macOS media adapter stream ended saw_frame={} malformed={} term={any}",
+                .{ saw_frame, malformed, child_term },
+            );
             self.recordLoss();
             backoff_ms = restartBackoff(backoff_ms, awakeMilliseconds(self.io) -| started_ms, saw_frame);
             self.sleepBackoff(backoff_ms);
@@ -520,6 +528,10 @@ pub const MediaProvider = struct {
         const started_ms = self.attempt_started_ms.load(.acquire);
         if (started_ms == 0 or now_ms -| started_ms < media_first_frame_deadline_ms) return;
         if (self.attempt_state.cmpxchgStrong(1, 2, .acq_rel, .acquire) != null) return;
+        std.log.warn(
+            "macOS media adapter first-frame deadline expired now_ms={d} started_ms={d} elapsed_ms={d}",
+            .{ now_ms, started_ms, now_ms -| started_ms },
+        );
         // This runs on the existing 1 Hz host provider supervision tick, so it
         // remains effective even if the stream worker is stuck in spawn,
         // poll, or read. The loss frame is published immediately; killing the
@@ -672,6 +684,10 @@ fn secondsToMilliseconds(seconds: f64) u64 {
     return @intFromFloat(@round(milliseconds));
 }
 
+fn readAdapterStdout(fd: posix.fd_t, buffer: []u8) posix.ReadError!usize {
+    return posix.read(fd, buffer);
+}
+
 fn microsecondsToMilliseconds(microseconds: f64) u64 {
     if (!std.math.isFinite(microseconds) or microseconds <= 0) return 0;
     const milliseconds = microseconds / 1000.0;
@@ -746,6 +762,10 @@ fn adapterEofIsProtocolFailure(pending_len: usize) bool {
 
 fn awakeMilliseconds(io: std.Io) u64 {
     return @intCast(@max(0, std.Io.Timestamp.now(io, .awake).nanoseconds) / std.time.ns_per_ms);
+}
+
+pub fn mediaClockMilliseconds(io: std.Io) u64 {
+    return awakeMilliseconds(io);
 }
 
 fn realEpochMicroseconds(io: std.Io) u64 {
@@ -1067,6 +1087,36 @@ test "macOS adapter has no post-frame idle timeout wakeups" {
     for ([_]u64{ 1000, 1100, 11_000, 99_000, std.math.maxInt(u64) }) |now_ms| {
         try std.testing.expectEqual(@as(?u64, null), firstFramePollTimeoutMs(1000, now_ms, true));
     }
+}
+
+test "macOS adapter consumes a short complete frame without waiting for helper EOF" {
+    var child = try std.process.spawn(std.testing.io, .{
+        .argv = &.{ "/bin/sh", "-c", "printf 'short frame\\n'; sleep 2" },
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .ignore,
+    });
+    defer {
+        if (child.id != null) {
+            child.kill(std.testing.io);
+            _ = child.wait(std.testing.io) catch {};
+        }
+    }
+
+    var descriptor: c.struct_pollfd = .{
+        .fd = child.stdout.?.handle,
+        .events = c.POLLIN | c.POLLHUP,
+        .revents = 0,
+    };
+    try std.testing.expectEqual(@as(c_int, 1), c.poll(&descriptor, 1, 1000));
+
+    var buffer: [64 * 1024]u8 = undefined;
+    const started_ms = awakeMilliseconds(std.testing.io);
+    const read = try readAdapterStdout(child.stdout.?.handle, &buffer);
+    const elapsed_ms = awakeMilliseconds(std.testing.io) -| started_ms;
+    try std.testing.expectEqualStrings("short frame\n", buffer[0..read]);
+    try std.testing.expect(read < buffer.len);
+    try std.testing.expect(elapsed_ms < 500);
 }
 
 test "macOS hosted seam publishes once per subscription epoch without idle work" {
