@@ -72,19 +72,6 @@ function alive(pid) {
   catch { return false; }
 }
 
-function transportOutcome() {
-  const directory = join(dataRoot, "storage");
-  if (!existsSync(directory)) return null;
-  for (const name of readdirSync(directory)) {
-    if (!name.endsWith(".json")) continue;
-    try {
-      const value = JSON.parse(readFileSync(join(directory, name), "utf8"));
-      if (typeof value.transport === "string") return value.transport;
-    } catch { /* Ignore a concurrently replaced or unrelated storage file. */ }
-  }
-  return null;
-}
-
 function widgetLogs() {
   const directory = join(environment.HOME, "Library", "Logs", "Weaver");
   if (!existsSync(directory)) return "(no widget log directory)";
@@ -248,10 +235,19 @@ export default widget({
     .map((entry) => entry.name);
   assert.equal(replacementRecoverySockets.length, 1, "replacement recovery Widget did not own exactly one provider endpoint");
   assert.notEqual(replacementRecoverySockets[0], firstRecoverySockets[0], "supervision reused the failed provider endpoint");
-  await waitFor("successful media command after runtime-fatal recovery", () => {
-    const outcome = transportOutcome();
-    return outcome === "resolved:false" && outcome;
-  }, 15_000);
+  // The attended 2026-07-26 run in pr05-mac-verify.md proves the recovered
+  // channel remains usable on real hardware. This hosted seam's product
+  // contract is the replacement PID/endpoint, resumed provider frame, and a
+  // subsequent command callback. Observe that callback at its runtime log
+  // boundary instead of waiting for useStorage's unrelated debounced file
+  // write; keeping the deliberately crash-injected fixture alive after the
+  // callback races the synthetic supervisor backoff and tests persistence,
+  // not media-channel recovery.
+  await waitFor(
+    "successful media command after runtime-fatal recovery",
+    () => widgetLogs().includes("media recovery command resolved:false"),
+    15_000,
+  );
   run(["uninstall", "Media Recovery"]);
   await waitFor("media recovery teardown", () => status()?.widgets?.length === 0);
 

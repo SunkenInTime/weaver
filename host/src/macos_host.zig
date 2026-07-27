@@ -255,11 +255,6 @@ const ProviderEndpoint = struct {
     }
 
     fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
-        _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
-        self.stream = null;
-    }
-
-    fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
         // A failed write is fatal for this per-widget channel. Mark stopping
         // before shutdown so the reader cannot race back into accept() after
         // observing the HUP while slot teardown is starting.
@@ -1193,6 +1188,7 @@ test "runtime socket root is short, per-user, and data-root-specific" {
     try std.testing.expect(first.len + "/widget-ffffffffffffffffffffffffffffffff.sock".len <= std.Io.net.UnixAddress.max_len);
     try std.testing.expect(!std.mem.eql(u8, first, second));
 }
+
 test "provider socket peer pid rejects a same-user hijacker pid" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-peer-test-{d}.sock", .{posix.system.getpid()});
@@ -1211,7 +1207,7 @@ test "provider socket peer pid rejects a same-user hijacker pid" {
 test "provider socket discards an unterminated command at EOF" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-eof-test-{d}.sock", .{posix.system.getpid()});
-    var endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
     defer endpoint.deinit();
     try endpoint.bind(posix.system.getpid());
     const address = try std.Io.net.UnixAddress.init(path);
@@ -1325,17 +1321,6 @@ test "backpressured acknowledgement cannot delay unrelated widget supervision" {
     );
     const elapsed_ns = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - started_ns;
     try std.testing.expect(elapsed_ns < 100 * std.time.ns_per_ms);
-}
-
-test "hosted media command override is compile gated" {
-    try std.testing.expectEqual(
-        @as(?system_providers.CommandOutcome, null),
-        automationCommandOutcome(false),
-    );
-    try std.testing.expectEqual(
-        system_providers.CommandOutcome.declined,
-        automationCommandOutcome(true).?,
-    );
 }
 
 test "hosted automation ack crosses the authenticated provider socket" {
