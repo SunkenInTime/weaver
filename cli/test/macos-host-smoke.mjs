@@ -144,7 +144,11 @@ try {
   assert.ok(mediaRuntimeRoot, "macOS media test could not find the host runtime root");
   const mediaProviderSockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
     .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"));
-  assert.equal(mediaProviderSockets.length, 0, "unavailable media allocated a provider socket or reader thread");
+  assert.equal(
+    mediaProviderSockets.length,
+    1,
+    "transport-capable unavailable media did not allocate its duplex command endpoint",
+  );
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
   assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
   run(["uninstall", "Now Playing"]);
@@ -181,11 +185,15 @@ try {
   run(["install", join(repoRoot, "examples", "system")]);
   run(["install", "system-two"]);
   await waitFor("system-provider fan-out", () => {
-    const providers = status()?.providers;
-    const logs = ["System Monitor.log", "System Monitor 2.log"]
-      .map((name) => join(environment.HOME, "Library", "Logs", "Weaver", name));
-    return providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 && providers.systemFrames >= 4 &&
-      logs.every((path) => existsSync(path) && readFileSync(path, "utf8").includes("widget provider frames applied count=2"));
+    const document = status();
+    const providers = document?.providers;
+    // `systemFrames` counts successful per-endpoint writes, while subscriber
+    // and running-widget counts prove both per-widget endpoints are active.
+    // Do not infer packet boundaries from SOCK_STREAM or log flush timing.
+    return document?.widgets?.length === 2 &&
+      document.widgets.every((widget) => widget.state === "running") &&
+      providers?.systemSubscribers === 2 && providers.systemSampleCount >= 2 &&
+      providers.systemFrames >= providers.systemSubscribers * 4;
   });
   const activeRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))

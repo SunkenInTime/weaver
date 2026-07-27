@@ -1,12 +1,18 @@
 const std = @import("std");
 const audio = @import("audio.zig");
+const media_commands = @import("media_commands.zig");
 const supervisor = @import("supervisor.zig");
 const registry = @import("registry.zig");
 const provider_protocol = @import("provider_protocol.zig");
 const system_providers = @import("providers_macos.zig");
 
 const posix = std.posix;
-const c = @cImport({ @cInclude("macos_system.h"); });
+const c = @cImport({
+    @cInclude("macos_system.h");
+    @cInclude("poll.h");
+    @cInclude("sys/socket.h");
+    @cInclude("sys/un.h");
+});
 
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes = supervisor.max_path_bytes;
@@ -134,9 +140,11 @@ const ProviderEndpoint = struct {
     allocator: std.mem.Allocator,
     path: []u8,
     listener: std.Io.net.Server,
-    thread: std.Thread,
+    thread: ?std.Thread = null,
+    expected_pid: posix.pid_t = 0,
     mutex: std.Io.Mutex = .init,
     stream: ?std.Io.net.Stream = null,
+    command_queue: media_commands.Queue = .{},
     stopping: bool = false,
 
     fn start(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*ProviderEndpoint {
@@ -148,19 +156,24 @@ const ProviderEndpoint = struct {
         errdefer listener.deinit(io);
         const self = try allocator.create(ProviderEndpoint);
         errdefer allocator.destroy(self);
-        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener, .thread = undefined };
-        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, acceptMain, .{self});
+        self.* = .{ .io = io, .allocator = allocator, .path = owned_path, .listener = listener };
         return self;
+    }
+
+    fn bind(self: *ProviderEndpoint, expected_pid: posix.pid_t) !void {
+        self.expected_pid = expected_pid;
+        self.thread = try std.Thread.spawn(.{ .stack_size = 128 * 1024 }, acceptMain, .{self});
     }
 
     fn deinit(self: *ProviderEndpoint) void {
         self.mutex.lockUncancelable(self.io);
         self.stopping = true;
-        if (self.stream) |stream| stream.close(self.io);
+        self.command_queue.stop();
+        if (self.stream) |stream| _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
         self.stream = null;
         self.mutex.unlock(self.io);
         self.listener.deinit(self.io);
-        self.thread.join();
+        if (self.thread) |thread| thread.join();
         std.Io.Dir.cwd().deleteFile(self.io, self.path) catch {};
         const allocator = self.allocator;
         allocator.free(self.path);
@@ -168,25 +181,120 @@ const ProviderEndpoint = struct {
     }
 
     fn acceptMain(self: *ProviderEndpoint) void {
-        const stream = self.listener.accept(self.io) catch return;
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        if (self.stopping) {
+        while (true) {
+            self.mutex.lockUncancelable(self.io);
+            const stopping = self.stopping;
+            self.mutex.unlock(self.io);
+            if (stopping) return;
+            const stream = self.listener.accept(self.io) catch return;
+            if (peerPid(stream) != self.expected_pid) {
+                std.log.warn(
+                    "rejecting provider socket client pid={?}; expected widget pid={d}",
+                    .{ peerPid(stream), self.expected_pid },
+                );
+                stream.close(self.io);
+                continue;
+            }
+            self.mutex.lockUncancelable(self.io);
+            if (self.stopping) {
+                self.mutex.unlock(self.io);
+                stream.close(self.io);
+                return;
+            }
+            self.stream = stream;
+            self.mutex.unlock(self.io);
+
+            var framer: media_commands.Framer = .{};
+            var chunk: [512]u8 = undefined;
+            while (true) {
+                var descriptor: c.struct_pollfd = .{
+                    .fd = stream.socket.handle,
+                    .events = c.POLLIN | c.POLLHUP,
+                    .revents = 0,
+                };
+                const ready = c.poll(&descriptor, 1, -1);
+                if (ready < 0) {
+                    if (posix.errno(ready) == .INTR) continue;
+                    framer.finish(&self.command_queue);
+                    break;
+                }
+                if (ready == 0) continue;
+                // The provider socket stays open for the widget lifetime.
+                // poll(2) blocks without idle work and proves that a short
+                // command or EOF is ready. A bare nonblocking read after a
+                // command can otherwise report EAGAIN and falsely sever the
+                // healthy per-widget channel.
+                const read = posix.read(stream.socket.handle, &chunk) catch |err| switch (err) {
+                    error.WouldBlock => continue,
+                    else => {
+                        framer.finish(&self.command_queue);
+                        break;
+                    },
+                };
+                if (read == 0) {
+                    framer.finish(&self.command_queue);
+                    break;
+                }
+                if (!framer.feed(&self.command_queue, chunk[0..read])) break;
+            }
+            self.mutex.lockUncancelable(self.io);
+            if (self.stream) |active| {
+                if (active.socket.handle == stream.socket.handle) self.stream = null;
+            }
+            const should_stop = self.stopping;
+            self.mutex.unlock(self.io);
+            // The reader thread owns the accepted descriptor. Writers only
+            // shut it down to wake this loop, avoiding close-vs-read races.
             stream.close(self.io);
-            return;
+            if (should_stop) return;
         }
-        self.stream = stream;
+    }
+
+    fn failStreamLocked(self: *ProviderEndpoint, stream: std.Io.net.Stream) void {
+        // A failed write is fatal for this per-widget channel. Mark stopping
+        // before shutdown so the reader cannot race back into accept() after
+        // observing the HUP while slot teardown is starting.
+        self.stopping = true;
+        _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
+        self.stream = null;
+    }
+
+    fn sendCompleteNonblockingImpl(comptime force_backpressure: bool, handle: posix.fd_t, bytes: []const u8) bool {
+        if (force_backpressure) return false;
+        const sent = c.send(
+            handle,
+            bytes.ptr,
+            bytes.len,
+            c.MSG_DONTWAIT | c.MSG_NOSIGNAL,
+        );
+        return sent > 0 and @as(usize, @intCast(sent)) == bytes.len;
+    }
+
+    fn sendCompleteNonblocking(handle: posix.fd_t, bytes: []const u8) bool {
+        return sendCompleteNonblockingImpl(false, handle, bytes);
     }
 
     pub fn write(self: *ProviderEndpoint, bytes: []const u8) bool {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         const stream = self.stream orelse return false;
-        var buffer: [8192]u8 = undefined;
-        var writer = stream.writer(self.io, &buffer);
-        writer.interface.writeAll(bytes) catch return false;
-        writer.interface.flush() catch return false;
-        return true;
+        if (sendCompleteNonblocking(stream.socket.handle, bytes)) return true;
+
+        // This method runs on the shared supervision loop. A partial write,
+        // EAGAIN, or any other error is therefore a channel failure, never an
+        // invitation to retry here. Shutting the stream down makes a partial
+        // newline frame an EOF protocol failure and lets the existing
+        // channel-failure path crash-restart only this widget.
+        self.failStreamLocked(stream);
+        return false;
+    }
+
+    pub fn takeCommand(self: *ProviderEndpoint) ?media_commands.Command {
+        return self.command_queue.take();
+    }
+
+    pub fn takeNack(self: *ProviderEndpoint) ?u64 {
+        return self.command_queue.takeNack();
     }
 };
 
@@ -227,6 +335,7 @@ const MacSlotState = struct {
     process: ?posix.pid_t = null,
     exit_code: ?u32 = null,
     endpoint: ?*ProviderEndpoint = null,
+    command_rate: media_commands.RateLimiter = .{},
     costs: CostSamples = .{},
     threads: u32 = 0,
     backend_path_buffer: [max_path_bytes]u8 = undefined,
@@ -317,6 +426,50 @@ const Host = struct {
         }
     }
 
+    fn drainMediaCommands(self: *Host, now_ms: u64) void {
+        var ack_buffer: [64]u8 = undefined;
+        for (&self.slots) |*slot| {
+            const endpoint = slot.platform.endpoint orelse continue;
+            var channel_failed = false;
+            while (endpoint.takeNack()) |id| {
+                const ack = media_commands.formatAck(id, false, &ack_buffer) catch continue;
+                if (!endpoint.write(ack)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.restartAfterMediaChannelFailure(slot, now_ms);
+                continue;
+            }
+            while (endpoint.takeCommand()) |command| {
+                const allowed = media_commands.authorize(slot.wants_media_transport, &slot.platform.command_rate, now_ms);
+                // The system-wide media adapter is deliberately absent until
+                // the spike-gated layer 04. A valid declared request therefore
+                // reaches weaverd and is honestly declined.
+                const ok = allowed and false;
+                const ack = media_commands.formatAck(command.id, ok, &ack_buffer) catch continue;
+                if (!endpoint.write(ack)) {
+                    channel_failed = true;
+                    break;
+                }
+            }
+            if (channel_failed) {
+                self.restartAfterMediaChannelFailure(slot, now_ms);
+                continue;
+            }
+            if (endpoint.command_queue.malformed.swap(false, .acq_rel)) {
+                std.log.warn("dropping malformed media command frame from widget {s}", .{slot.name()});
+            }
+        }
+    }
+
+    fn restartAfterMediaChannelFailure(self: *Host, slot: *Slot, now_ms: u64) void {
+        std.log.warn("restarting widget {s} after fatal provider channel failure", .{slot.name()});
+        self.stopSlot(slot, false);
+        supervisor.recordChannelFailure(slot, now_ms);
+    }
+
     fn launch(self: *Host, slot: *Slot, now_ms: u64) !void {
         try self.ensureBundle(slot.source());
         const dist = try std.fs.path.join(self.allocator, &.{ slot.source(), "dist" });
@@ -325,15 +478,19 @@ const Host = struct {
         defer self.allocator.free(manifest_path);
         const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, manifest_path, self.allocator, .limited(64 * 1024));
         defer self.allocator.free(manifest_bytes);
-        const Manifest = struct { subscribe: []const []const u8 = &.{}, renderBackend: []const u8 = "software" };
+        const Manifest = struct {
+            subscribe: []const []const u8 = &.{},
+            capabilities: []const []const u8 = &.{},
+            renderBackend: []const u8 = "software",
+        };
         const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
         defer manifest.deinit();
-        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.renderBackend, false);
+        supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.capabilities, manifest.value.renderBackend, false);
 
         // ADR 0015 makes media explicitly unavailable on macOS. A media-only
         // Widget keeps its no-data state without a socket, reader thread, or
         // provider timer; supported providers still share one endpoint.
-        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio;
+        const needs_endpoint = slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media_transport;
         var endpoint_path: ?[]u8 = null;
         defer if (endpoint_path) |path| self.allocator.free(path);
         if (needs_endpoint) {
@@ -369,10 +526,12 @@ const Host = struct {
             .pgid = 0,
         });
         slot.platform.process = child.id.?;
+        if (slot.platform.endpoint) |endpoint| try endpoint.bind(slot.platform.process.?);
         errdefer self.stopSlot(slot, false);
         try self.writeChildMarker(slot.platform.process.?);
         slot.platform.exit_code = null;
         slot.platform.costs = .{};
+        slot.platform.command_rate = .{};
         supervisor.markRunning(slot, now_ms, self.artifactMtime(slot.source()));
     }
 
@@ -491,11 +650,29 @@ const Host = struct {
         const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
         for (&self.slots) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
-            if (provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed) and endpoint.write(cpu)) {
+            const send_cpu = provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed);
+            const send_memory = provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed);
+            if (send_cpu and send_memory) {
+                // One system sample is one socket publication. Keeping the two
+                // newline-delimited frames in a single bounded write prevents
+                // the runtime's 1 Hz drain from phase-splitting CPU and memory
+                // indefinitely while preserving the frozen per-frame wire
+                // format and all-or-nothing delivery accounting.
+                var batch: [cpu_buffer.len + memory_buffer.len]u8 = undefined;
+                @memcpy(batch[0..cpu.len], cpu);
+                @memcpy(batch[cpu.len..][0..memory.len], memory);
+                if (endpoint.write(batch[0 .. cpu.len + memory.len])) {
+                    slot.cpu_sent = true;
+                    slot.memory_sent = true;
+                    self.system_frames += 2;
+                }
+                continue;
+            }
+            if (send_cpu and endpoint.write(cpu)) {
                 slot.cpu_sent = true;
                 self.system_frames += 1;
             }
-            if (provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed) and endpoint.write(memory)) {
+            if (send_memory and endpoint.write(memory)) {
                 slot.memory_sent = true;
                 self.system_frames += 1;
             }
@@ -574,6 +751,19 @@ const Host = struct {
         cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
     }
 };
+
+fn peerPid(stream: std.Io.net.Stream) ?posix.pid_t {
+    var pid: c.pid_t = 0;
+    var length: c.socklen_t = @sizeOf(c.pid_t);
+    if (c.getsockopt(
+        stream.socket.handle,
+        c.SOL_LOCAL,
+        c.LOCAL_PEERPID,
+        &pid,
+        &length,
+    ) != 0) return null;
+    return pid;
+}
 
 pub fn main(init: std.process.Init) void {
     run(init) catch |err| {
@@ -687,6 +877,7 @@ fn run(init: std.process.Init) !void {
         };
         const now = monotonicMilliseconds();
         host.supervise(now);
+        host.drainMediaCommands(now);
         host.sampleAudio(now);
         const audio_availability_changed = audio_availability != host.audio_provider.availability;
         audio_availability = host.audio_provider.availability;
@@ -814,4 +1005,138 @@ test "runtime socket root is short, per-user, and data-root-specific" {
     try std.testing.expect(std.mem.startsWith(u8, first, "/tmp/weaver-"));
     try std.testing.expect(first.len + "/widget-ffffffffffffffffffffffffffffffff.sock".len <= std.Io.net.UnixAddress.max_len);
     try std.testing.expect(!std.mem.eql(u8, first, second));
+}
+
+test "provider socket peer pid rejects a same-user hijacker pid" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-peer-test-{d}.sock", .{posix.system.getpid()});
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid() + 1);
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    defer stream.close(std.testing.io);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(50), .awake);
+    endpoint.mutex.lockUncancelable(std.testing.io);
+    defer endpoint.mutex.unlock(std.testing.io);
+    try std.testing.expect(endpoint.stream == null);
+}
+
+test "provider socket discards an unterminated command at EOF" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-eof-test-{d}.sock", .{posix.system.getpid()});
+    var endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid());
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    // LOCAL_PEERPID is only available while the peer is alive. Keep this
+    // in-process client open until the accept thread has authenticated it;
+    // otherwise a fast close can turn this framing test into a PID-race test.
+    var accepted = false;
+    for (0..100) |_| {
+        endpoint.mutex.lockUncancelable(std.testing.io);
+        accepted = endpoint.stream != null;
+        endpoint.mutex.unlock(std.testing.io);
+        if (accepted) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(accepted);
+    {
+        defer stream.close(std.testing.io);
+        var write_buffer: [256]u8 = undefined;
+        var writer = stream.writer(std.testing.io, &write_buffer);
+        try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"play\",\"id\":1}");
+        try writer.interface.flush();
+    }
+    for (0..100) |_| {
+        if (endpoint.command_queue.malformed.load(.acquire)) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(endpoint.command_queue.malformed.load(.acquire));
+    try std.testing.expect(endpoint.takeCommand() == null);
+}
+
+test "provider socket dispatches a short command while the widget stays connected" {
+    var path_buffer: [96]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-command-live-test-{d}.sock", .{posix.system.getpid()});
+    const endpoint = try ProviderEndpoint.start(std.testing.io, std.testing.allocator, path);
+    defer endpoint.deinit();
+    try endpoint.bind(posix.system.getpid());
+    const address = try std.Io.net.UnixAddress.init(path);
+    const stream = try address.connect(std.testing.io);
+    defer stream.close(std.testing.io);
+
+    var accepted = false;
+    for (0..100) |_| {
+        endpoint.mutex.lockUncancelable(std.testing.io);
+        accepted = endpoint.stream != null;
+        endpoint.mutex.unlock(std.testing.io);
+        if (accepted) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(accepted);
+
+    var write_buffer: [128]u8 = undefined;
+    var writer = stream.writer(std.testing.io, &write_buffer);
+    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"play\",\"id\":17}\n");
+    try writer.interface.flush();
+
+    var command: ?media_commands.Command = null;
+    for (0..100) |_| {
+        command = endpoint.takeCommand();
+        if (command != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(command != null);
+    try std.testing.expectEqual(@as(u64, 17), command.?.id);
+    try std.testing.expectEqual(media_commands.Verb.play, command.?.verb);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(25), .awake);
+    endpoint.mutex.lockUncancelable(std.testing.io);
+    const still_connected = endpoint.stream != null;
+    endpoint.mutex.unlock(std.testing.io);
+    try std.testing.expect(still_connected);
+
+    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"pause\",\"id\":18}\n");
+    try writer.interface.flush();
+    command = null;
+    for (0..100) |_| {
+        command = endpoint.takeCommand();
+        if (command != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(command != null);
+    try std.testing.expectEqual(@as(u64, 18), command.?.id);
+    try std.testing.expectEqual(media_commands.Verb.pause, command.?.verb);
+}
+
+test "backpressured acknowledgement cannot delay unrelated widget supervision" {
+    var unrelated: supervisor.Slot(struct {}) = .{};
+    try unrelated.setRegistration(.{
+        .name = "Unrelated",
+        .sourcePath = "/owned/unrelated",
+        .enabled = true,
+        .dev = false,
+    });
+    unrelated.state = .starting;
+
+    const started_ns = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
+    // Compile-time injection models the EAGAIN/partial-send result at the
+    // exact production primitive without making the test depend on kernel
+    // socket-buffer sizing. The false branch (and this seam) disappear from
+    // production; the real branch above performs exactly one nonblocking
+    // send.
+    try std.testing.expect(!ProviderEndpoint.sendCompleteNonblockingImpl(
+        true,
+        -1,
+        "{\"command\":\"mediaAck\",\"id\":1,\"ok\":true}\n",
+    ));
+    // This is the next widget's turn on the same loop. The old retry loop held
+    // it for one second; the single nonblocking attempt must not.
+    try std.testing.expectEqual(
+        supervisor.SlotAction.launch,
+        supervisor.nextSlotAction(&unrelated, true, false, false, 0),
+    );
+    const elapsed_ns = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - started_ns;
+    try std.testing.expect(elapsed_ns < 100 * std.time.ns_per_ms);
 }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const art_cache = @import("art_cache.zig");
+const media_commands = @import("media_commands.zig");
 
 const native = @cImport({
     @cInclude("windows_providers.h");
@@ -136,6 +137,23 @@ pub const Provider = struct {
             copyText(&frame.art_path, &frame.art_path_len, self.current_art_path[0..self.current_art_path_len]);
         }
         return frame;
+    }
+
+    pub const CommandOutcome = enum { accepted, declined, channel_failure };
+
+    /// Commands acquire the current SMTC session at dispatch time on a
+    /// dedicated worker. Transport capability alone therefore never opens or
+    /// polls the subscription provider.
+    pub fn command(_: *Provider, verb: media_commands.Verb, seek_ms: ?u64) CommandOutcome {
+        const native_verb: c_int = switch (verb) {
+            .play => native.WEAVER_MEDIA_COMMAND_PLAY,
+            .pause => native.WEAVER_MEDIA_COMMAND_PAUSE,
+            .next => native.WEAVER_MEDIA_COMMAND_NEXT,
+            .previous => native.WEAVER_MEDIA_COMMAND_PREVIOUS,
+            .seek => native.WEAVER_MEDIA_COMMAND_SEEK,
+        };
+        const result = native.weaver_media_command(native_verb, seek_ms orelse 0, 2500);
+        return if (result > 0) .accepted else if (result == 0) .declined else .channel_failure;
     }
 
     fn open(self: *Provider, now_ms: u64) void {

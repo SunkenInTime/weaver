@@ -7,8 +7,8 @@ Last updated: 2026-07-25
 | Layer | Branch | Parent | State |
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`2feb700`) |
-| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`2eecd49` plus adversarial repair pending push) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; restack pending |
+| 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`f6a6442`) |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34; round-2 repair locally green |
 | 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36; restack pending |
 | 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; restack pending |
 
@@ -54,19 +54,65 @@ This run will not change the submodule pointer.
   no-art state changes the snapshot. The new retention/no-art test and
   `host: zig build test` pass.
 
+- Layer 03 focused SDK/CLI tests: PASS after fixing two recovered-work
+  integration defects (missing SDK export and a misplaced test fixture).
+- Layer 03 `npm test`: PASS, 63/63 tests.
+- Layer 03 `npm run typecheck`: PASS.
+- Layer 03 `runtime`: `zig build test -Dweb-layer=exclude -Dtrace=off`: PASS.
+  A capability-wall test forces the conditional native bridge path to compile
+  and proves undeclared runtimes receive no `native.mediaCommand`.
+- Layer 03 `host`: `zig build test`: PASS.
+- Layer 03 production builds: runtime and host PASS.
+- Layer 03 example: `weaver check examples/now-playing`: PASS.
+- Layer 03 live gate exposed and repaired a Windows synchronous-duplex
+  deadlock. Both Windows endpoints now use overlapped I/O while preserving the
+  dedicated blocking reader and sole-host-writer contract. Runtime and host
+  Zig test/build gates pass after the repair.
+- Layer 03 real Spotify verbs: PASS. Play, pause, next, previous, and seek all
+  resolved `true`; titles changed for next/previous, and seek reached 129 s
+  for a 128 s target.
+- Layer 03 visual gate: PASS. Viewed captures and the per-element checklist
+  are in `docs/media-evidence/pr03-visual.md`.
+- Layer 03 adversarial repair gate: `npm test` PASS 63/63,
+  `npm run typecheck` PASS, every example directory with `widget.tsx` passed
+  `weaver check`, runtime `zig build test -Dweb-layer=exclude -Dtrace=off`
+  PASS, and host `zig build test` PASS. Direct semantic macOS compilation
+  passed for both `host/src/macos_host.zig` and
+  `runtime/src/provider_macos.zig`.
+- Layer 03 adversarial tests now cover a real mismatched-PID pipe rejection,
+  macOS peer-PID rejection, command and acknowledgement EOF residuals,
+  hostile command bursts, late-ack rollover, an exact 3000 ms deadline,
+  transport-only idle-zero, forced SDK resolution despite a hostile widget
+  tsconfig, and local hook aliases.
+- Layer 03 round-2 repair: `npm test` PASS 63/63, `npm run typecheck`
+  PASS, runtime `zig build test -Dweb-layer=exclude -Dtrace=off` PASS, host
+  `zig build test` PASS, and `weaver check examples/now-playing` PASS.
+  Direct semantic compilation of `runtime/src/provider_macos.zig` for
+  `aarch64-macos` also passes. New deterministic tests cover a connected host
+  that stops reading, the host and runtime cancel-before-read interleavings,
+  fatal shared-channel crash/restart semantics, and SDK-hook calls reached
+  through destructuring, deferred assignment, object properties, and a
+  re-export chain.
+
 ## Blockers and unverified gates
 
 - None for the Windows stack.
-- PR 04 remains spike-gated. This Windows run cannot claim the required real
-  macOS metadata frame or delivered command without recorded external Mac/CI
-  execution evidence.
+- The attended Mac route spike passed with real metadata and a delivered pause
+  command; its evidence enters the stack in layer 04. The round-2 adapter
+  changes still require hosted CI and an attended Mac before any implementation
+  behavior is claimed verified.
 
 ## Current work
 
-The 15-finding adversarial remediation is in progress bottom-up. Layer 02's F9
-repair is committed and published after its complete per-layer gate passed.
+Round-2 remediation is in progress bottom-up. Layer 03 now bounds the macOS
+runtime-to-host command write, makes both Windows reader shutdown sequences
+race-free with persistent shutdown events, traces the SDK transport hook
+through all reviewed binding forms with the resolved-signature backstop, and
+restarts a widget through crash supervision after fatal failure of its shared
+provider channel. The layer is locally green; macOS runtime send behavior is
+compile- and seam-tested here but remains unattended-Mac unverified.
 
 ## Next executable task
 
-Restack layer 03, then fix F1/F2/F3/F4/F10/F11/F12 at the
-transport-owning layer.
+Commit/push the layer-03 round-2 remediation, then restack layer 04 and add the
+first-frame watchdog, convergent seek read-back, and playback-rate timeline.

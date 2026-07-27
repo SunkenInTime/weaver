@@ -645,3 +645,82 @@ drive-absolute paths within the cache at a case-insensitive component boundary.
 Drive-relative, rooted-current-drive, UNC, device-namespace, `..`, missing, and
 prefix-collision paths are rejected. Widgets cannot nominate an additional
 readable root.
+
+## PR 03: media transport capability
+
+Media control is a separate, explicit capability. A widget must declare
+`capabilities: ["media-transport"]`; `subscribe: ["media"]` is not required
+for transport-only widgets. The SDK surface is:
+
+```ts
+interface MediaTransport {
+  play(): Promise<boolean>;
+  pause(): Promise<boolean>;
+  next(): Promise<boolean>;
+  previous(): Promise<boolean>;
+  seek(ms: number): Promise<boolean>;
+}
+
+const transport = useMediaTransport();
+```
+
+`seek` is absolute and accepts only finite, non-negative integer
+milliseconds. The host clamps it to a known session duration. A promise
+resolves `true` only when the OS media API reports success. It resolves
+`false` when a valid request reaches weaverd but the capability is refused,
+there is no session, or the OS declines the operation. Channel
+unavailability, malformed protocol, a three-second timeout, disconnect, and
+shutdown reject.
+
+Each runtime owns one monotonically increasing safe-integer command-ID
+sequence. At most four commands may be pending per widget; a fifth rejects
+immediately. Commands are FIFO, and weaverd accepts at most five verbs per
+widget in any one-second sliding window.
+
+The existing provider endpoint is duplex. Runtime-to-host command lines and
+host-to-runtime acknowledgement lines are newline-delimited JSON:
+
+```json
+{"command":"media","verb":"play","id":1}
+{"command":"media","verb":"seek","seekMs":42000,"id":2}
+{"ack":1,"ok":true}
+```
+
+The command object has exactly `command`, `verb`, optional `seekMs`, and `id`;
+`command` is `"media"` and verbs are `play`, `pause`, `next`, `previous`, or
+`seek`. `seekMs` is present only for `seek`. The acknowledgement object has
+exactly `ack` and `ok`.
+
+The host accepts an endpoint only when the operating system reports that its
+peer PID is the child process launched for that widget slot. A mismatch is
+disconnected before any frame or command is served, and the endpoint is
+recreated or continues accepting the expected child.
+
+One blocking host reader thread per widget validates incremental newline
+framing and enqueues commands without calling platform media APIs or writing
+to the endpoint. EOF with a buffered partial record is a protocol failure;
+the residual is never executed. The host supervision loop is the sole writer
+of provider frames and acknowledgements; it independently checks the declared
+capability and rate limit. Platform operations run on a bounded command
+worker, so an OS API stall cannot block supervision. The negative-
+acknowledgement lane is sized for the four-command pending limit plus the
+five-command rate-limit burst; backpressure prevents accepting another
+command until its required acknowledgement can be represented.
+
+The runtime reader is the sole endpoint reader. It demultiplexes complete
+newline-terminated records by top-level key; EOF residuals are discarded as
+protocol failures. Provider frames retain their four-entry drop-oldest queue.
+Acknowledgements are placed directly into one of four slots reserved by the
+pending command ID. An acknowledgement for an unknown, expired, or duplicate
+ID is counted and dropped without affecting current commands. Runtime writes
+are serialized by a send mutex, and reader arrival wakes the existing app-loop
+provider dispatcher. A transport-only widget creates no repeating provider
+timer. Each pending command arms the earliest exact three-second deadline as a
+one-shot timer; acknowledgement arrival settles it immediately.
+`native.mediaCommand` is absent unless the runtime manifest declares
+`media-transport`.
+
+The proven desktop adapter implements the verbs through system media request
+APIs. The unproven adapter carries the same duplex plumbing in this layer but
+honestly returns `false` for valid commands until its separately spike-gated
+implementation exists.

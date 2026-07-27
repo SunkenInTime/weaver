@@ -65,7 +65,7 @@ interface WidgetConfigData {
   clickThrough?: boolean;
   subscribe?: ("time" | "cpu" | "memory" | "audio" | "media")[];
   origins?: string[];
-  capabilities?: never[];
+  capabilities?: ("media-transport")[];
 }
 
 interface RuntimeManifest {
@@ -77,6 +77,7 @@ interface RuntimeManifest {
   transparent: true;
   origins: string[];
   subscribe: ("time" | "cpu" | "memory" | "audio" | "media")[];
+  capabilities: ("media-transport")[];
   renderBackend: "gpu" | "software";
   fonts: RuntimeFont[];
 }
@@ -216,6 +217,7 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
     transparent: true,
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
+    capabilities: project.config.capabilities ?? [],
     renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
     fonts: project.fonts,
   };
@@ -972,7 +974,9 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   if (value.layer !== undefined && !["desktop", "normal", "topmost"].includes(String(value.layer))) errors.push(locationMessage(sourceFile, node, "config.layer must be desktop, normal, or topmost"));
   if (value.clickThrough !== undefined && typeof value.clickThrough !== "boolean") errors.push(locationMessage(sourceFile, node, "config.clickThrough must be boolean"));
   if (value.subscribe !== undefined && (!Array.isArray(value.subscribe) || value.subscribe.some((item) => !["time", "cpu", "memory", "audio", "media"].includes(String(item))))) errors.push(locationMessage(sourceFile, node, 'config.subscribe supports only "time", "cpu", "memory", "audio", and "media"'));
-  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities) || value.capabilities.length > 0)) errors.push(locationMessage(sourceFile, node, "Widget capabilities are not exposed in M2a; capabilities must be empty"));
+  if (value.capabilities !== undefined && (!Array.isArray(value.capabilities) || value.capabilities.some((item) => item !== "media-transport"))) {
+    errors.push(locationMessage(sourceFile, node, 'config.capabilities supports only "media-transport"'));
+  }
   if (value.origins !== undefined) {
     if (!Array.isArray(value.origins) || value.origins.some((origin) => !validOriginHost(origin))) errors.push(locationMessage(sourceFile, node, 'config.origins entries must be exact hosts such as "api.example.com"'));
   }
@@ -1168,6 +1172,131 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   }
 }
 
+function validateMediaTransportCapability(project: SourceProject, errors: string[]): void {
+  const configPath = join(project.directory, "tsconfig.json");
+  const configRead = ts.readConfigFile(configPath, (path) => readFileSync(path, "utf8"));
+  if (configRead.error) return; // The ordinary TypeScript invocation reports it.
+  const parsed = ts.parseJsonConfigFileContent(configRead.config, ts.sys, project.directory, undefined, configPath);
+  const sdkDirectory = join(repoRoot, "sdk");
+  // Bundling owns these two specifiers regardless of widget-authored paths.
+  // Check must compile the same graph or a local compatible declaration can
+  // hide capability use that the bundle later binds to Weaver's real SDK.
+  const options: ts.CompilerOptions = {
+    ...parsed.options,
+    paths: {
+      ...parsed.options.paths,
+      "@weaver/sdk": [join(sdkDirectory, "index.d.ts")],
+      "@weaver/sdk/jsx-runtime": [join(sdkDirectory, "jsx-runtime.d.ts")],
+    },
+  };
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options });
+  const checker = program.getTypeChecker();
+
+  const sdkHookDeclaration = (declaration: ts.Declaration | undefined): boolean => {
+    if (!declaration) return false;
+    const path = resolve(declaration.getSourceFile().fileName);
+    if (!pathsEqual(path, sdkDirectory) && !pathInside(sdkDirectory, path)) return false;
+    const named = declaration as ts.Declaration & { name?: ts.DeclarationName };
+    if (!named.name) return false;
+    let symbol = checker.getSymbolAtLocation(named.name);
+    if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    return symbol?.getName() === "useMediaTransport";
+  };
+
+  const assignments = new Map<ts.Symbol, ts.Expression[]>();
+  const canonicalSymbol = (node: ts.Node): ts.Symbol | undefined => {
+    let symbol = checker.getSymbolAtLocation(node);
+    const seen = new Set<ts.Symbol>();
+    while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !seen.has(symbol)) {
+      seen.add(symbol);
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    return symbol;
+  };
+  const rememberAssignment = (target: ts.Expression, value: ts.Expression): void => {
+    const symbol = canonicalSymbol(target);
+    if (!symbol) return;
+    const values = assignments.get(symbol) ?? [];
+    values.push(value);
+    assignments.set(symbol, values);
+  };
+  for (const sourceFile of program.getSourceFiles()) {
+    const indexAssignments = (node: ts.Node): void => {
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        rememberAssignment(node.left, node.right);
+      }
+      ts.forEachChild(node, indexAssignments);
+    };
+    indexAssignments(sourceFile);
+  }
+
+  const tracesSdkHookSymbol = (symbol: ts.Symbol | undefined, seen: Set<ts.Symbol>): boolean => {
+    while (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 && !seen.has(symbol)) {
+      seen.add(symbol);
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    if (!symbol || seen.has(symbol)) return false;
+    seen.add(symbol);
+    if (symbol.getName() === "useMediaTransport" && (symbol.declarations ?? []).some(sdkHookDeclaration)) return true;
+    for (const value of assignments.get(symbol) ?? []) {
+      if (tracesSdkHookNode(value, seen)) return true;
+    }
+    for (const declaration of symbol.declarations ?? []) {
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer && tracesSdkHookNode(declaration.initializer, seen)) return true;
+      if (ts.isPropertyAssignment(declaration) && tracesSdkHookNode(declaration.initializer, seen)) return true;
+      if (ts.isShorthandPropertyAssignment(declaration)) {
+        const valueSymbol = checker.getShorthandAssignmentValueSymbol(declaration);
+        if (tracesSdkHookSymbol(valueSymbol, seen)) return true;
+      }
+      if (ts.isBindingElement(declaration)) {
+        let parent: ts.Node = declaration.parent;
+        while (ts.isObjectBindingPattern(parent) || ts.isArrayBindingPattern(parent) || ts.isBindingElement(parent)) parent = parent.parent;
+        if (ts.isVariableDeclaration(parent) && parent.initializer) {
+          const propertyNode = declaration.propertyName ?? declaration.name;
+          const propertyName = ts.isIdentifier(propertyNode) || ts.isStringLiteral(propertyNode) || ts.isNumericLiteral(propertyNode)
+            ? propertyNode.text
+            : undefined;
+          if (propertyName) {
+            const sourceType = checker.getTypeAtLocation(parent.initializer);
+            if (tracesSdkHookSymbol(checker.getPropertyOfType(sourceType, propertyName), seen)) return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+  function tracesSdkHookNode(node: ts.Node, seen = new Set<ts.Symbol>()): boolean {
+    return tracesSdkHookSymbol(canonicalSymbol(node), seen);
+  }
+  const signatureIsSdkHook = (node: ts.CallExpression): boolean => {
+    const declaration = checker.getResolvedSignature(node)?.getDeclaration();
+    return sdkHookDeclaration(declaration);
+  };
+  const isSdkHook = (node: ts.CallExpression): boolean => {
+    // The signature declaration is the authoritative backstop: TypeScript
+    // preserves the SDK call signature through destructuring, assignments,
+    // object properties, and re-export chains even when the local symbol is a
+    // BindingElement or an inferred variable.
+    return signatureIsSdkHook(node) || tracesSdkHookNode(node.expression);
+  };
+
+  for (const sourceFile of program.getSourceFiles()) {
+    const path = resolve(sourceFile.fileName);
+    if (sourceFile.isDeclarationFile || (!pathsEqual(path, project.directory) && !pathInside(project.directory, path))) continue;
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && isSdkHook(node) && !project.config.capabilities?.includes("media-transport")) {
+        errors.push(locationMessage(
+          sourceFile,
+          node,
+          'useMediaTransport() requires capabilities: ["media-transport"]. Fix: add capabilities: ["media-transport"] to the widget config.',
+        ));
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+}
+
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
   const usedProviders = new Set<"time" | "cpu" | "memory" | "audio" | "media">();
@@ -1250,6 +1379,7 @@ function validateSource(project: SourceProject): string[] {
   for (const provider of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) errors.push(`useProvider("${provider}") requires subscribe: ["${provider}"] in the widget config`);
   }
+  validateMediaTransportCapability(project, errors);
   validateLoweredTreeBudgets(project, errors);
   return errors;
 }

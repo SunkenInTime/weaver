@@ -13,7 +13,7 @@ export interface WidgetConfig {
   clickThrough?: boolean;
   subscribe?: ("time" | "cpu" | "memory" | "audio" | "media")[];
   origins?: string[];
-  capabilities?: never[];
+  capabilities?: ("media-transport")[];
 }
 
 export interface WidgetModule {
@@ -44,6 +44,13 @@ export interface MediaData {
   artPath?: string;
   positionMs: number;
   durationMs: number;
+}
+export interface MediaTransport {
+  play(): Promise<boolean>;
+  pause(): Promise<boolean>;
+  next(): Promise<boolean>;
+  previous(): Promise<boolean>;
+  seek(ms: number): Promise<boolean>;
 }
 
 export interface WFetchInit {
@@ -81,6 +88,7 @@ export function useProvider(name: "cpu"): CpuData;
 export function useProvider(name: "memory"): MemoryData;
 export function useProvider(name: "audio"): AudioData;
 export function useProvider(name: "media"): MediaData;
+export function useMediaTransport(): MediaTransport;
 export function useStorage<T>(key: string, initial: T): [T, (next: T | ((prev: T) => T)) => void];
 export function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
 
