@@ -56,9 +56,11 @@ function ownedEntries() {
   return existsSync(widgetsRoot) ? readdirSync(widgetsRoot).sort() : [];
 }
 
-function waitForOutput(child, token, timeoutMs = 5_000) {
+function waitForOutput(child, token, timeoutMs = 30_000) {
   return new Promise((resolvePromise, rejectPromise) => {
     let output = "";
+    // Shared CI filesystems can delay visibility to a separate tailing process;
+    // keep this smoke bounded without treating a five-second delay as failure.
     const timeout = setTimeout(() => rejectPromise(new Error(`Timed out waiting for log follower token ${token}\noutput:\n${output}`)), timeoutMs);
     child.stdout.on("data", (bytes) => {
       output += bytes;

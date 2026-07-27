@@ -19,16 +19,23 @@ typedef struct WeaverMediaState {
     char title[512];
     char artist[512];
     char album[512];
+    char source_app[257];
     int playing;
+    int status;
     int64_t position_ms;
     int64_t duration_ms;
 } WeaverMediaState;
+
+#define WEAVER_MEDIA_STATUS_STOPPED 0
+#define WEAVER_MEDIA_STATUS_PLAYING 1
+#define WEAVER_MEDIA_STATUS_PAUSED 2
 
 typedef struct WeaverMediaSession WeaverMediaSession;
 
 WeaverMediaSession *weaver_media_create(void);
 void weaver_media_destroy(WeaverMediaSession *session);
 int weaver_media_poll(WeaverMediaSession *session, WeaverMediaState *state);
+void weaver_media_select_source_app(const char *raw_id, const char *resolved_name, char output[257]);
 
 #ifdef __cplusplus
 }

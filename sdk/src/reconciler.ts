@@ -38,7 +38,16 @@ export interface TimeData {
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
 export interface AudioData { rms: number; bands: number[] }
-export interface MediaData { title: string; artist: string; album: string; playing: boolean; positionMs: number; durationMs: number }
+export interface MediaData {
+  title: string;
+  artist: string;
+  album: string;
+  status: "playing" | "paused" | "stopped";
+  playing: boolean;
+  sourceApp: string;
+  positionMs: number;
+  durationMs: number;
+}
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
 export interface CanvasFrame { t: number; dt: number }
@@ -295,7 +304,16 @@ export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData
     useEffect(() => hostProviders.subscribeAudio(setValue), []);
     return value;
   }
-  const [value, setValue] = useState<MediaData>(() => ({ title: "", artist: "", album: "", playing: false, positionMs: 0, durationMs: 0 }));
+  const [value, setValue] = useState<MediaData>(() => ({
+    title: "",
+    artist: "",
+    album: "",
+    status: "stopped",
+    playing: false,
+    sourceApp: "",
+    positionMs: 0,
+    durationMs: 0,
+  }));
   useEffect(() => hostProviders.subscribeMedia(setValue), []);
   return value;
 }

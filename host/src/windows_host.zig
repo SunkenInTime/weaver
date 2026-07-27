@@ -108,7 +108,7 @@ const Host = struct {
     previous_memory: [512]u8 = undefined,
     previous_memory_len: usize = 0,
     system_frames: u64 = 0,
-    previous_media: [2048]u8 = undefined,
+    previous_media: [media.max_media_frame_bytes]u8 = undefined,
     previous_media_len: usize = 0,
     audio_pipe_frames: u64 = 0,
     media_pipe_frames: u64 = 0,
@@ -430,8 +430,11 @@ const Host = struct {
         self.media_provider.setActive(active, now_ms);
         if (!active) return;
         const frame = self.media_provider.poll(now_ms) orelse return;
-        var buffer: [2048]u8 = undefined;
-        const encoded = media.formatFrame(&frame, &buffer) catch return;
+        var buffer: [media.max_media_frame_bytes]u8 = undefined;
+        const encoded = media.formatFrame(&frame, &buffer) catch |err| {
+            std.log.err("media frame exceeded protocol bound or failed to encode: {s}", .{@errorName(err)});
+            return;
+        };
         const changed = !std.mem.eql(u8, encoded, self.previous_media[0..self.previous_media_len]);
         var delivered = false;
         for (&self.slots) |*slot| {
