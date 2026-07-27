@@ -8,9 +8,9 @@ Last updated: 2026-07-26
 |---|---|---|---|
 | 01/05 | `media/01-status-sourceapp` | `master` (`b1199b5`) | DRAFT PR #32 (`4dcf19c`) |
 | 02/05 | `media/02-album-art` | layer 01 | DRAFT PR #33 (`e8748fb`) |
-| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`d3753b2`); restacked on the final layer-02 repair |
-| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36 (`4495be9`); round-3 repair pushed |
-| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; round-3 implementation head `6f73027`, Dara's REC-dot commit preserved |
+| 03/05 | `media/03-transport` | layer 02 | DRAFT PR #34 (`56788f5`) |
+| 04/05 | `media/04-macos-adapter` | layer 03 | DRAFT PR #36 (`b5f4b02`) |
+| 05/05 | `media/05-noro-gate` | layer 04 | DRAFT PR #35; final implementation/evidence head `e28ccef`, Dara's REC-dot commit preserved |
 
 The Native SDK submodule remains at `3f6a68b606e110087b5992cbe75f700051f1b7f3`.
 This run will not change the submodule pointer.
@@ -41,6 +41,17 @@ two exact 340x356 captures with the same SHA-256 and zero differing pixels.
 A real pointer click on the enlarged layer visibly sought the paused Spotify
 track from `01:40` to `02:33`. Captures and the per-element checklist are in
 `docs/media-evidence/pr05-visual.md`.
+
+The clean fold CI exposed one hosted-only follow-up without invalidating the
+attended behavior: the command/ack UDS descriptors are nonblocking, so a bare
+second `posix.read` could misclassify the normal between-frame `EAGAIN` as
+channel loss. Layer 03 now blocks in `poll(2)` before every short UDS read and
+tests two commands and two acknowledgements separated by idle time. The
+hosted recovery seam also observes the successful post-restart callback
+directly instead of racing an unrelated debounced `useStorage` write after
+the product contract (new PID, fresh endpoint, resumed frame, successful
+subsequent command) has already passed. The attended report remains the
+ground truth for sustained live recovery.
 
 ## Completed gates
 
@@ -239,19 +250,23 @@ track from `01:40` to `02:33`. Captures and the per-element checklist are in
   layer passed `npm run typecheck`, runtime and host `zig build test`, and all
   18 `weaver check` example gates.
 
-## Superseded round-2 GitHub Actions results
+## Final implementation-head GitHub Actions results
 
-All conclusions below were actual completed results for the named heads. They
-do not project the still-running round-3 heads; a final table will replace
-this one only after those runs complete.
+All conclusions below are actual completed results for the named exact heads.
+Each run passed the repository gate, Intel and Apple-silicon headless jobs,
+and the hosted Apple-silicon session.
 
 | PR | Head evidenced | Actions run | Jobs |
 |---|---|---|---|
-| #32 / 01 | `4dcf19c` | `30173553577` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #33 / 02 | `a153e6c` | `30193379848` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #34 / 03 | `ddfff61` | `30193380921` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #36 / 04 | `9c31229` | `30193380839` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
-| #35 / 05 | `12d5040` | `30193381494` | PASS: gate, Intel headless, Apple-silicon headless, hosted Apple-silicon |
+| #32 / 01 | `4dcf19c` | `30173553577` attempt 2 | PASS: all four jobs |
+| #33 / 02 | `e8748fb` | `30211809074` attempt 2 | PASS: all four jobs |
+| #34 / 03 | `56788f5` | `30238087379` | PASS: all four jobs |
+| #36 / 04 | `b5f4b02` | `30239391686` | PASS: all four jobs |
+| #35 / 05 | `e28ccef` | `30239499896` | PASS: all four jobs |
+
+The layer-05 status-only commit that contains this table changes no
+implementation or evidence. Its post-push exact-head CI result is recorded in
+PR #35 because a commit cannot contain the run ID created by its own push.
 
 ## Superseded pre-attended blockers
 
@@ -334,7 +349,6 @@ fixes the three partial/new P1s and four P2s through layer 05:
 
 ## Next executable task
 
-Finish the layer-05 local gate, push the restacked 03/04/05 heads, and record
-the clean full GitHub Actions wave for all five exact heads. The previous
-04/05 runs were cancelled during the attended Mac checkout and are not
-treated as failures or passes.
+None. The five-layer draft stack is ready for human review. The only remaining
+attended product gap is the explicitly recorded real 2x playback-rate session;
+the implementation path remains unit-covered.

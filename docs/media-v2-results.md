@@ -24,13 +24,15 @@ pointer click visibly sought the Spotify session. Full evidence is in
 ## 2026-07-26 round-3 addendum
 
 The Objective-C helper tests and hosted macOS session passed on the completed
-round-2 heads recorded in `docs/media-run-status.md`; the earlier
-“CI-pending” statement below is superseded. Round 3 removes a post-first-frame
-100 ms adapter poll and makes a runtime-detected macOS command-send failure
-process-fatal so host supervision replaces the widget and its authenticated
-endpoint. The current round-3 macOS implementation is locally green; its new
-hosted idle/recovery coverage has not yet completed and is not claimed here.
-Real-player macOS behavior remains within the attended-only UNVERIFIED matrix.
+exact heads recorded in `docs/media-run-status.md`; every final implementation
+head passed the repository gate, both headless Mac jobs, and the hosted
+Apple-silicon session. Round 3 removes a post-first-frame 100 ms adapter poll
+and makes a runtime-detected macOS command-send failure process-fatal so host
+supervision replaces the widget and its authenticated endpoint. The attended
+fold additionally keeps short command/ack reads prompt while blocking in
+`poll(2)` between frames, so ordinary nonblocking `EAGAIN` is not mistaken for
+channel loss. The attended real-player matrix is PASS except for the explicitly
+not-run real 2x playback-rate session, which remains unit-covered.
 
 ## 2026-07-25 round-2 addendum
 
