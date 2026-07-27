@@ -42,5 +42,13 @@ than being relabeled as implementation work.
    esbuild), weaverd login auto-start. Built last by design; note: it gates
    the gallery's public launch, since gallery users need an install story.
 
+## Beta acceptance bar
+
+Set 2026-07-27: before beta, Weaver must 100% recreate every skin in
+[skin parity targets](skin-parity-targets.md) to the noro-player standard
+(indistinguishable side-by-side + functional parity, attended-verified on
+both OSes). That list — not speculation — is the demand signal that orders
+the remaining breadth work (alive pack, providers, loud capability rungs).
+
 Not on the roadmap: GPU text atlases (until profiling demands), JSX sugar
 layer (TSX won), web embedding (cut), Linux (acknowledged, unloved — ADR 0006).
