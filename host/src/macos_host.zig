@@ -11,6 +11,7 @@ const system_providers = @import("providers_macos.zig");
 const posix = std.posix;
 const c = @cImport({
     @cInclude("macos_system.h");
+    @cInclude("poll.h");
     @cInclude("sys/socket.h");
     @cInclude("sys/un.h");
 });
@@ -210,12 +211,29 @@ const ProviderEndpoint = struct {
             var framer: media_commands.Framer = .{};
             var chunk: [512]u8 = undefined;
             while (true) {
-                // The provider socket stays open for the widget lifetime.
-                // Read only currently available bytes; readSliceShort waits
-                // for all 512 bytes or EOF and strands ordinary command lines.
-                const read = posix.read(stream.socket.handle, &chunk) catch {
+                var descriptor: c.struct_pollfd = .{
+                    .fd = stream.socket.handle,
+                    .events = c.POLLIN | c.POLLHUP,
+                    .revents = 0,
+                };
+                const ready = c.poll(&descriptor, 1, -1);
+                if (ready < 0) {
+                    if (posix.errno(ready) == .INTR) continue;
                     framer.finish(&self.command_queue);
                     break;
+                }
+                if (ready == 0) continue;
+                // The provider socket stays open for the widget lifetime.
+                // poll(2) blocks without idle work and proves that a short
+                // command or EOF is ready. A bare nonblocking read after a
+                // command can otherwise report EAGAIN and falsely sever the
+                // healthy per-widget channel.
+                const read = posix.read(stream.socket.handle, &chunk) catch |err| switch (err) {
+                    error.WouldBlock => continue,
+                    else => {
+                        framer.finish(&self.command_queue);
+                        break;
+                    },
                 };
                 if (read == 0) {
                     framer.finish(&self.command_queue);
