@@ -1096,12 +1096,8 @@ test "macOS adapter consumes a short complete frame without waiting for helper E
         .stdout = .pipe,
         .stderr = .ignore,
     });
-    defer {
-        if (child.id != null) {
-            child.kill(std.testing.io);
-            _ = child.wait(std.testing.io) catch {};
-        }
-    }
+    // `kill` reaps the child and clears `id`, so a following `wait` asserts.
+    defer child.kill(std.testing.io);
 
     var descriptor: c.struct_pollfd = .{
         .fd = child.stdout.?.handle,
