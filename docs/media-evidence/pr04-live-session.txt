@@ -1,0 +1,113 @@
+Weaver media PR 04 attended-Mac raw session
+Date: 2026-07-25
+
+ENVIRONMENT
+ProductName: macOS
+ProductVersion: 26.5.1
+BuildVersion: 25F80
+Darwin: 25.5.0 arm64
+Machine: Apple M2
+Zig: 0.16.0
+Weaver branch parent: origin/media/04-macos-adapter@08355b81f5ace28e1e9a0dcb1d8607c4c4ff4590
+Upstream adapter: ungive/mediaremote-adapter@3ac3d4bdf862c7b5399b4fba4df5689f5c38609a (v0.7.6)
+Installed artifact: Homebrew media-control 0.7.6
+Host build: cd host && zig build -Doptimize=ReleaseFast
+Host build result: exit 0
+
+ADAPTER FUNCTIONAL TEST
+Command:
+/usr/bin/perl /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/mediaremote-adapter.pl /opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/MediaRemoteAdapterTestClient test
+
+Result:
+exit_code=0
+
+EXECUTED PROCESS AND LOADED CODE
+Process:
+24501 86050 dara /usr/bin/perl /usr/bin/perl /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/mediaremote-adapter.pl /opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/MediaRemoteAdapterTestClient stream --no-diff --no-artwork --debounce=100
+
+codesign identity:
+Executable=/usr/bin/perl
+Identifier=com.apple.perl
+Format=Mach-O universal (x86_64 arm64e)
+Platform identifier=26
+Authority=Software Signing
+Authority=Apple Code Signing Certification Authority
+Authority=Apple Root CA
+designated => identifier "com.apple.perl" and anchor apple
+
+No explicit entitlement dictionary was printed by:
+codesign -dvvv -r- --entitlements - /usr/bin/perl
+
+vmmap confirmed both mappings in PID 24501:
+/opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
+/System/Library/PrivateFrameworks/MediaRemote.framework/Versions/A/MediaRemote
+
+REAL SPOTIFY METADATA FRAME
+Command:
+/usr/bin/perl /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/mediaremote-adapter.pl /opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/MediaRemoteAdapterTestClient get --now --no-artwork
+
+Output:
+{"playbackRate":1,"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","elapsedTimeNow":51.227281843185423,"trackNumber":1,"elapsedTime":0.085999999999999993,"timestamp":"2026-07-25T19:50:04Z","bundleIdentifier":"com.spotify.client","processIdentifier":7472,"title":"Satellites","totalDiscCount":1,"totalTrackCount":0,"duration":211,"artist":"Frost Children","contentItemIdentifier":"B2FE397C-C926-4282-BDF2-358681FB4FF9","playing":true}
+
+Independent Spotify AppleScript observation before command:
+playing, 51.338001251221, Satellites, Frost Children, Tweaker Poem
+
+DELIVERED PAUSE COMMAND
+Command:
+/usr/bin/perl /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/mediaremote-adapter.pl /opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/MediaRemoteAdapterTestClient send 1
+
+Output:
+<none>
+exit_code=0
+
+The immediate post-command MediaRemote read still returned playing:true. The
+next read, after the notification settled, returned:
+{"album":"Tweaker Poem","trackNumber":1,"mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","elapsedTimeNow":51.338000000000001,"elapsedTime":51.338000000000001,"timestamp":"2026-07-25T19:50:56Z","bundleIdentifier":"com.spotify.client","processIdentifier":7472,"title":"Satellites","totalDiscCount":1,"totalTrackCount":0,"duration":211,"artist":"Frost Children","contentItemIdentifier":"FBD70522-FA6E-44C7-9C84-E6B632F83C11","playing":false}
+
+Independent Spotify AppleScript observation after command:
+paused, 51.338001251221, Satellites, Frost Children, Tweaker Poem
+
+STREAM FRAMING
+Command:
+/usr/bin/perl /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/mediaremote-adapter.pl /opt/homebrew/Cellar/media-control/0.7.6/Frameworks/MediaRemoteAdapter.framework /opt/homebrew/Cellar/media-control/0.7.6/lib/media-control/MediaRemoteAdapterTestClient stream --no-diff --no-artwork --debounce=100
+
+Each stdout record was one newline-delimited JSON object:
+{"type":"data","diff":false,"payload":{}}
+{"type":"data","diff":false,"payload":{"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","trackNumber":1,"elapsedTime":51.338000000000001,"timestamp":"2026-07-25T19:50:56Z","bundleIdentifier":"com.spotify.client","processIdentifier":7472,"title":"Satellites","totalDiscCount":1,"totalTrackCount":0,"duration":211,"artist":"Frost Children","contentItemIdentifier":"FBD70522-FA6E-44C7-9C84-E6B632F83C11","playing":false}}
+
+After a separate send 0 command:
+{"type":"data","diff":false,"payload":{"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","trackNumber":1,"elapsedTime":51.338000000000001,"timestamp":"2026-07-25T19:50:56Z","bundleIdentifier":"com.spotify.client","processIdentifier":7472,"title":"Satellites","totalDiscCount":1,"totalTrackCount":0,"duration":211,"artist":"Frost Children","contentItemIdentifier":"FBD70522-FA6E-44C7-9C84-E6B632F83C11","playing":true}}
+
+PLAYER QUIT AND RELAUNCH
+Spotify quit while the stream helper remained alive:
+{"type":"data","diff":false,"payload":{"playbackRate":1,"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","trackNumber":1,"elapsedTime":51.591999999999999,"timestamp":"2026-07-25T19:51:24Z","bundleIdentifier":"com.spotify.client","processIdentifier":7472,"title":"Satellites","totalDiscCount":1,"totalTrackCount":0,"duration":211,"artist":"Frost Children","contentItemIdentifier":"A48382DA-562A-46B5-83FD-4D7B76293E13","playing":false}}
+{"type":"data","diff":false,"payload":{}}
+
+Music was still paused from an earlier supporting check, so MediaRemote then
+selected it as the next current player:
+{"type":"data","diff":false,"payload":{"playbackRate":0,"contentItemIdentifier":"130::132","album":"","mediaType":"MRMediaRemoteMediaTypeMusic","composer":"","elapsedTime":22.503542750000001,"timestamp":"2026-07-25T19:50:03Z","processIdentifier":4387,"bundleIdentifier":"com.apple.Music","isMusicApp":true,"title":"gmbeatmusic-ambient-61-206186 (1)","uniqueIdentifier":-4824017290874636949,"duration":45.048000000000002,"artist":"","genre":"","playing":false}}
+
+After Music also quit:
+{"type":"data","diff":false,"payload":{}}
+
+Spotify relaunched with a new PID and resumed the same track. The original
+stream helper remained alive and emitted:
+{"type":"data","diff":false,"payload":{"playbackRate":1,"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","trackNumber":1,"elapsedTime":0,"timestamp":"2026-07-25T19:52:22Z","bundleIdentifier":"com.spotify.client","processIdentifier":19408,"title":"Satellites","totalDiscCount":1,"totalTrackCount":6,"duration":211,"artist":"Frost Children","contentItemIdentifier":"4FDDD8F3-327B-41E7-8F8A-A491B02FDCBA","playing":true}}
+
+HELPER TERMINATION AND RELAUNCH
+The stream helper PID 17075 received SIGTERM. It exited cleanly with exit 0.
+No final stdout record was emitted; a supervisor must treat EOF/process exit
+as adapter loss.
+
+A replacement helper immediately emitted:
+{"type":"data","diff":false,"payload":{}}
+{"type":"data","diff":false,"payload":{"playbackRate":1,"album":"Tweaker Poem","mediaType":"kMRMediaRemoteNowPlayingInfoTypeAudio","trackNumber":1,"elapsedTime":0,"timestamp":"2026-07-25T19:52:22Z","bundleIdentifier":"com.spotify.client","processIdentifier":19408,"title":"Satellites","totalDiscCount":1,"totalTrackCount":6,"duration":211,"artist":"Frost Children","contentItemIdentifier":"4FDDD8F3-327B-41E7-8F8A-A491B02FDCBA","playing":true}}
+
+ARTIFACT HASHES
+984d622eeebbcb17656d157a49272b02fb741593ae2ec624d1926c12d955c8a1  mediaremote-adapter.pl
+2b34eead8018ea2ba5fb1e180cbe1e677d4bebae62a1a3e1771293cadef54a0e  MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter
+11c6ecb918860dfb9c6ff687415693e6cfd6b438e6cccb2f0c3bdd4e0fa6e58b  MediaRemoteAdapterTestClient
+
+FINAL PLAYER STATE
+Spotify was paused after the lifecycle checks:
+paused, 92.245002746582, Satellites, Frost Children

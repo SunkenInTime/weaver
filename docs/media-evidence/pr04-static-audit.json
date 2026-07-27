@@ -1,0 +1,57 @@
+{
+  "addendum_2026_07_25": {
+    "acceptedState": "ROUTE_PASSED_IMPLEMENTATION_UNVERIFIED",
+    "implementation": "Layer 04 now supervises the vendored route with strict framing, truthful command outcomes, seek read-back, normalized artwork, bounded teardown/backoff, and a macOS 15.4 runtime gate.",
+    "implementationLiveGate": "UNVERIFIED_NEEDS_ATTENDED_MAC",
+    "macOS15_4Floor": "UNVERIFIED_NEEDS_ATTENDED_MAC_AT_15_4",
+    "routeEvidence": "docs/media-evidence/pr04-mac-spike.md",
+    "routeGate": "PASSED",
+    "supersedes": "The historical executionGate.status=BLOCKED object below is retained as the original static-audit output and is superseded by this dated addendum."
+  },
+  "executionGate": {
+    "deliveredCommand": false,
+    "realMetadataFrame": false,
+    "reason": "static inventory cannot prove a real system-player frame or delivered command",
+    "status": "BLOCKED"
+  },
+  "privateCandidateCodeSignOutput": [
+    "FILE=/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoted",
+    "Executable=/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoted",
+    "Identifier=com.apple.mediaremoted",
+    "Format=Mach-O universal (x86_64 arm64e)",
+    "CodeDirectory v=20400 size=40975 flags=0x0(none) hashes=1270+7 location=embedded",
+    "Platform identifier=26",
+    "Signature size=4442",
+    "Authority=Software Signing",
+    "Authority=Apple Code Signing Certification Authority",
+    "Authority=Apple Root CA",
+    "Signed Time=Apr 19, 2026 at 12:33:33\u202fAM",
+    "Info.plist entries=16",
+    "TeamIdentifier=not set",
+    "Sealed Resources=none",
+    "Internal requirements count=1 size=72",
+    "FILE=/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoteagent",
+    "Executable=/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoteagent",
+    "Identifier=com.apple.mediaremoteagent",
+    "Format=Mach-O universal (x86_64 arm64e)",
+    "CodeDirectory v=20400 size=755 flags=0x0(none) hashes=18+2 location=embedded",
+    "Platform identifier=26",
+    "Signature size=4442",
+    "Authority=Software Signing",
+    "Authority=Apple Code Signing Certification Authority",
+    "Authority=Apple Root CA",
+    "Signed Time=Apr 19, 2026 at 12:33:33\u202fAM",
+    "Info.plist=not bound",
+    "TeamIdentifier=not set",
+    "Sealed Resources=none",
+    "Internal requirements count=1 size=76"
+  ],
+  "privateFrameworkExecutableCandidates": [
+    "/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoted",
+    "/System/Library/PrivateFrameworks/MediaRemote.framework/Support/mediaremoteagent"
+  ],
+  "publicSdkMediaRemotePaths": [],
+  "sdkRoot": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk",
+  "weaverMediaRemoteDependencies": [],
+  "weaverMediaRemoteUndefinedSymbols": []
+}

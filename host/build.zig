@@ -23,17 +23,79 @@ pub fn build(b: *std.Build) void {
             }),
         });
         addMacosAudio(exe.root_module, b, automation_seam);
+        const adapter_build_dir = b.pathFromRoot(".zig-cache/mediaremote-adapter");
+        const adapter_source_dir = b.pathFromRoot("assets/mediaremote-adapter");
+        const adapter_configure = b.addSystemCommand(&.{
+            "cmake",
+            "-S",
+            adapter_source_dir,
+            "-B",
+            adapter_build_dir,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.2",
+        });
+        const adapter_build = b.addSystemCommand(&.{
+            "cmake",
+            "--build",
+            adapter_build_dir,
+            "--target",
+            "MediaRemoteAdapter",
+            "MediaRemoteAdapterSeekTests",
+            "--config",
+            "Release",
+        });
+        adapter_build.step.dependOn(&adapter_configure.step);
         exe.root_module.linkSystemLibrary("c", .{});
         b.installArtifact(exe);
         const bundle_executable = b.addInstallFile(exe.getEmittedBin(), "Weaverd.app/Contents/MacOS/weaverd");
         const bundle_plist = b.addInstallFile(b.path("macos/Info.plist"), "Weaverd.app/Contents/Info.plist");
+        const adapter_framework_source = b.pathJoin(&.{ adapter_build_dir, "MediaRemoteAdapter.framework" });
+        const share_framework = b.addSystemCommand(&.{
+            "/usr/bin/ditto",
+            adapter_framework_source,
+            b.getInstallPath(.prefix, "share/weaver/mediaremote-adapter/MediaRemoteAdapter.framework"),
+        });
+        share_framework.step.dependOn(&adapter_build.step);
+        const app_framework = b.addSystemCommand(&.{
+            "/usr/bin/ditto",
+            adapter_framework_source,
+            b.getInstallPath(.prefix, "Weaverd.app/Contents/Resources/mediaremote-adapter/MediaRemoteAdapter.framework"),
+        });
+        app_framework.step.dependOn(&adapter_build.step);
+        const share_script = b.addInstallFile(
+            b.path("assets/mediaremote-adapter/bin/mediaremote-adapter.pl"),
+            "share/weaver/mediaremote-adapter/mediaremote-adapter.pl",
+        );
+        const app_script = b.addInstallFile(
+            b.path("assets/mediaremote-adapter/bin/mediaremote-adapter.pl"),
+            "Weaverd.app/Contents/Resources/mediaremote-adapter/mediaremote-adapter.pl",
+        );
+        const share_license = b.addInstallFile(
+            b.path("assets/mediaremote-adapter/LICENSE"),
+            "share/weaver/mediaremote-adapter/LICENSE",
+        );
+        const app_license = b.addInstallFile(
+            b.path("assets/mediaremote-adapter/LICENSE"),
+            "Weaverd.app/Contents/Resources/mediaremote-adapter/LICENSE",
+        );
+        share_framework.step.dependOn(&share_script.step);
+        app_framework.step.dependOn(&app_script.step);
+        b.getInstallStep().dependOn(&share_framework.step);
+        b.getInstallStep().dependOn(&app_framework.step);
+        b.getInstallStep().dependOn(&share_script.step);
+        b.getInstallStep().dependOn(&app_script.step);
+        b.getInstallStep().dependOn(&share_license.step);
+        b.getInstallStep().dependOn(&app_license.step);
         const bundle_path = b.getInstallPath(.prefix, "Weaverd.app");
         const sign_bundle = b.addSystemCommand(&.{
-            "codesign", "--force", "--deep", "--sign", "-", "--identifier",
+            "codesign",                     "--force",   "--deep", "--sign", "-", "--identifier",
             "com.sunkenintime.weaver.host", bundle_path,
         });
         sign_bundle.step.dependOn(&bundle_executable.step);
         sign_bundle.step.dependOn(&bundle_plist.step);
+        sign_bundle.step.dependOn(&app_framework.step);
+        sign_bundle.step.dependOn(&app_script.step);
+        sign_bundle.step.dependOn(&app_license.step);
         b.getInstallStep().dependOn(&sign_bundle.step);
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
@@ -46,6 +108,7 @@ pub fn build(b: *std.Build) void {
         tests.root_module.linkSystemLibrary("c", .{});
         const test_step = b.step("test", "Run macOS host and portable supervisor tests");
         test_step.dependOn(&b.addRunArtifact(tests).step);
+        test_step.dependOn(&adapter_build.step);
         return;
     }
     if (target.result.os.tag != .windows) @panic("weaverd supports only Windows and macOS");
@@ -150,11 +213,17 @@ fn addMacosAudio(module: *std.Build.Module, b: *std.Build, automation_seam: bool
         .flags = audio_flags,
     });
     module.addCSourceFile(.{
+        .file = b.path("src/macos_media.m"),
+        .flags = audio_flags,
+    });
+    module.addCSourceFile(.{
         .file = b.path("src/macos_system.c"),
         .flags = &.{ "-std=c11", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, sdk_include },
     });
     module.addIncludePath(b.path("src"));
     module.addFrameworkPath(.{ .cwd_relative = b.pathJoin(&.{ b.sysroot.?, "System", "Library", "Frameworks" }) });
     module.linkFramework("CoreAudio", .{});
+    module.linkFramework("CoreGraphics", .{});
     module.linkFramework("Foundation", .{});
+    module.linkFramework("ImageIO", .{});
 }

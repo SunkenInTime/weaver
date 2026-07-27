@@ -15,11 +15,13 @@ const cli = join(repoRoot, "cli", "bin", "weaver.js");
 const tempRoot = realpathSync(tmpdir());
 const scratch = mkdtempSync(join(tempRoot, "weaver-macos-host-smoke-"));
 const audioControl = join(scratch, "audio-control");
+const providerSendFailure = join(scratch, "provider-send-failure");
 const environment = {
   ...process.env,
   HOME: join(scratch, "home"),
   WEAVER_AUTOMATION: "1",
   WEAVER_AUDIO_TEST_CONTROL: audioControl,
+  WEAVER_PROVIDER_TEST_FAIL_SEND: providerSendFailure,
 };
 const dataRoot = join(environment.HOME, "Library", "Application Support", "Weaver");
 const registryFile = join(dataRoot, "registry.json");
@@ -70,6 +72,18 @@ function alive(pid) {
   catch { return false; }
 }
 
+function widgetLogs() {
+  const directory = join(environment.HOME, "Library", "Logs", "Weaver");
+  if (!existsSync(directory)) return "(no widget log directory)";
+  return readdirSync(directory)
+    .filter((name) => name.endsWith(".log"))
+    .map((name) => {
+      try { return `--- ${name} ---\n${readFileSync(join(directory, name), "utf8")}`; }
+      catch { return `--- ${name} unreadable ---`; }
+    })
+    .join("\n");
+}
+
 async function waitFor(description, predicate, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -77,7 +91,7 @@ async function waitFor(description, predicate, timeoutMs = 10_000) {
     if (value) return value;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
   }
-  throw new Error(`Timed out waiting for ${description}\nstatus:\n${JSON.stringify(status(), null, 2)}\ndev stdout:\n${devStdout}\ndev stderr:\n${devStderr}`);
+  throw new Error(`Timed out waiting for ${description}\nstatus:\n${JSON.stringify(status(), null, 2)}\ndev stdout:\n${devStdout}\ndev stderr:\n${devStderr}\nwidget logs:\n${widgetLogs()}`);
 }
 
 function editClock(from, to) {
@@ -127,15 +141,16 @@ try {
   await waitFor("dev registration removal acknowledgement", () => status()?.widgets?.length === 0);
 
   run(["install", join(repoRoot, "examples", "now-playing")]);
-  const unavailableMedia = await waitFor("explicit unavailable macOS media status", () => {
+  const macMedia = await waitFor("settled macOS media adapter status", () => {
     const document = status();
     const widget = document?.widgets?.[0];
     const providers = document?.providers;
     return widget?.name === "Now Playing" && widget.state === "running" &&
-      providers?.mediaAvailability === "unavailable" && providers.mediaSubscribers === 1 &&
-      providers.mediaPipeFrames === 0 && { document, widget, providers };
-  });
-  trackedPids.add(unavailableMedia.widget.pid);
+      ["available", "unavailable"].includes(providers?.mediaAvailability) &&
+      providers.mediaSubscribers === 1 && providers.mediaPipeFrames >= 1 &&
+      { document, widget, providers };
+  }, 20_000);
+  trackedPids.add(macMedia.widget.pid);
   const mediaRuntimeRoot = runtimeSearchRoots.flatMap((root) => readdirSync(root)
     .filter((name) => name.startsWith(runtimeRootPrefix))
     .map((name) => join(root, name)))
@@ -149,13 +164,92 @@ try {
     1,
     "transport-capable unavailable media did not allocate its duplex command endpoint",
   );
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 1200));
-  assert.equal(status().providers.mediaPipeFrames, 0, "unavailable media emitted a fabricated frame");
+  assert.ok(
+    ["available", "unavailable"].includes(status().providers.mediaAvailability),
+    "macOS media adapter did not expose an honest live-or-loss diagnostic",
+  );
   run(["uninstall", "Now Playing"]);
-  await waitFor("unavailable media teardown", () => {
+  await waitFor("macOS media adapter teardown", () => {
     const document = status();
-    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 && document;
+    return document?.widgets?.length === 0 && document.providers?.mediaSubscribers === 0 &&
+      document.providers.mediaAvailability === "idle" && document;
   });
+
+  run(["init", "media-recovery"]);
+  writeFileSync(join(scratch, "media-recovery", "widget.tsx"), `
+import { useInterval, useMediaTransport, useProvider, useState, useStorage, widget } from "@weaver/sdk";
+
+export default widget({
+  name: "Media Recovery",
+  size: [260, 72],
+  anchor: { corner: "bottom-left", offset: [24, 24] },
+  subscribe: ["media"],
+  capabilities: ["media-transport"],
+}, () => {
+  const media = useProvider("media");
+  const transport = useMediaTransport();
+  const [attempted, setAttempted] = useState(false);
+  const [outcome, setOutcome] = useStorage("transport", "pending");
+  useInterval(() => {
+    if (attempted) return;
+    setAttempted(true);
+    void transport.pause().then((ok) => {
+      setOutcome(\`resolved:\${ok}\`);
+      console.log(\`media recovery command resolved:\${ok}\`);
+    }).catch((error) => setOutcome(\`rejected:\${String(error)}\`));
+  }, 2000);
+  return <column class="w-[260px] h-[72px] p-3 bg-[#11141c]">
+    <text class="text-sm text-white">{outcome}</text>
+    <text class="text-xs text-white">{media.status}</text>
+  </column>;
+});
+`, "utf8");
+  const recoveryFramesBeforeInstall = status().providers.mediaPipeFrames;
+  writeFileSync(providerSendFailure, "fail-next-send", "utf8");
+  run(["install", "media-recovery"]);
+  const firstRecovery = await waitFor("initial media recovery Widget", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    return widget?.name === "Media Recovery" && widget.state === "running" &&
+      document.providers?.mediaPipeFrames > recoveryFramesBeforeInstall &&
+      { document, widget };
+  }, 15_000);
+  trackedPids.add(firstRecovery.widget.pid);
+  const firstRecoverySockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"))
+    .map((entry) => entry.name);
+  assert.equal(firstRecoverySockets.length, 1, "initial recovery Widget did not own exactly one provider endpoint");
+
+  const replacementRecovery = await waitFor("runtime-fatal provider send recovery", () => {
+    const document = status();
+    const widget = document?.widgets?.[0];
+    return widget?.name === "Media Recovery" && widget.state === "running" &&
+      widget.pid !== firstRecovery.widget.pid && !alive(firstRecovery.widget.pid) &&
+      document.providers?.mediaPipeFrames > firstRecovery.document.providers.mediaPipeFrames &&
+      { document, widget };
+  }, 20_000);
+  trackedPids.add(replacementRecovery.widget.pid);
+  assert.equal(existsSync(providerSendFailure), false, "injected send failure was not consumed by the crashed runtime");
+  const replacementRecoverySockets = readdirSync(mediaRuntimeRoot, { withFileTypes: true })
+    .filter((entry) => entry.isSocket() && entry.name.startsWith("widget-"))
+    .map((entry) => entry.name);
+  assert.equal(replacementRecoverySockets.length, 1, "replacement recovery Widget did not own exactly one provider endpoint");
+  assert.notEqual(replacementRecoverySockets[0], firstRecoverySockets[0], "supervision reused the failed provider endpoint");
+  // The attended 2026-07-26 run in pr05-mac-verify.md proves the recovered
+  // channel remains usable on real hardware. This hosted seam's product
+  // contract is the replacement PID/endpoint, resumed provider frame, and a
+  // subsequent command callback. Observe that callback at its runtime log
+  // boundary instead of waiting for useStorage's unrelated debounced file
+  // write; keeping the deliberately crash-injected fixture alive after the
+  // callback races the synthetic supervisor backoff and tests persistence,
+  // not media-channel recovery.
+  await waitFor(
+    "successful media command after runtime-fatal recovery",
+    () => widgetLogs().includes("media recovery command resolved:false"),
+    15_000,
+  );
+  run(["uninstall", "Media Recovery"]);
+  await waitFor("media recovery teardown", () => status()?.widgets?.length === 0);
 
   const validEmptyRegistry = readFileSync(registryFile, "utf8");
   writeFileSync(registryFile, "{ malformed\n", "utf8");

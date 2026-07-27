@@ -2,12 +2,19 @@ const std = @import("std");
 const native_sdk = @import("native_sdk");
 
 pub fn build(b: *std.Build) void {
+    const automation_seam = b.option(bool, "automation-seam", "Compile deterministic runtime failure injection (automation builds only)") orelse false;
     const artifacts = native_sdk.addAppArtifacts(b, b.dependency("native_sdk", .{
         .@"widget-profile" = true,
     }), .{
         .name = "weaver-widget",
         .widget_profile = true,
     });
+    const weaver_options = b.addOptions();
+    weaver_options.addOption(bool, "automation_seam", automation_seam);
+    artifacts.exe.root_module.addOptions("weaver_build_options", weaver_options);
+    if (artifacts.tests.root_module != artifacts.exe.root_module) {
+        artifacts.tests.root_module.addOptions("weaver_build_options", weaver_options);
+    }
     const target = artifacts.exe.root_module.resolved_target.?;
     const os_tag = target.result.os.tag;
     if (os_tag != .windows and os_tag != .macos) {

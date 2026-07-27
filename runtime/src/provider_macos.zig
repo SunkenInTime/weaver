@@ -54,11 +54,13 @@ pub const Client = struct {
     queues: protocol.Queues = .{},
     connected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     disconnected: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+    fatal_channel_failure: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
     next_command_id: u64 = 1,
     wake: ?*const fn () void = null,
     send_fn: SendFn = systemSend,
     send_context: ?*anyopaque = null,
     send_deadline_ns: i128 = command_write_deadline_ns,
+    automation_send_failure_path: ?[]const u8 = null,
 
     pub fn init(self: *Client, io: std.Io, endpoint: ?[]const u8) !void {
         // Inert clients still provide the monotonic clock used by transport
@@ -118,6 +120,17 @@ pub const Client = struct {
         return self.disconnected.load(.acquire) != 0;
     }
 
+    pub fn fatalChannelFailure(self: *const Client) bool {
+        return self.fatal_channel_failure.load(.acquire) != 0;
+    }
+
+    /// Installed only by the automation build after WEAVER_AUTOMATION=1 has
+    /// been checked in main. Deleting the marker makes the failure one-shot
+    /// across the replacement process spawned by host supervision.
+    pub fn setAutomationSendFailurePath(self: *Client, path: []const u8) void {
+        self.automation_send_failure_path = path;
+    }
+
     pub fn nowMilliseconds(self: *const Client) u64 {
         return @intCast(std.Io.Clock.now(.awake, self.io).toMilliseconds());
     }
@@ -128,6 +141,10 @@ pub const Client = struct {
         defer self.send_mutex.unlock();
         const stream = self.stream orelse return error.HostEndpointUnavailable;
         if (!self.isAvailable()) return error.HostEndpointUnavailable;
+        if (self.consumeAutomationSendFailure()) {
+            std.log.warn("automation injected provider command send failure", .{});
+            return self.failWrite();
+        }
         var framed: [protocol.command_line_capacity + 1]u8 = undefined;
         @memcpy(framed[0..line.len], line);
         framed[line.len] = '\n';
@@ -140,19 +157,34 @@ pub const Client = struct {
                     continue;
                 },
                 .retry => {},
-                .failure => return self.failWrite(),
+                .failure => {
+                    std.log.warn("provider command socket write failed", .{});
+                    return self.failWrite();
+                },
             }
             if (std.Io.Timestamp.now(self.io, .awake).nanoseconds - started_ns >= self.send_deadline_ns) {
+                std.log.warn("provider command socket write reached its deadline", .{});
                 return self.failWrite();
             }
-            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return self.failWrite();
+            std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch {
+                std.log.warn("provider command socket retry sleep failed", .{});
+                return self.failWrite();
+            };
         }
     }
 
     fn failWrite(self: *Client) error{HostEndpointWriteFailed} {
         self.connected.store(0, .release);
         self.disconnected.store(1, .release);
+        self.fatal_channel_failure.store(1, .release);
+        if (self.wake) |wake| wake();
         return error.HostEndpointWriteFailed;
+    }
+
+    fn consumeAutomationSendFailure(self: *Client) bool {
+        const path = self.automation_send_failure_path orelse return false;
+        std.Io.Dir.cwd().deleteFile(self.io, path) catch return false;
+        return true;
     }
 
     pub fn nextCommandId(self: *Client) !u64 {
@@ -420,7 +452,9 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     try std.testing.expect(elapsed < 500 * std.time.ns_per_ms);
     try std.testing.expect(stalled_send.attempts > 1);
     try std.testing.expect(client.isDisconnected());
+    try std.testing.expect(client.fatalChannelFailure());
     // The caller is back on the app loop after the finite send deadline, so
-    // pending-slot cleanup and promise rejection can run immediately.
+    // pending-slot cleanup can run before the app-loop wake exits the process
+    // through host crash supervision.
     try std.testing.expect(client.nowMilliseconds() > 0);
 }

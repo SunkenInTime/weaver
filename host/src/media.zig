@@ -3,9 +3,12 @@ const builtin = @import("builtin");
 const art_cache = @import("art_cache.zig");
 const media_commands = @import("media_commands.zig");
 
-const native = @cImport({
-    @cInclude("windows_providers.h");
-});
+const native = if (builtin.os.tag == .windows)
+    @cImport({
+        @cInclude("windows_providers.h");
+    })
+else
+    struct {};
 
 pub const max_text_bytes: usize = 512;
 pub const max_source_app_bytes: usize = 256;
@@ -67,7 +70,7 @@ pub const Frame = struct {
     }
 };
 
-pub const Provider = struct {
+pub const Provider = if (builtin.os.tag == .windows) struct {
     session: ?*native.WeaverMediaSession = null,
     cache: ?*art_cache.Cache = null,
     next_open_ms: u64 = 0,
@@ -229,14 +232,13 @@ pub const Provider = struct {
         self.awaiting_session_art_resolution = false;
         if (self.cache) |cache| cache.clearPublished();
     }
-
     fn resolveArtworkUnavailable(self: *Provider) void {
         // Retain the durable prior path and pin for recovery/housekeeping, but
         // make the refreshed metadata frame explicitly artless.
         self.current_art_matches_session = false;
         self.awaiting_session_art_resolution = false;
     }
-};
+} else struct {};
 
 pub fn formatFrame(frame: *const Frame, output: []u8) ![]const u8 {
     var writer = std.Io.Writer.fixed(output);
@@ -272,7 +274,7 @@ pub fn formatFrame(frame: *const Frame, output: []u8) ![]const u8 {
     return writer.buffered();
 }
 
-fn copyText(destination: anytype, length: *usize, source: []const u8) void {
+pub fn copyText(destination: anytype, length: *usize, source: []const u8) void {
     length.* = @min(source.len, destination.len);
     @memcpy(destination[0..length.*], source[0..length.*]);
 }
@@ -317,6 +319,7 @@ test "media frame bound covers maximum escaped fields and future art path" {
 }
 
 test "source app mapping prefers packaged display names and honestly falls back" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const fixtures = [_]struct {
         raw: [:0]const u8,
         resolved: [:0]const u8,
@@ -335,14 +338,17 @@ test "source app mapping prefers packaged display names and honestly falls back"
 }
 
 fn statusFromNative(value: c_int) Status {
-    return switch (value) {
-        native.WEAVER_MEDIA_STATUS_PLAYING => .playing,
-        native.WEAVER_MEDIA_STATUS_PAUSED => .paused,
-        else => .stopped,
-    };
+    if (comptime builtin.os.tag == .windows) {
+        return switch (value) {
+            native.WEAVER_MEDIA_STATUS_PLAYING => .playing,
+            native.WEAVER_MEDIA_STATUS_PAUSED => .paused,
+            else => .stopped,
+        };
+    } else return .stopped;
 }
 
 test "native playback status maps to the frozen tri-state" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(Status.playing, statusFromNative(native.WEAVER_MEDIA_STATUS_PLAYING));
     try std.testing.expectEqual(Status.paused, statusFromNative(native.WEAVER_MEDIA_STATUS_PAUSED));
     try std.testing.expectEqual(Status.stopped, statusFromNative(native.WEAVER_MEDIA_STATUS_STOPPED));
@@ -350,22 +356,27 @@ test "native playback status maps to the frozen tri-state" {
 }
 
 test "native media dirty flags start dirty and coalesce duplicate events" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_dirty_coalescing());
 }
 
 test "native media event callbacks stop at the shared lifetime fence" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_event_lifetime());
 }
 
 test "native media retries a consumed transient refresh failure" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_retry());
 }
 
 test "native media bounds unresolved artwork before publishing metadata without it" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     try std.testing.expectEqual(@as(c_int, 1), native.weaver_media_test_refresh_failure_bound());
 }
 
 test "art refresh failure retains prior path and cache pin until genuine no-art" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-refresh-retention";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
@@ -396,6 +407,7 @@ test "art refresh failure retains prior path and cache pin until genuine no-art"
 }
 
 test "session replacement refresh failure suppresses prior art without unpinning it" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-session-boundary";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
@@ -434,6 +446,7 @@ test "session replacement refresh failure suppresses prior art without unpinning
 }
 
 test "permanent artwork failure publishes metadata without stale art" {
+    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-media-art-unavailable";
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
