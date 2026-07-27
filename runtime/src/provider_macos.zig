@@ -1,5 +1,6 @@
 const std = @import("std");
 const c = @cImport({
+    @cInclude("poll.h");
     @cInclude("sys/socket.h");
 });
 const posix = std.posix;
@@ -171,12 +172,29 @@ pub const Client = struct {
         var framer: protocol.Framer = .{};
         var chunk: [4096]u8 = undefined;
         while (true) {
-            // The duplex provider socket remains open for the widget
-            // lifetime. Consume bytes available from each host write instead
-            // of waiting for a full 4 KiB buffer or EOF before routing acks.
-            const read = posix.read(stream.socket.handle, &chunk) catch {
+            var descriptor: c.struct_pollfd = .{
+                .fd = stream.socket.handle,
+                .events = c.POLLIN | c.POLLHUP,
+                .revents = 0,
+            };
+            const ready = c.poll(&descriptor, 1, -1);
+            if (ready < 0) {
+                if (posix.errno(ready) == .INTR) continue;
                 framer.finish(&self.queues);
                 return;
+            }
+            if (ready == 0) continue;
+            // The duplex provider socket remains open for the widget
+            // lifetime. poll(2) blocks without idle work and proves that a
+            // short read or EOF is ready. Reading again without poll would
+            // turn the socket's ordinary EAGAIN between acks into a false
+            // channel failure.
+            const read = posix.read(stream.socket.handle, &chunk) catch |err| switch (err) {
+                error.WouldBlock => continue,
+                else => {
+                    framer.finish(&self.queues);
+                    return;
+                },
             };
             if (read == 0) {
                 framer.finish(&self.queues);
@@ -248,6 +266,7 @@ test "Unix provider transport routes a short ack while the host stays connected"
         io: std.Io,
         listener: std.Io.net.Server,
         send_ack: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        send_second_ack: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         stopping: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
         fn run(self: *@This()) void {
@@ -260,6 +279,12 @@ test "Unix provider transport routes a short ack while the host stays connected"
             var buffer: [64]u8 = undefined;
             var writer = stream.writer(self.io, &buffer);
             writer.interface.writeAll("{\"ack\":7,\"ok\":true}\n") catch return;
+            writer.interface.flush() catch return;
+            while (!self.send_second_ack.load(.acquire) and !self.stopping.load(.acquire)) {
+                std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return;
+            }
+            if (self.stopping.load(.acquire)) return;
+            writer.interface.writeAll("{\"ack\":8,\"ok\":false}\n") catch return;
             writer.interface.flush() catch return;
             while (!self.stopping.load(.acquire)) {
                 std.Io.sleep(self.io, .fromMilliseconds(1), .awake) catch return;
@@ -281,6 +306,7 @@ test "Unix provider transport routes a short ack while the host stays connected"
     try client.init(std.testing.io, path);
     defer client.deinit();
     try std.testing.expect(client.registerAck(7));
+    try std.testing.expect(client.registerAck(8));
     endpoint.send_ack.store(true, .release);
 
     var ack: ?protocol.Ack = null;
@@ -292,6 +318,18 @@ test "Unix provider transport routes a short ack while the host stays connected"
     try std.testing.expect(ack != null);
     try std.testing.expectEqual(@as(u64, 7), ack.?.id);
     try std.testing.expect(ack.?.ok);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(25), .awake);
+    try std.testing.expect(client.isAvailable());
+    endpoint.send_second_ack.store(true, .release);
+    ack = null;
+    for (0..100) |_| {
+        ack = client.takeAck();
+        if (ack != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(5), .awake);
+    }
+    try std.testing.expect(ack != null);
+    try std.testing.expectEqual(@as(u64, 8), ack.?.id);
+    try std.testing.expect(!ack.?.ok);
     try std.testing.expect(client.isAvailable());
 }
 

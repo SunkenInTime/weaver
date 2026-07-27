@@ -9,6 +9,7 @@ const system_providers = @import("providers_macos.zig");
 const posix = std.posix;
 const c = @cImport({
     @cInclude("macos_system.h");
+    @cInclude("poll.h");
     @cInclude("sys/socket.h");
     @cInclude("sys/un.h");
 });
@@ -206,12 +207,29 @@ const ProviderEndpoint = struct {
             var framer: media_commands.Framer = .{};
             var chunk: [512]u8 = undefined;
             while (true) {
-                // The provider socket stays open for the widget lifetime.
-                // Read only currently available bytes; readSliceShort waits
-                // for all 512 bytes or EOF and strands ordinary command lines.
-                const read = posix.read(stream.socket.handle, &chunk) catch {
+                var descriptor: c.struct_pollfd = .{
+                    .fd = stream.socket.handle,
+                    .events = c.POLLIN | c.POLLHUP,
+                    .revents = 0,
+                };
+                const ready = c.poll(&descriptor, 1, -1);
+                if (ready < 0) {
+                    if (posix.errno(ready) == .INTR) continue;
                     framer.finish(&self.command_queue);
                     break;
+                }
+                if (ready == 0) continue;
+                // The provider socket stays open for the widget lifetime.
+                // poll(2) blocks without idle work and proves that a short
+                // command or EOF is ready. A bare nonblocking read after a
+                // command can otherwise report EAGAIN and falsely sever the
+                // healthy per-widget channel.
+                const read = posix.read(stream.socket.handle, &chunk) catch |err| switch (err) {
+                    error.WouldBlock => continue,
+                    else => {
+                        framer.finish(&self.command_queue);
+                        break;
+                    },
                 };
                 if (read == 0) {
                     framer.finish(&self.command_queue);
@@ -1077,4 +1095,21 @@ test "provider socket dispatches a short command while the widget stays connecte
     try std.testing.expect(command != null);
     try std.testing.expectEqual(@as(u64, 17), command.?.id);
     try std.testing.expectEqual(media_commands.Verb.play, command.?.verb);
+    try std.Io.sleep(std.testing.io, .fromMilliseconds(25), .awake);
+    endpoint.mutex.lockUncancelable(std.testing.io);
+    const still_connected = endpoint.stream != null;
+    endpoint.mutex.unlock(std.testing.io);
+    try std.testing.expect(still_connected);
+
+    try writer.interface.writeAll("{\"command\":\"media\",\"verb\":\"pause\",\"id\":18}\n");
+    try writer.interface.flush();
+    command = null;
+    for (0..100) |_| {
+        command = endpoint.takeCommand();
+        if (command != null) break;
+        try std.Io.sleep(std.testing.io, .fromMilliseconds(10), .awake);
+    }
+    try std.testing.expect(command != null);
+    try std.testing.expectEqual(@as(u64, 18), command.?.id);
+    try std.testing.expectEqual(media_commands.Verb.pause, command.?.verb);
 }
