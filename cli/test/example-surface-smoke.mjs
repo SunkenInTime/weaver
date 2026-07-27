@@ -11,6 +11,7 @@ const fixtures = [
   "pomodoro",
   "system",
   "now-playing",
+  "noro-shell",
   "visualizer",
   "dpi-diagnostic",
   "m4b-parity",

@@ -731,3 +731,15 @@ observe the requested position within 2000 ms, accounting for playback advance
 at the reported playback rate. Only that verified observation resolves `true`;
 no session, unavailable read-back, and an out-of-tolerance observation at the
 deadline resolve `false`.
+
+## PR 05: noro acceptance surface
+
+`examples/noro-shell` is the executable system-media acceptance surface for
+this amendment. It subscribes to `media` and `time`, declares
+`capabilities: ["media-transport"]`, conditionally renders `artPath` with a
+widget-local fallback, and derives the play/pause glyph from `status`.
+
+Click-to-seek uses the event's normalized local `u` coordinate. The handler
+clamps `event.u` to `[0, 1]`, multiplies by `durationMs`, rounds to an integer,
+and passes that absolute value to `seek(ms)`. Click-only seek is the contracted
+example behavior; dragging is not implied.
