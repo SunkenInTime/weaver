@@ -1086,10 +1086,8 @@ pub fn main(init: std.process.Init) !void {
     else
         false;
     const renderer_backend = declaredGpuBackend(loaded.manifest.renderBackend, force_software);
-    if (@import("builtin").os.tag == .macos) {
-        backend_status_io = init.io;
-        backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
-    }
+    backend_status_io = init.io;
+    backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
     const local_app_data = init.environ_map.get("LOCALAPPDATA");
     const home = init.environ_map.get("HOME");
     const data_root = try platform.dataRoot(allocator, local_app_data, home);
