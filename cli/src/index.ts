@@ -414,7 +414,13 @@ async function devWidget(directory: string): Promise<void> {
       catch { /* Preserve the reload failure after restoring the authoritative registry. */ }
       throw error;
     }
-    startupWarnings.push(...sweepUnregisteredInstallDirectories(nextRegistry));
+    // The installed registration is temporarily absent while dev owns the
+    // name, but it is still the authoritative fallback we restore on exit.
+    // Keep its owned directory out of the ordinary orphan sweep.
+    const cleanupRegistry = existing
+      ? { widgets: [...nextRegistry.widgets, existing] }
+      : nextRegistry;
+    startupWarnings.push(...sweepUnregisteredInstallDirectories(cleanupRegistry));
   });
   const temporaryRegistration = !existing;
   const logFollower = followLogFile(project.config.name, true);
