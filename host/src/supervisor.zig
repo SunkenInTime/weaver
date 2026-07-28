@@ -93,6 +93,13 @@ pub fn reconcile(slots: anytype, registrations: []const registry.Registration, a
         const dev_changed = slot.used and slot.dev != registration.dev;
         if (source_changed or dev_changed) adapter.stop(index, true);
         try slot.setRegistration(registration);
+        if (registration.enabled and (source_changed or dev_changed)) {
+            slot.crash_times = [_]u64{0} ** backoff.history_capacity;
+            slot.crash_count = 0;
+            slot.state = .starting;
+            slot.next_restart_ms = 0;
+            slot.reason_len = 0;
+        }
         if (!registration.enabled and adapter.running(index)) adapter.stop(index, true);
         if (!registration.enabled) slot.state = .disabled;
         if (registration.enabled and slot.state == .disabled) slot.state = .starting;
@@ -394,6 +401,23 @@ test "fake adapter drives reconciliation without platform handles" {
     try reconcile(&slots, &.{}, &fake);
     try std.testing.expectEqual(@as(usize, 2), fake.stops);
     try std.testing.expect(!slots[0].used);
+}
+
+test "reinstalling from a new owned path cannot leave a running slot with no process" {
+    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var fake: FakeAdapter = .{ .slots = &slots };
+    const first = [_]registry.Registration{.{ .name = "Clock", .sourcePath = "/owned/clock-v1", .enabled = true, .dev = false }};
+    try reconcile(&slots, &first, &fake);
+    slots[0].platform.running = true;
+    markRunning(&slots[0], 100, 10);
+
+    const replacement = [_]registry.Registration{.{ .name = "Clock", .sourcePath = "/owned/clock-v2", .enabled = true, .dev = false }};
+    try reconcile(&slots, &replacement, &fake);
+
+    try std.testing.expectEqual(@as(usize, 1), fake.stops);
+    try std.testing.expect(!slots[0].platform.running);
+    try std.testing.expectEqual(RunState.starting, slots[0].state);
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots[0], true, false, false, 100));
 }
 
 test "a new artifact revives a crash-latched slot with a fresh crash budget" {
