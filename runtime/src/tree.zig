@@ -8,9 +8,17 @@ pub const max_source_bytes: usize = 260;
 pub const max_icon_path_bytes: usize = 8 * 1024;
 pub const max_font_family_bytes: usize = 63;
 pub const max_canvases: usize = 8;
-pub const max_canvas_commands: usize = 256;
-pub const max_canvas_points: usize = 1024;
-pub const max_canvas_wire_values: usize = 4096;
+// Authored-canvas batch budgets, sized to the Native SDK's per-view
+// display-list budget (`canvas_limits.max_canvas_commands_per_view` = 2048)
+// so a single canvas can use the whole frame budget: a real meter widget
+// needed 336 rects and hit the old 256/4096 caps in normal use. Wire values
+// budget ~16 per command (a rect is opcode + packed color + geometry);
+// points feed polylines. Memory is fixed capacity per canvas slot
+// (commands ~64 B, points 8 B), ~1.5 MiB across the 8 canvas slots, pages
+// touched only as canvases draw.
+pub const max_canvas_commands: usize = 2048;
+pub const max_canvas_points: usize = 8192;
+pub const max_canvas_wire_values: usize = 32768;
 
 pub const NodeId = u32;
 
@@ -643,6 +651,16 @@ pub const Tree = struct {
         const canvas = try self.canvasState(id);
         if (canvas.fingerprint == fingerprint and canvas.command_count > 0 and
             canvas.command_layout_width == canvas.layout_width and canvas.command_layout_height == canvas.layout_height) return;
+        var commands_in_other_canvases: usize = 0;
+        for (&self.canvases) |*other| {
+            if (other.owner != id) commands_in_other_canvases += other.command_count;
+        }
+        const command_limit = max_canvas_commands -| commands_in_other_canvases;
+        // Validate the complete bounded batch before replacing the last good
+        // frame. Decoding below is then a commit pass: malformed geometry,
+        // points, or aggregate command pressure cannot leave a partial canvas
+        // behind.
+        try preflightCanvasWire(wire, command_limit);
         canvas.command_count = 0;
         canvas.point_count = 0;
         var cursor: usize = 0;
@@ -654,7 +672,7 @@ pub const Tree = struct {
                     const color = try wireColor(wire, &cursor);
                     if (color.a > 0) {
                         const node_value = try self.nodeConst(id);
-                        try appendCanvasCommand(canvas, .{ .fill_rect = .{
+                        try appendCanvasCommand(canvas, command_limit, .{ .fill_rect = .{
                             .rect = native_sdk.geometry.RectF.init(
                                 0,
                                 0,
@@ -665,21 +683,21 @@ pub const Tree = struct {
                         } });
                     }
                 },
-                1 => try appendCanvasCommand(canvas, .{ .fill_rect = .{
+                1 => try appendCanvasCommand(canvas, command_limit, .{ .fill_rect = .{
                     .rect = native_sdk.geometry.RectF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
                     .color = try wireColor(wire, &cursor),
                 } }),
-                2 => try appendCanvasCommand(canvas, .{ .fill_rounded_rect = .{
+                2 => try appendCanvasCommand(canvas, command_limit, .{ .fill_rounded_rect = .{
                     .rect = native_sdk.geometry.RectF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
                     .radius = try wireFloat(wire, &cursor),
                     .color = try wireColor(wire, &cursor),
                 } }),
-                3 => try appendCanvasCommand(canvas, .{ .fill_circle = .{
+                3 => try appendCanvasCommand(canvas, command_limit, .{ .fill_circle = .{
                     .center = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
                     .radius = try wireFloat(wire, &cursor),
                     .color = try wireColor(wire, &cursor),
                 } }),
-                4 => try appendCanvasCommand(canvas, .{ .line = .{
+                4 => try appendCanvasCommand(canvas, command_limit, .{ .line = .{
                     .from = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
                     .to = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor)),
                     .width = try wireFloat(wire, &cursor),
@@ -696,7 +714,7 @@ pub const Tree = struct {
                         canvas.points[canvas.point_count] = native_sdk.geometry.PointF.init(try wireFloat(wire, &cursor), try wireFloat(wire, &cursor));
                         canvas.point_count += 1;
                     }
-                    try appendCanvasCommand(canvas, .{ .polyline = .{ .points = canvas.points[start..canvas.point_count], .width = width, .color = color } });
+                    try appendCanvasCommand(canvas, command_limit, .{ .polyline = .{ .points = canvas.points[start..canvas.point_count], .width = width, .color = color } });
                 },
                 else => return error.InvalidCanvasBatch,
             }
@@ -833,10 +851,60 @@ test "node lifetime changes when a removed image id is reused" {
     try std.testing.expect((try tree.nodeConst(second)).lifetime != first_lifetime);
 }
 
-fn appendCanvasCommand(canvas: *CanvasState, command: native_sdk.canvas.ImmediateCanvasCommand) Error!void {
-    if (canvas.command_count == max_canvas_commands) return error.CanvasCommandLimit;
+fn appendCanvasCommand(canvas: *CanvasState, command_limit: usize, command: native_sdk.canvas.ImmediateCanvasCommand) Error!void {
+    if (canvas.command_count == command_limit) return error.CanvasCommandLimit;
     canvas.commands[canvas.command_count] = command;
     canvas.command_count += 1;
+}
+
+fn preflightCanvasWire(wire: []const f64, command_limit: usize) Error!void {
+    var cursor: usize = 0;
+    var command_count: usize = 0;
+    var point_count: usize = 0;
+    while (cursor < wire.len) {
+        const opcode = finiteInt(wire[cursor]) orelse return error.InvalidCanvasBatch;
+        cursor += 1;
+        var emits_command = true;
+        switch (opcode) {
+            0 => {
+                const color = try wireColor(wire, &cursor);
+                emits_command = color.a > 0;
+            },
+            1 => {
+                for (0..4) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            2 => {
+                for (0..5) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            3 => {
+                for (0..3) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            4 => {
+                for (0..5) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            5 => {
+                _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+                const count = finiteInt(if (cursor < wire.len) wire[cursor] else return error.InvalidCanvasBatch) orelse return error.InvalidCanvasBatch;
+                cursor += 1;
+                if (count < 2 or point_count + count > max_canvas_points) return error.CanvasPointLimit;
+                for (0..count) |_| {
+                    _ = try wireFloat(wire, &cursor);
+                    _ = try wireFloat(wire, &cursor);
+                }
+                point_count += count;
+            },
+            else => return error.InvalidCanvasBatch,
+        }
+        if (emits_command) {
+            if (command_count == command_limit) return error.CanvasCommandLimit;
+            command_count += 1;
+        }
+    }
 }
 
 fn wireFloat(wire: []const f64, cursor: *usize) Error!f32 {
@@ -1024,4 +1092,47 @@ test "canvas wire decodes packed colors and polyline points" {
     try tree.setCanvasCommands(id, &wire);
     try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.width);
     try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.height);
+}
+
+test "canvas command budget is shared across every canvas in the view" {
+    var tree: Tree = .{};
+    const first = try tree.createNode(.canvas);
+    const second = try tree.createNode(.canvas);
+    const values_per_rect = 6;
+    const wire = try std.testing.allocator.alloc(f64, max_canvas_commands * values_per_rect);
+    defer std.testing.allocator.free(wire);
+    for (0..max_canvas_commands) |index| {
+        const command = wire[index * values_per_rect ..][0..values_per_rect];
+        command.* = .{ 1, 0, 0, 1, 1, 0xffffffff };
+    }
+    try tree.setCanvasCommands(first, wire);
+    try std.testing.expectError(
+        error.CanvasCommandLimit,
+        tree.setCanvasCommands(second, &.{ 1, 0, 0, 1, 1, 0xffffffff }),
+    );
+}
+
+test "a failed canvas batch preserves the last good frame and shared budget" {
+    var tree: Tree = .{};
+    const first = try tree.createNode(.canvas);
+    const second = try tree.createNode(.canvas);
+    try tree.setCanvasCommands(first, &.{ 1, 7, 8, 9, 10, 0xffffffff });
+    const original_fingerprint = (try tree.canvasStateConst(first)).fingerprint;
+
+    // The first command is valid, but the following polyline declares three
+    // points and supplies only one. The old single-command frame must remain
+    // intact rather than becoming this partial prefix.
+    try std.testing.expectError(
+        error.InvalidCanvasBatch,
+        tree.setCanvasCommands(first, &.{ 1, 99, 98, 97, 96, 0xff0000ff, 5, 1, 0xffffffff, 3, 0, 0 }),
+    );
+    const preserved = try tree.canvasStateConst(first);
+    try std.testing.expectEqual(@as(usize, 1), preserved.command_count);
+    try std.testing.expectEqual(@as(usize, 0), preserved.point_count);
+    try std.testing.expectEqual(original_fingerprint, preserved.fingerprint);
+    try std.testing.expectEqual(@as(f32, 7), preserved.commands[0].fill_rect.rect.x);
+
+    // Failed work contributes nothing to the per-view budget.
+    try tree.setCanvasCommands(second, &.{ 1, 0, 0, 1, 1, 0xffffffff });
+    try std.testing.expectEqual(@as(usize, 1), (try tree.canvasStateConst(second)).command_count);
 }
