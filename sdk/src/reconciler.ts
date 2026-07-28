@@ -623,7 +623,8 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   if (!binding) {
     binding = {
       onFrame, fps, timerId: 0, surfaceClock: false, width, height,
-      batch: new Float64Array(4096), batchLength: 0, active: false,
+      // Mirrors the runtime's wire budget (tree.zig max_canvas_wire_values).
+      batch: new Float64Array(32768), batchLength: 0, active: false,
       ctx: undefined as unknown as CanvasCtx,
     };
     binding.ctx = createCanvasContext(binding);

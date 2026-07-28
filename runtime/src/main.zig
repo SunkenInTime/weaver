@@ -19,9 +19,9 @@ comptime {
     if (native_sdk.platform.max_windows != 1 or
         native_sdk.platform.max_views != 1 or
         native_sdk.platform.max_webviews != 1 or
-        native_sdk.runtime.max_canvas_commands_per_view != 128 or
+        native_sdk.runtime.max_canvas_commands_per_view != 2048 or
         native_sdk.runtime.max_canvas_path_elements_per_view != 2048 or
-        native_sdk.runtime.max_canvas_widget_nodes_per_view != 128)
+        native_sdk.runtime.max_canvas_widget_nodes_per_view != 1024)
     {
         @compileError("Weaver runtime must be built with the Native SDK widget profile");
     }

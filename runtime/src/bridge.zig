@@ -508,6 +508,12 @@ fn onTimer(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     return fail(js, "unknown timer id");
 }
 
+/// Scratch for one decoded command batch. File-scope rather than a stack
+/// local because the wire budget (32768 f64s = 256 KiB) is too large for a
+/// QuickJS callback frame; the engine runs single-threaded per widget
+/// process, so one buffer serves every call.
+var canvas_wire_scratch: [tree_mod.max_canvas_wire_values]f64 = undefined;
+
 /// Copy one Float64Array command batch at the QuickJS boundary. The wire is
 /// intentionally numeric and bounded: JS performs color parsing and command
 /// construction, while Zig validates every value before replacing the node's
@@ -536,10 +542,9 @@ fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [
     if (length > tree_mod.max_canvas_wire_values) {
         return fail(js, "canvas command batch exceeds the native limit");
     }
-    var values: [tree_mod.max_canvas_wire_values]f64 = undefined;
     const source: [*]const f64 = @ptrCast(@alignCast(buffer + byte_offset));
-    @memcpy(values[0..length], source[0..length]);
-    state(js).tree.setCanvasCommands(id, values[0..length]) catch return fail(js, "invalid canvas command batch");
+    @memcpy(canvas_wire_scratch[0..length], source[0..length]);
+    state(js).tree.setCanvasCommands(id, canvas_wire_scratch[0..length]) catch return fail(js, "invalid canvas command batch");
     return qjs.undefinedValue();
 }
 

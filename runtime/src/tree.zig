@@ -8,9 +8,17 @@ pub const max_source_bytes: usize = 260;
 pub const max_icon_path_bytes: usize = 8 * 1024;
 pub const max_font_family_bytes: usize = 63;
 pub const max_canvases: usize = 8;
-pub const max_canvas_commands: usize = 256;
-pub const max_canvas_points: usize = 1024;
-pub const max_canvas_wire_values: usize = 4096;
+// Authored-canvas batch budgets, sized to the Native SDK's per-view
+// display-list budget (`canvas_limits.max_canvas_commands_per_view` = 2048)
+// so a single canvas can use the whole frame budget: a real meter widget
+// needed 336 rects and hit the old 256/4096 caps in normal use. Wire values
+// budget ~16 per command (a rect is opcode + packed color + geometry);
+// points feed polylines. Memory is fixed capacity per canvas slot
+// (commands ~64 B, points 8 B), ~1.5 MiB across the 8 canvas slots, pages
+// touched only as canvases draw.
+pub const max_canvas_commands: usize = 2048;
+pub const max_canvas_points: usize = 8192;
+pub const max_canvas_wire_values: usize = 32768;
 
 pub const NodeId = u32;
 
