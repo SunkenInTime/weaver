@@ -1361,9 +1361,26 @@ function validateSource(project: SourceProject): string[] {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
               errors.push(locationMessage(project.sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
             }
+            if (tag === "canvas") {
+              const sizes = compiled as Record<string, unknown>;
+              for (const axis of ["width", "height"] as const) {
+                const percent = sizes[axis === "width" ? "widthPercent" : "heightPercent"] !== undefined;
+                if (percent || sizes[axis] === undefined) {
+                  const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
+                  errors.push(locationMessage(
+                    project.sourceFile,
+                    classAttribute,
+                    `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
+                  ));
+                }
+              }
+            }
           }
           catch (error) { errors.push(locationMessage(project.sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
         }
+      }
+      if (tag === "canvas" && !classAttribute) {
+        errors.push(locationMessage(project.sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "image") {
         const sourceAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "src");

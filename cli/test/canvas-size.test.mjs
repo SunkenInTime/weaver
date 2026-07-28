@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+
+function runCli(cwd, ...arguments_) {
+  return spawnSync(process.execPath, [cli, ...arguments_], { cwd, encoding: "utf8" });
+}
+
+function fixture(source) {
+  const root = mkdtempSync(join(tmpdir(), "weaver-canvas-size-"));
+  const initialized = runCli(root, "init", "widget");
+  assert.equal(initialized.status, 0, initialized.stderr);
+  const widget = join(root, "widget");
+  writeFileSync(join(widget, "widget.tsx"), source, "utf8");
+  return { root, widget };
+}
+
+function source(canvas) {
+  return `import { widget } from "@weaver/sdk";
+export default widget({ name: "Canvas Size", size: [320, 200] }, () => (
+  <column>${canvas}</column>
+));
+`;
+}
+
+test("check rejects a canvas with a percentage width", () => {
+  const { root, widget } = fixture(source(`<canvas class="w-full h-[71px]" fps={0} onFrame={() => {}} />`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsExplicitSize: <canvas> has a percentage width/);
+    assert.match(checked.stderr, /w-\[312px\]/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check rejects a canvas with no class at all", () => {
+  const { root, widget } = fixture(source(`<canvas fps={0} onFrame={() => {}} />`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsExplicitSize: <canvas> has no class/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check accepts a canvas with explicit pixel sizes", () => {
+  const { root, widget } = fixture(source(`<canvas class="w-[312px] h-[71px]" fps={0} onFrame={() => {}} />`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 0, checked.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
