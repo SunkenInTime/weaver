@@ -1086,10 +1086,8 @@ pub fn main(init: std.process.Init) !void {
     else
         false;
     const renderer_backend = declaredGpuBackend(loaded.manifest.renderBackend, force_software);
-    if (@import("builtin").os.tag == .macos) {
-        backend_status_io = init.io;
-        backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
-    }
+    backend_status_io = init.io;
+    backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
     const local_app_data = init.environ_map.get("LOCALAPPDATA");
     const home = init.environ_map.get("HOME");
     const data_root = try platform.dataRoot(allocator, local_app_data, home);
@@ -1113,6 +1111,7 @@ pub fn main(init: std.process.Init) !void {
         null;
     var frame = manifest_mod.desktopFrame(loaded.manifest);
     if (dragged) |saved| {
+        std.log.info("widget using persisted dragged position x={d} y={d}; manifest anchor is overridden until the geometry record is removed", .{ saved.x, saved.y });
         frame.x = saved.x;
         frame.y = saved.y;
         // The Windows host reads a (0,0) origin as "let the system

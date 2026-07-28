@@ -503,6 +503,16 @@ function logPath(name: string): string {
 function showLogs(name: string, follow: boolean): Promise<void> | void {
   const path = logPath(name);
   const oldPath = `${path}.old`;
+  if (!existsSync(path) && !existsSync(oldPath)) {
+    const known = existsSync(weaverLogsPath())
+      ? readdirSync(weaverLogsPath()).filter((file) => file.endsWith(".log")).map((file) => file.slice(0, -4))
+      : [];
+    const knownLine = known.length > 0 ? `Widgets with logs: ${known.join(", ")}` : `No widget has written a log yet (widgets log to ${weaverLogsPath()} once they start).`;
+    if (!follow) {
+      throw new WeaverFailure([`No log for "${name}" at ${path}`, knownLine, `The weaverd host process does not keep a log file; "weaver status" reports its widget states.`]);
+    }
+    process.stdout.write(`No log for "${name}" yet at ${path}; waiting for the widget to start.\n`);
+  }
   const text = [oldPath, path].filter(existsSync).map((file) => readFileSync(file, "utf8")).join("");
   const lines = text.split(/\r?\n/).filter((line) => line.length > 0).slice(-200);
   const follower = follow ? followLogFile(name, true) : undefined;

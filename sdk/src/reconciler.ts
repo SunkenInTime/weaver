@@ -737,7 +737,7 @@ function drawCanvasFrame(id: number, nativeTimestamp?: number): void {
 function createCanvasContext(binding: CanvasBinding): CanvasCtx {
   const ensureActive = (): void => { if (!binding.active) throw new Error("CanvasCtx methods may only be called inside onFrame"); };
   const reserve = (count: number): number => {
-    if (binding.batchLength + count > binding.batch.length) throw new Error("Canvas command batch exceeds the native limit");
+    if (binding.batchLength + count > binding.batch.length) throw new Error(`Canvas frame needs ${binding.batchLength + count} wire values; the limit (max_canvas_wire_values) is ${binding.batch.length} — draw fewer commands per frame`);
     const offset = binding.batchLength;
     binding.batchLength += count;
     return offset;
