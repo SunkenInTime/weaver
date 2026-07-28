@@ -212,6 +212,12 @@ pub const Engine = struct {
     }
 
     fn beginTurn(self: *Engine) void {
+        // QuickJS records its C-stack top when the runtime is created, but
+        // platform callbacks can enter from a materially deeper native
+        // dispatch path (notably canvas resize during a near-cap rebuild).
+        // A turn starts with no live JS frames, so refresh the reference
+        // point before applying QuickJS's ordinary 1 MiB recursion guard.
+        if (!self.executing) c.JS_UpdateStackTop(self.runtime);
         self.deadline_ms = platform.monotonicMilliseconds() + turn_budget_ms;
         self.executing = true;
     }
