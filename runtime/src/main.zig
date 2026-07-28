@@ -1113,6 +1113,7 @@ pub fn main(init: std.process.Init) !void {
         null;
     var frame = manifest_mod.desktopFrame(loaded.manifest);
     if (dragged) |saved| {
+        std.log.info("widget using persisted dragged position x={d} y={d}; manifest anchor is overridden until the geometry record is removed", .{ saved.x, saved.y });
         frame.x = saved.x;
         frame.y = saved.y;
         // The Windows host reads a (0,0) origin as "let the system

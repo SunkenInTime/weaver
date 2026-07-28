@@ -136,6 +136,15 @@ fn fail(ctx: *c.JSContext, message: [*:0]const u8) c.JSValue {
     return c.JS_ThrowTypeError(ctx, "%s", message);
 }
 
+/// A budget error a developer's agent can act on names the budget, its
+/// limit, and what the batch actually asked for; a bare "invalid batch"
+/// forced a source read to learn which cap was hit.
+fn failFmt(ctx: *c.JSContext, comptime format: []const u8, args: anytype) c.JSValue {
+    var buffer: [256]u8 = undefined;
+    const message = std.fmt.bufPrintZ(&buffer, format, args) catch "canvas command batch rejected";
+    return fail(ctx, message);
+}
+
 fn idArg(ctx: *c.JSContext, value: c.JSValueConst) !tree_mod.NodeId {
     var id: u32 = 0;
     if (c.JS_ToUint32(ctx, &id, value) < 0) return error.InvalidArgument;
@@ -540,11 +549,16 @@ fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [
     }
     const length = byte_length / @sizeOf(f64);
     if (length > tree_mod.max_canvas_wire_values) {
-        return fail(js, "canvas command batch exceeds the native limit");
+        return failFmt(js, "canvas command batch is {d} wire values; the limit (max_canvas_wire_values) is {d}", .{ length, tree_mod.max_canvas_wire_values });
     }
     const source: [*]const f64 = @ptrCast(@alignCast(buffer + byte_offset));
     @memcpy(canvas_wire_scratch[0..length], source[0..length]);
-    state(js).tree.setCanvasCommands(id, canvas_wire_scratch[0..length]) catch return fail(js, "invalid canvas command batch");
+    state(js).tree.setCanvasCommands(id, canvas_wire_scratch[0..length]) catch |err| return switch (err) {
+        error.CanvasCommandLimit => failFmt(js, "canvas batch exceeds {d} draw commands (max_canvas_commands); draw fewer commands per frame", .{tree_mod.max_canvas_commands}),
+        error.CanvasPointLimit => failFmt(js, "canvas batch exceeds {d} polyline points (max_canvas_points)", .{tree_mod.max_canvas_points}),
+        error.InvalidNode => fail(js, "invalid canvas node id"),
+        else => fail(js, "malformed canvas command batch (non-finite value or truncated command)"),
+    };
     return qjs.undefinedValue();
 }
 

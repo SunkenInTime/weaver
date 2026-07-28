@@ -319,7 +319,16 @@ pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: Provi
         try json.objectField("state");
         try json.write(runStateLabel(entry.state));
         try json.objectField("reason");
-        try json.write(entry.reason);
+        // A running process that has never reported a renderer backend is
+        // presenting nothing — the window shows no frames. Saying so here
+        // is the difference between "running" reading as healthy and the
+        // one real tell (backend '-') going unnoticed. Ten seconds skips
+        // ordinary startup latency.
+        if (entry.state == .running and entry.reason.len == 0 and entry.uptime_seconds >= 10 and std.mem.eql(u8, entry.backend, "-")) {
+            try json.write("no frames presented (renderer surface not created); check 'weaver logs <name>'");
+        } else {
+            try json.write(entry.reason);
+        }
         try json.endObject();
     }
     try json.endArray();
@@ -448,4 +457,50 @@ test "portable status serializer keeps the public state spelling" {
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"hostPid\": 7") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"mediaAvailability\": \"unavailable\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, output.written(), "\"mediaSubscribers\": 1") != null);
+}
+
+test "a running widget with no reported backend gets a no-frames reason" {
+    var output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    const providers: ProviderStatus = .{
+        .system_subscribers = 0,
+        .system_sample_count = 0,
+        .system_frames = 0,
+        .audio_capture_active = false,
+        .audio_silent = true,
+        .audio_pipe_frames = 0,
+        .media_pipe_frames = 0,
+        .media_availability = "unavailable",
+        .media_subscribers = 0,
+    };
+    const stuck = [_]StatusEntry{.{
+        .name = "Meter",
+        .pid = 42,
+        .private_mb = 10,
+        .cpu_percent = 0,
+        .threads = 4,
+        .backend = "-",
+        .uptime_seconds = 11,
+        .state = .running,
+        .reason = "",
+    }};
+    try writeStatus(&output.writer, 7, providers, &stuck);
+    try std.testing.expect(std.mem.indexOf(u8, output.written(), "no frames presented") != null);
+
+    // A freshly launched widget keeps its empty reason during startup.
+    var fresh_output: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer fresh_output.deinit();
+    const fresh = [_]StatusEntry{.{
+        .name = "Meter",
+        .pid = 42,
+        .private_mb = 10,
+        .cpu_percent = 0,
+        .threads = 4,
+        .backend = "-",
+        .uptime_seconds = 2,
+        .state = .running,
+        .reason = "",
+    }};
+    try writeStatus(&fresh_output.writer, 7, providers, &fresh);
+    try std.testing.expect(std.mem.indexOf(u8, fresh_output.written(), "no frames presented") == null);
 }
