@@ -397,8 +397,11 @@ async function devWidget(directory: string): Promise<void> {
   await withRegistryLock(() => {
     const before = readRegistry();
     existing = before.widgets.find((widget) => widget.name === project.config.name);
-    if (existing && !pathsEqual(existing.sourcePath, directory)) {
+    if (existing && !pathsEqual(existing.sourcePath, directory) && !ownedInstallPath(existing.sourcePath)) {
       throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${existing.sourcePath}`]);
+    }
+    if (existing && !pathsEqual(existing.sourcePath, directory)) {
+      process.stdout.write(`weaver dev is taking over installed widget "${project.config.name}" for this session; the installed copy resumes when dev exits\n`);
     }
     const nextRegistry = { widgets: [...before.widgets.filter((widget) => widget.name !== project.config.name), {
       name: project.config.name, sourcePath: directory, enabled: true, dev: true,
@@ -411,7 +414,13 @@ async function devWidget(directory: string): Promise<void> {
       catch { /* Preserve the reload failure after restoring the authoritative registry. */ }
       throw error;
     }
-    startupWarnings.push(...sweepUnregisteredInstallDirectories(nextRegistry));
+    // The installed registration is temporarily absent while dev owns the
+    // name, but it is still the authoritative fallback we restore on exit.
+    // Keep its owned directory out of the ordinary orphan sweep.
+    const cleanupRegistry = existing
+      ? { widgets: [...nextRegistry.widgets, existing] }
+      : nextRegistry;
+    startupWarnings.push(...sweepUnregisteredInstallDirectories(cleanupRegistry));
   });
   const temporaryRegistration = !existing;
   const logFollower = followLogFile(project.config.name, true);
