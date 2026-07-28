@@ -347,16 +347,25 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     const snapshot = old_engine.captureHotSwap(std.heap.page_allocator);
     defer if (snapshot) |bytes| std.heap.page_allocator.free(bytes);
 
-    var candidate_tree: tree_mod.Tree = .{};
+    // The authored-canvas tier makes Tree roughly 1.5 MiB. Keeping a
+    // candidate inline here lets ReleaseFast fold that allocation into the
+    // update callback's stack frame; every QuickJS timer then enters more
+    // than its C-stack allowance below the runtime's recorded stack top.
+    // The candidate is reload state, not call-frame state.
+    const candidate_tree = try std.heap.page_allocator.create(tree_mod.Tree);
+    candidate_tree.* = .{};
     var candidate_tree_moved = false;
-    defer if (!candidate_tree_moved) candidate_tree.deinit();
+    defer {
+        if (!candidate_tree_moved) candidate_tree.deinit();
+        std.heap.page_allocator.destroy(candidate_tree);
+    }
     var preserved = snapshot != null;
-    const candidate = evaluateCandidate(model, &candidate_tree, source, snapshot) catch |err| switch (err) {
+    const candidate = evaluateCandidate(model, candidate_tree, source, snapshot) catch |err| switch (err) {
         error.HotSwapMismatch => block: {
             preserved = false;
             candidate_tree.deinit();
-            candidate_tree = .{};
-            break :block try evaluateCandidate(model, &candidate_tree, source, null);
+            candidate_tree.* = .{};
+            break :block try evaluateCandidate(model, candidate_tree, source, null);
         },
         else => return err,
     };
@@ -364,7 +373,7 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     model.image_epoch +%= 1;
     if (model.image_epoch == 0) model.image_epoch = 1;
     model.tree.deinit();
-    model.tree = candidate_tree;
+    model.tree = candidate_tree.*;
     candidate_tree_moved = true;
     candidate.setTree(&model.tree);
     model.engine = candidate;
