@@ -78,19 +78,10 @@ pub const Analyzer = struct {
         }
         fft(&self.real, &self.imaginary);
 
-        var energy: [band_count]f64 = [_]f64{0} ** band_count;
-        var bins: [band_count]usize = [_]usize{0} ** band_count;
-        const nyquist_bin = fft_size / 2;
-        for (1..nyquist_bin) |bin| {
-            const frequency = @as(f64, @floatFromInt(bin)) * @as(f64, @floatFromInt(sample_rate)) / @as(f64, @floatFromInt(fft_size));
-            if (frequency < 20 or frequency > 16_000) continue;
-            const normalized = @log(frequency / 20.0) / @log(16_000.0 / 20.0);
-            const band = @min(band_count - 1, @as(usize, @intFromFloat(@floor(normalized * band_count))));
-            energy[band] += self.real[bin] * self.real[bin] + self.imaginary[bin] * self.imaginary[bin];
-            bins[band] += 1;
-        }
+        const bin_hz = @as(f64, @floatFromInt(sample_rate)) / @as(f64, @floatFromInt(fft_size));
         for (0..band_count) |band| {
-            const amplitude = if (bins[band] == 0) 0 else @sqrt(energy[band] / @as(f64, @floatFromInt(bins[band]))) / (@as(f64, @floatFromInt(fft_size)) * 0.25);
+            const mean_energy = self.bandMeanEnergy(bandEdgeHz(band), bandEdgeHz(band + 1), bin_hz);
+            const amplitude = @sqrt(mean_energy) / (@as(f64, @floatFromInt(fft_size)) * 0.25);
             const db = 20.0 * @log10(@max(amplitude, 0.000_000_001));
             if (db >= self.peak_db[band]) self.peak_db[band] = db else self.peak_db[band] = @max(-60, self.peak_db[band] - 0.05);
             const floor_db = self.peak_db[band] - 36.0;
@@ -99,7 +90,67 @@ pub const Analyzer = struct {
         frame.rms = roundThousandth(frame.rms);
         return frame;
     }
+
+    fn binEnergy(self: *const Analyzer, bin: usize) f64 {
+        return self.real[bin] * self.real[bin] + self.imaginary[bin] * self.imaginary[bin];
+    }
+
+    /// Mean bin energy inside one band. At the low end a log band is narrower
+    /// than the FFT bin spacing, so no bin center falls inside it; that band
+    /// samples the spectrum at its own center frequency instead of reporting
+    /// zero. A band entirely below bin 1 samples bin 1, the closest the FFT can
+    /// resolve. Bands above the highest resolvable bin report an honest zero.
+    fn bandMeanEnergy(self: *const Analyzer, low_hz: f64, high_hz: f64, bin_hz: f64) f64 {
+        // These annotations are load-bearing: `@min` against a comptime-known
+        // bound narrows its result to the smallest type that fits, so an
+        // unannotated `last` becomes a u10 and `last + 1` overflows on the
+        // top bin.
+        const last_bin: usize = fft_size / 2 - 1;
+        const last_bin_hz = @as(f64, @floatFromInt(last_bin)) * bin_hz;
+        // Nothing above the highest resolvable bin exists in the signal.
+        if (low_hz >= last_bin_hz) return 0;
+
+        const first: usize = @max(1, ceilBin(low_hz / bin_hz));
+        const last: usize = @min(last_bin, floorBin(high_hz / bin_hz));
+        if (first <= last) {
+            var sum: f64 = 0;
+            for (first..last + 1) |bin| sum += self.binEnergy(bin);
+            return sum / @as(f64, @floatFromInt(last - first + 1));
+        }
+
+        // Geometric center keeps the sample point centered on a log axis.
+        const center = std.math.clamp(
+            @sqrt(low_hz * high_hz) / bin_hz,
+            1.0,
+            @as(f64, @floatFromInt(last_bin)),
+        );
+        const lower_f = @floor(center);
+        const lower: usize = @intFromFloat(lower_f);
+        const upper: usize = @min(lower + 1, last_bin);
+        const blend = center - lower_f;
+        return self.binEnergy(lower) * (1.0 - blend) + self.binEnergy(upper) * blend;
+    }
 };
+
+pub const band_low_hz: f64 = 20.0;
+pub const band_high_hz: f64 = 16_000.0;
+
+/// Lower frequency of band `edge`; `bandEdgeHz(band_count)` is the top edge.
+pub fn bandEdgeHz(edge: usize) f64 {
+    const decades = @log(band_high_hz / band_low_hz);
+    const fraction = @as(f64, @floatFromInt(edge)) / @as(f64, @floatFromInt(band_count));
+    return band_low_hz * @exp(decades * fraction);
+}
+
+fn ceilBin(value: f64) usize {
+    if (value <= 0) return 0;
+    return @intFromFloat(@ceil(value));
+}
+
+fn floorBin(value: f64) usize {
+    if (value <= 0) return 0;
+    return @intFromFloat(@floor(value));
+}
 
 pub const Provider = struct {
     capture: ?*native.WeaverAudioCapture = null,
@@ -368,6 +419,73 @@ test "radix-2 analyzer places a one-kilohertz tone in its logarithmic band" {
     const maximum = std.mem.indexOfMax(f64, &frame.bands);
     try std.testing.expect(maximum >= 18 and maximum <= 20);
     try std.testing.expect(frame.bands[maximum] > 0.8);
+}
+
+fn pushNoise(analyzer: *Analyzer) void {
+    var prng = std.Random.DefaultPrng.init(0x5EED);
+    const random = prng.random();
+    var samples: [fft_size]f32 = undefined;
+    for (&samples) |*sample| sample.* = @floatCast(random.float(f64) * 2.0 - 1.0);
+    analyzer.push(&samples);
+}
+
+test "no log band is structurally dead at any supported sample rate" {
+    // Regression: iterating bins and dropping empty bands pinned bands 1, 2, 3
+    // and 5 to zero at 48 kHz (1, 2, 4 and 7 at 44.1 kHz), because a log band
+    // below ~100 Hz is narrower than the 23.4 Hz bin spacing. Broadband input
+    // must light every band whose range the FFT can measure.
+    for ([_]u32{ 44_100, 48_000, 96_000 }) |rate| {
+        var analyzer: Analyzer = .{};
+        pushNoise(&analyzer);
+        const frame = analyzer.spectrum(rate);
+        for (frame.bands, 0..) |value, band| {
+            std.testing.expect(value > 0) catch |err| {
+                std.debug.print("rate {d} band {d} is dead\n", .{ rate, band });
+                return err;
+            };
+        }
+    }
+}
+
+test "bands above the measurable range report an honest zero" {
+    // A 16 kHz tap resolves nothing above its 8 kHz Nyquist, so those bands
+    // must stay zero rather than repeat the highest measurable bin.
+    var analyzer: Analyzer = .{};
+    pushNoise(&analyzer);
+    const frame = analyzer.spectrum(16_000);
+    const last_measurable_hz = @as(f64, @floatFromInt(fft_size / 2 - 1)) * 16_000.0 / @as(f64, @floatFromInt(fft_size));
+    var saw_live = false;
+    for (frame.bands, 0..) |value, band| {
+        if (bandEdgeHz(band) >= last_measurable_hz) {
+            try std.testing.expectEqual(@as(f64, 0), value);
+        } else {
+            try std.testing.expect(value > 0);
+            saw_live = true;
+        }
+    }
+    try std.testing.expect(saw_live);
+}
+
+test "low sample rates keep every band value in range" {
+    // Below ~41 kHz, bin 1 sits under the 20 Hz band floor, and above the tap's
+    // Nyquist the top bands have no bins at all. Neither edge may produce an
+    // out-of-range value or an out-of-bounds bin index.
+    for ([_]u32{ 8_000, 16_000, 32_000 }) |rate| {
+        var analyzer: Analyzer = .{};
+        pushNoise(&analyzer);
+        const frame = analyzer.spectrum(rate);
+        for (frame.bands) |value| {
+            try std.testing.expect(value >= 0 and value <= 1);
+        }
+    }
+}
+
+test "band edges span the documented twenty hertz to sixteen kilohertz range" {
+    try std.testing.expectApproxEqAbs(band_low_hz, bandEdgeHz(0), 0.000_001);
+    try std.testing.expectApproxEqAbs(band_high_hz, bandEdgeHz(band_count), 0.001);
+    for (1..band_count + 1) |edge| {
+        try std.testing.expect(bandEdgeHz(edge) > bandEdgeHz(edge - 1));
+    }
 }
 
 test "audio provider frame is one JSON line with 32 bands" {

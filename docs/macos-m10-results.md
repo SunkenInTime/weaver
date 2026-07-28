@@ -28,6 +28,15 @@ decay, one final zero, and frame suppression. Default-output changes rebuild the
 capture; device failures retry; permission failures park until explicit
 reauthorization. The final subscriber destroys capture and analyzer state.
 
+> **Correction (2026-07-27).** The band projection exercised in this run walked
+> FFT bins and pinned any log band that received no bin to zero, which left
+> bands below ~100 Hz permanently dead (bands 1, 2, 3 and 5 at 48 kHz). The
+> projection was later rewritten to iterate bands over their own frequency
+> edges — see `bandEdgeHz` and `bandMeanEnergy` in `host/src/audio.zig`. The
+> evidence and cost figures below were recorded against the old projection;
+> the dead bands do not affect the lifecycle, authorization, or cost claims,
+> but per-band spectrum output from this run is not representative.
+
 ## Automated evidence
 
 | Gate | Result | Evidence |
