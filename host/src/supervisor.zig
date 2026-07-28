@@ -100,6 +100,17 @@ pub fn reconcile(slots: anytype, registrations: []const registry.Registration, a
         if (adapter.running(index) and artifact != 0 and artifact != slot.artifact_mtime) {
             adapter.stop(index, true);
             slot.state = .starting;
+        } else if (slot.state == .stopped and artifact != 0 and artifact != slot.artifact_mtime) {
+            // A crash-latched slot has no live process, so the running()
+            // branch above never notices a reinstall. A new artifact is a
+            // new program: it gets a fresh crash budget and a launch,
+            // otherwise a fixed bundle stays silently dead until the host
+            // itself restarts.
+            slot.crash_times = [_]u64{0} ** backoff.history_capacity;
+            slot.crash_count = 0;
+            slot.next_restart_ms = 0;
+            slot.reason_len = 0;
+            slot.state = .starting;
         }
     }
     for (slots, 0..) |*slot, index| {
@@ -383,6 +394,35 @@ test "fake adapter drives reconciliation without platform handles" {
     try reconcile(&slots, &.{}, &fake);
     try std.testing.expectEqual(@as(usize, 2), fake.stops);
     try std.testing.expect(!slots[0].used);
+}
+
+test "a new artifact revives a crash-latched slot with a fresh crash budget" {
+    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var fake: FakeAdapter = .{ .slots = &slots };
+    const registrations = [_]registry.Registration{.{ .name = "Meter", .sourcePath = "/owned/meter", .enabled = true, .dev = false }};
+    try reconcile(&slots, &registrations, &fake);
+
+    // Crash out to the stopped latch.
+    markRunning(&slots[0], 100, 10);
+    slots[0].platform.mtime = 10;
+    recordCrash(&slots[0], 200, 1);
+    recordCrash(&slots[0], 300, 1);
+    recordCrash(&slots[0], 400, 1);
+    recordCrash(&slots[0], 500, 1);
+    try std.testing.expectEqual(RunState.stopped, slots[0].state);
+    try std.testing.expectEqual(SlotAction.none, nextSlotAction(&slots[0], true, false, false, 600));
+
+    // Same artifact: the latch holds.
+    try reconcile(&slots, &registrations, &fake);
+    try std.testing.expectEqual(RunState.stopped, slots[0].state);
+
+    // A reinstall (new artifact mtime) resets the crash budget and relaunches.
+    slots[0].platform.mtime = 11;
+    try reconcile(&slots, &registrations, &fake);
+    try std.testing.expectEqual(RunState.starting, slots[0].state);
+    try std.testing.expectEqual(@as(usize, 0), slots[0].crash_count);
+    try std.testing.expectEqual(@as(usize, 0), slots[0].reason().len);
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots[0], true, false, false, 600));
 }
 
 test "slot state machine preserves subscriptions renderer policy and crash backoff" {

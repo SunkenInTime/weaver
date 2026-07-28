@@ -397,8 +397,11 @@ async function devWidget(directory: string): Promise<void> {
   await withRegistryLock(() => {
     const before = readRegistry();
     existing = before.widgets.find((widget) => widget.name === project.config.name);
-    if (existing && !pathsEqual(existing.sourcePath, directory)) {
+    if (existing && !pathsEqual(existing.sourcePath, directory) && !ownedInstallPath(existing.sourcePath)) {
       throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${existing.sourcePath}`]);
+    }
+    if (existing && !pathsEqual(existing.sourcePath, directory)) {
+      process.stdout.write(`weaver dev is taking over installed widget "${project.config.name}" for this session; the installed copy resumes when dev exits\n`);
     }
     const nextRegistry = { widgets: [...before.widgets.filter((widget) => widget.name !== project.config.name), {
       name: project.config.name, sourcePath: directory, enabled: true, dev: true,
