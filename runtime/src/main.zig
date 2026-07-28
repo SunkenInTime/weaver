@@ -347,11 +347,10 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     const snapshot = old_engine.captureHotSwap(std.heap.page_allocator);
     defer if (snapshot) |bytes| std.heap.page_allocator.free(bytes);
 
-    // The authored-canvas tier makes Tree roughly 1.5 MiB. Keeping a
-    // candidate inline here lets ReleaseFast fold that allocation into the
-    // update callback's stack frame; every QuickJS timer then enters more
-    // than its C-stack allowance below the runtime's recorded stack top.
-    // The candidate is reload state, not call-frame state.
+    // The authored-canvas tier makes Tree roughly 1.5 MiB. Keeping the
+    // candidate on the heap prevents ReleaseFast from folding it into the
+    // update callback's stack frame, where it would consume most of
+    // QuickJS's recorded C-stack allowance.
     const candidate_tree = try std.heap.page_allocator.create(tree_mod.Tree);
     candidate_tree.* = .{};
     var candidate_tree_moved = false;

@@ -656,6 +656,11 @@ pub const Tree = struct {
             if (other.owner != id) commands_in_other_canvases += other.command_count;
         }
         const command_limit = max_canvas_commands -| commands_in_other_canvases;
+        // Validate the complete bounded batch before replacing the last good
+        // frame. Decoding below is then a commit pass: malformed geometry,
+        // points, or aggregate command pressure cannot leave a partial canvas
+        // behind.
+        try preflightCanvasWire(wire, command_limit);
         canvas.command_count = 0;
         canvas.point_count = 0;
         var cursor: usize = 0;
@@ -850,6 +855,56 @@ fn appendCanvasCommand(canvas: *CanvasState, command_limit: usize, command: nati
     if (canvas.command_count == command_limit) return error.CanvasCommandLimit;
     canvas.commands[canvas.command_count] = command;
     canvas.command_count += 1;
+}
+
+fn preflightCanvasWire(wire: []const f64, command_limit: usize) Error!void {
+    var cursor: usize = 0;
+    var command_count: usize = 0;
+    var point_count: usize = 0;
+    while (cursor < wire.len) {
+        const opcode = finiteInt(wire[cursor]) orelse return error.InvalidCanvasBatch;
+        cursor += 1;
+        var emits_command = true;
+        switch (opcode) {
+            0 => {
+                const color = try wireColor(wire, &cursor);
+                emits_command = color.a > 0;
+            },
+            1 => {
+                for (0..4) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            2 => {
+                for (0..5) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            3 => {
+                for (0..3) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            4 => {
+                for (0..5) |_| _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+            },
+            5 => {
+                _ = try wireFloat(wire, &cursor);
+                _ = try wireColor(wire, &cursor);
+                const count = finiteInt(if (cursor < wire.len) wire[cursor] else return error.InvalidCanvasBatch) orelse return error.InvalidCanvasBatch;
+                cursor += 1;
+                if (count < 2 or point_count + count > max_canvas_points) return error.CanvasPointLimit;
+                for (0..count) |_| {
+                    _ = try wireFloat(wire, &cursor);
+                    _ = try wireFloat(wire, &cursor);
+                }
+                point_count += count;
+            },
+            else => return error.InvalidCanvasBatch,
+        }
+        if (emits_command) {
+            if (command_count == command_limit) return error.CanvasCommandLimit;
+            command_count += 1;
+        }
+    }
 }
 
 fn wireFloat(wire: []const f64, cursor: *usize) Error!f32 {
@@ -1055,4 +1110,29 @@ test "canvas command budget is shared across every canvas in the view" {
         error.CanvasCommandLimit,
         tree.setCanvasCommands(second, &.{ 1, 0, 0, 1, 1, 0xffffffff }),
     );
+}
+
+test "a failed canvas batch preserves the last good frame and shared budget" {
+    var tree: Tree = .{};
+    const first = try tree.createNode(.canvas);
+    const second = try tree.createNode(.canvas);
+    try tree.setCanvasCommands(first, &.{ 1, 7, 8, 9, 10, 0xffffffff });
+    const original_fingerprint = (try tree.canvasStateConst(first)).fingerprint;
+
+    // The first command is valid, but the following polyline declares three
+    // points and supplies only one. The old single-command frame must remain
+    // intact rather than becoming this partial prefix.
+    try std.testing.expectError(
+        error.InvalidCanvasBatch,
+        tree.setCanvasCommands(first, &.{ 1, 99, 98, 97, 96, 0xff0000ff, 5, 1, 0xffffffff, 3, 0, 0 }),
+    );
+    const preserved = try tree.canvasStateConst(first);
+    try std.testing.expectEqual(@as(usize, 1), preserved.command_count);
+    try std.testing.expectEqual(@as(usize, 0), preserved.point_count);
+    try std.testing.expectEqual(original_fingerprint, preserved.fingerprint);
+    try std.testing.expectEqual(@as(f32, 7), preserved.commands[0].fill_rect.rect.x);
+
+    // Failed work contributes nothing to the per-view budget.
+    try tree.setCanvasCommands(second, &.{ 1, 0, 0, 1, 1, 0xffffffff });
+    try std.testing.expectEqual(@as(usize, 1), (try tree.canvasStateConst(second)).command_count);
 }
