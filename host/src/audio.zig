@@ -9,6 +9,14 @@ else
 pub const fft_size: usize = 2048;
 pub const band_count: usize = 32;
 pub const silence_floor: f64 = 0.0005;
+/// Hysteresis gate: once the silence hold is armed (or silence has
+/// latched), rms must clear this higher floor to count as signal again.
+/// With a single threshold, device noise hovering at the floor re-armed
+/// the two-second hold on every crossing, so `silent` stayed false for
+/// minutes with nothing audibly playing (the published rms rounds to
+/// 0.000 the whole time). Real playback sits orders of magnitude above
+/// this; only the noise band between the two floors changes behavior.
+pub const silence_resume_floor: f64 = 0.002;
 pub const silence_hold_ms: u64 = 2000;
 
 pub const Frame = struct {
@@ -276,7 +284,8 @@ pub const Provider = struct {
     const SilenceAction = enum { active, decay, final_zero, suppress };
 
     fn silenceAction(self: *Provider, rms: f64, now_ms: u64) SilenceAction {
-        if (rms >= silence_floor) {
+        const gate: f64 = if (self.silence_started_ms == 0 and !self.silent) silence_floor else silence_resume_floor;
+        if (rms >= gate) {
             self.silence_started_ms = 0;
             self.silent = false;
             self.zero_sent = false;
@@ -398,6 +407,23 @@ test "audio silence decays once, parks, and resumes on signal" {
     try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.1, 2400));
     try std.testing.expect(!provider.silent);
     try std.testing.expect(!provider.zero_sent);
+}
+
+test "noise at the silence floor cannot re-arm the hold or unlatch silence" {
+    var provider: Provider = .{};
+    try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.2, 100));
+    // Noise-floor flapping between the two gates during the hold keeps
+    // the hold running instead of resetting it on every crossing.
+    try std.testing.expectEqual(Provider.SilenceAction.decay, provider.silenceAction(0.0004, 200));
+    try std.testing.expectEqual(Provider.SilenceAction.decay, provider.silenceAction(0.0006, 300));
+    try std.testing.expectEqual(Provider.SilenceAction.decay, provider.silenceAction(0.0004, 2199));
+    try std.testing.expectEqual(Provider.SilenceAction.final_zero, provider.silenceAction(0.0006, 2200));
+    try std.testing.expect(provider.silent);
+    // Latched silence ignores the noise band and resumes on real signal.
+    try std.testing.expectEqual(Provider.SilenceAction.suppress, provider.silenceAction(0.0019, 2300));
+    try std.testing.expect(provider.silent);
+    try std.testing.expectEqual(Provider.SilenceAction.active, provider.silenceAction(0.002, 2400));
+    try std.testing.expect(!provider.silent);
 }
 
 test "live capture failure emits one final zero and then parks" {
