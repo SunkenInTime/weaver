@@ -133,8 +133,9 @@ type HotSwapValueType = "undefined" | "null" | "boolean" | "number" | "string" |
 interface HotSwapSlot { kind: Hook["kind"]; valueType?: HotSwapValueType; value?: unknown; transferable?: boolean }
 
 const encodedHotSwapSeed = (globalThis as typeof globalThis & { __weaverHotSwapSeed?: unknown }).__weaverHotSwapSeed;
+const hotSwapSeedProvided = typeof encodedHotSwapSeed === "string";
 let hotSwapSeed: HotSwapSlot[] | null = parseHotSwapSeed(encodedHotSwapSeed);
-let hotSwapCompatible = hotSwapSeed !== null;
+let hotSwapCompatible = !hotSwapSeedProvided || hotSwapSeed !== null;
 
 export const Fragment = Symbol("weaver.fragment");
 
@@ -142,8 +143,11 @@ let rootComponent: Component | null = null;
 let rootInstance: Instance | null = null;
 let activeConfig: WidgetConfig | null = null;
 let renderingComponent: ComponentInstance | null = null;
+let renderInProgress = false;
+let renderFailureScope: string | null = null;
 let renderQueued = false;
 let committedRootId = 0;
+let widgetFailed = false;
 const pendingEffects: EffectHook[] = [];
 const handlers = new Map<number, HostElementProps>();
 interface CanvasBinding {
@@ -164,7 +168,7 @@ interface CanvasBinding {
 const canvases = new Map<number, CanvasBinding>();
 const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
-native.onCanvasResize((id, width, height) => {
+native.onCanvasResize((id, width, height) => runWidgetCallback("canvas resize callback", () => {
   const binding = canvases.get(id);
   if (!binding || !Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height < 0) return;
   if (binding.width === width && binding.height === height) return;
@@ -172,7 +176,7 @@ native.onCanvasResize((id, width, height) => {
   binding.height = height;
   binding.ctx = createCanvasContext(binding);
   drawCanvasFrame(id, Date.now() / 1000);
-});
+}));
 
 export function h(type: ElementType, props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
   const source = props ?? {};
@@ -277,7 +281,7 @@ export function useInterval(callback: () => void, milliseconds: number): void {
   useEffect(() => {
     if (!Number.isFinite(milliseconds) || milliseconds <= 0) throw new Error("useInterval requires a positive millisecond interval");
     const id = native.setInterval(milliseconds);
-    native.onTimer(id, () => latest.current());
+    native.onTimer(id, () => runWidgetCallback("useInterval callback", () => latest.current()));
     return () => native.clearInterval(id);
   }, [milliseconds]);
 }
@@ -401,22 +405,44 @@ export function wfetch(url: string, init: WFetchInit = {}): Promise<WFetchRespon
 }
 
 function renderRoot(): void {
-  if (!rootComponent) return;
+  if (!rootComponent || widgetFailed) return;
   pendingEffects.length = 0;
-  native.beginBatch();
+  let batchStarted = false;
   try {
-    rootInstance = reconcile(null, rootInstance, h(rootComponent, null));
-    const rootId = firstNativeId(rootInstance);
+    native.beginBatch();
+    batchStarted = true;
+    renderInProgress = true;
+    const nextRoot = reconcile(null, rootInstance, h(rootComponent, null));
+    const rootId = firstNativeId(nextRoot);
     if (rootId !== committedRootId) {
       native.setRoot(rootId);
-      committedRootId = rootId;
     }
-  } finally {
     native.endBatch();
+    batchStarted = false;
+    renderInProgress = false;
+    rootInstance = nextRoot;
+    committedRootId = rootId;
+  } catch (error) {
+    renderInProgress = false;
+    pendingEffects.length = 0;
+    if (batchStarted) {
+      try {
+        native.abortBatch();
+      } catch (abortError) {
+        native.log(`render rollback failed: ${errorDetails(abortError)}`);
+      }
+    }
+    const scope = renderFailureScope ?? "render";
+    renderFailureScope = null;
+    failWidget(scope, error);
+    return;
   }
+  renderFailureScope = null;
   for (const hook of pendingEffects.splice(0)) {
-    hook.cleanup?.();
-    const cleanup = hook.effect?.();
+    runWidgetCallback("effect cleanup callback", () => hook.cleanup?.());
+    if (widgetFailed) return;
+    const cleanup = runWidgetCallback("effect callback", () => hook.effect?.());
+    if (widgetFailed) return;
     hook.cleanup = typeof cleanup === "function" ? cleanup : undefined;
   }
 }
@@ -603,7 +629,9 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
 
 function unmount(instance: Instance): void {
   if (instance.kind === "component") {
-    for (const hook of instance.hooks) if (hook.kind === "effect") hook.cleanup?.();
+    for (const hook of instance.hooks) {
+      if (hook.kind === "effect") runWidgetCallback("effect cleanup callback", () => hook.cleanup?.());
+    }
     if (instance.child) unmount(instance.child);
     return;
   }
@@ -700,35 +728,37 @@ function disposeCanvas(id: number): void {
 }
 
 function drawCanvasFrame(id: number, nativeTimestamp?: number): void {
-  const binding = canvases.get(id);
-  if (!binding) return;
-  if (nativeTimestamp !== undefined && !binding.nativeTimestampStarted) {
-    binding.lastT = undefined;
-    binding.nativeTimestampStarted = true;
-  }
-  const t = typeof nativeTimestamp === "number" && Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
-    ? nativeTimestamp
-    : Date.now() / 1000;
-  const dt = binding.lastT === undefined ? 0 : Math.max(0, t - binding.lastT);
-  binding.lastT = t;
-  binding.batchLength = 0;
-  binding.active = true;
-  try {
-    binding.onFrame(binding.ctx, { t, dt });
-  } finally {
-    binding.active = false;
-  }
-  // Preserve a real empty canvas on glass without making the GPU transport
-  // treat the frame as an unsupported packet. The zero-area transparent rect
-  // is visually inert in both renderers but gives the retained packet an
-  // explicit draw command that clears stale immediate instances.
-  if (binding.batchLength === 2 && binding.batch[0] === 0) {
-    const at = binding.batchLength;
-    binding.batch[at] = 1; binding.batch[at + 1] = 0; binding.batch[at + 2] = 0;
-    binding.batch[at + 3] = 0; binding.batch[at + 4] = 0; binding.batch[at + 5] = 0;
-    binding.batchLength += 6;
-  }
-  native.setCanvasCommands(id, binding.batch.subarray(0, binding.batchLength));
+  runWidgetCallback("canvas onFrame callback", () => {
+    const binding = canvases.get(id);
+    if (!binding) return;
+    if (nativeTimestamp !== undefined && !binding.nativeTimestampStarted) {
+      binding.lastT = undefined;
+      binding.nativeTimestampStarted = true;
+    }
+    const t = typeof nativeTimestamp === "number" && Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
+      ? nativeTimestamp
+      : Date.now() / 1000;
+    const dt = binding.lastT === undefined ? 0 : Math.max(0, t - binding.lastT);
+    binding.lastT = t;
+    binding.batchLength = 0;
+    binding.active = true;
+    try {
+      binding.onFrame(binding.ctx, { t, dt });
+    } finally {
+      binding.active = false;
+    }
+    // Preserve a real empty canvas on glass without making the GPU transport
+    // treat the frame as an unsupported packet. The zero-area transparent rect
+    // is visually inert in both renderers but gives the retained packet an
+    // explicit draw command that clears stale immediate instances.
+    if (binding.batchLength === 2 && binding.batch[0] === 0) {
+      const at = binding.batchLength;
+      binding.batch[at] = 1; binding.batch[at + 1] = 0; binding.batch[at + 2] = 0;
+      binding.batch[at + 3] = 0; binding.batch[at + 4] = 0; binding.batch[at + 5] = 0;
+      binding.batchLength += 6;
+    }
+    native.setCanvasCommands(id, binding.batch.subarray(0, binding.batchLength));
+  });
 }
 
 /// Keep the command writer and its bounded Float64Array stable for the life of
@@ -833,12 +863,52 @@ function flatten(values: readonly unknown[]): WidgetChild[] {
 }
 
 function scheduleRender(): void {
-  if (renderQueued) return;
+  if (renderQueued || widgetFailed) return;
   renderQueued = true;
   void Promise.resolve().then(() => {
     renderQueued = false;
     renderRoot();
   });
+}
+
+function errorDetails(error: unknown): string {
+  if (error instanceof Error) {
+    const headline = `${error.name}: ${error.message}`;
+    if (!error.stack) return headline;
+    return error.message && !error.stack.includes(error.message) ? `${headline}\n${error.stack}` : error.stack;
+  }
+  try {
+    return typeof error === "string" ? error : JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function failWidget(scope: string, error: unknown): void {
+  if (widgetFailed) return;
+  widgetFailed = true;
+  renderQueued = false;
+  pendingEffects.length = 0;
+  const details = errorDetails(error);
+  try {
+    native.reportError(scope, details);
+  } catch (reportError) {
+    native.log(`${scope} failed: ${details}\nerror reporting also failed: ${errorDetails(reportError)}`);
+  }
+}
+
+function runWidgetCallback<T>(scope: string, callback: () => T): T | undefined {
+  if (widgetFailed) return undefined;
+  try {
+    return callback();
+  } catch (error) {
+    if (renderInProgress) {
+      renderFailureScope = scope;
+      throw error;
+    }
+    failWidget(scope, error);
+    return undefined;
+  }
 }
 
 function currentComponent(hook: string): ComponentInstance {
@@ -868,9 +938,13 @@ function parseHotSwapSeed(value: unknown): HotSwapSlot[] | null {
   if (typeof value !== "string") return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed) || parsed.some((slot) => !slot || typeof slot !== "object" || !["state", "ref", "effect"].includes(String((slot as HotSwapSlot).kind)))) return null;
+    if (!Array.isArray(parsed) || parsed.some((slot) => !slot || typeof slot !== "object" || !["state", "ref", "effect"].includes(String((slot as HotSwapSlot).kind)))) {
+      native.log("dev hot swap state seed was invalid; candidate must retry with fresh state");
+      return null;
+    }
     return parsed as HotSwapSlot[];
   } catch {
+    native.log("dev hot swap state seed could not be parsed; candidate must retry with fresh state");
     return null;
   }
 }
@@ -908,13 +982,15 @@ function captureHotSwap(): string | null {
       return { kind: hook.kind, valueType, value };
     }));
   } catch {
+    native.log("dev hot swap state capture could not be serialized; next candidate will use fresh state");
     return null;
   }
 }
 
 function hotSwapAccepted(): boolean {
-  if (!hotSwapSeed) return true;
-  return hotSwapCompatible && rootInstance?.kind === "component" && rootInstance.type === rootComponent && rootInstance.hooks.length === hotSwapSeed.length;
+  if (hotSwapSeedProvided && !hotSwapSeed) return false;
+  if (!hotSwapSeed) return !widgetFailed;
+  return !widgetFailed && hotSwapCompatible && rootInstance?.kind === "component" && rootInstance.type === rootComponent && rootInstance.hooks.length === hotSwapSeed.length;
 }
 
 function readStorage(): Record<string, unknown> {
@@ -935,11 +1011,11 @@ function serializeStorage(values: Record<string, unknown>): string {
 function scheduleStorageWrite(_encoded: string): void {
   if (storageTimerId !== 0) native.clearInterval(storageTimerId);
   storageTimerId = native.setInterval(200);
-  native.onTimer(storageTimerId, () => {
+  native.onTimer(storageTimerId, () => runWidgetCallback("storage flush callback", () => {
     native.clearInterval(storageTimerId);
     storageTimerId = 0;
     flushStorage();
-  });
+  }));
 }
 
 function flushStorage(): void {
@@ -968,13 +1044,13 @@ function pressEvent(payload: NativePressPayload): PressEvent {
   return { x: payload.x, y: payload.y, u, v };
 }
 
-native.onEvent((id, kind, payload) => {
+native.onEvent((id, kind, payload) => runWidgetCallback(`${kind} event callback`, () => {
   const handler = handlers.get(id);
   if (kind === "press") handler?.onPress?.(payload && typeof payload === "object" ? pressEvent(payload) : undefined);
   else if (kind === "doublepress" && payload && typeof payload === "object") handler?.onDoublePress?.(pressEvent(payload));
   else if (kind === "rightpress" && payload && typeof payload === "object") handler?.onRightPress?.(pressEvent(payload));
   else if (kind === "change" && typeof payload === "number") handler?.onChange?.(payload);
-});
+}));
 Object.defineProperty(globalThis, "wfetch", { value: wfetch, configurable: false, writable: false });
 Object.defineProperty(globalThis, "__weaverFlushStorage", { value: flushStorage, configurable: false, writable: false });
 Object.defineProperty(globalThis, "__weaverCaptureHotSwap", { value: captureHotSwap, configurable: false, writable: false });
@@ -1004,7 +1080,7 @@ const timeProvider = (() => {
       listeners.add(listener);
       if (timerId === 0) {
         timerId = native.setInterval(1000);
-        native.onTimer(timerId, tick);
+        native.onTimer(timerId, () => runWidgetCallback("time provider callback", tick));
       }
       return () => {
         listeners.delete(listener);
@@ -1026,7 +1102,7 @@ const hostProviders = (() => {
   const install = (): void => {
     if (installed) return;
     installed = true;
-    native.onProvider((line) => {
+    native.onProvider((line) => runWidgetCallback("host provider callback", () => {
       const frame = JSON.parse(line) as { provider?: unknown; value?: unknown };
       if (frame.provider === "cpu") {
         const value = frame.value as CpuData;
@@ -1041,7 +1117,7 @@ const hostProviders = (() => {
         const value = frame.value as MediaData;
         for (const listener of mediaListeners) listener(value);
       }
-    });
+    }));
   };
   return {
     subscribeCpu(listener: (value: CpuData) => void): () => void {

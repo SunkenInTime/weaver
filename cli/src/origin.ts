@@ -3,7 +3,7 @@ export function originHost(urlText: string): string | null {
     const url = new URL(urlText);
     return url.protocol === "https:" ? url.host : null;
   } catch {
-    return null;
+    return null; // Callers turn null into the actionable "wfetch requires an https:// URL" validation error.
   }
 }
 
@@ -13,7 +13,7 @@ export function validOriginHost(value: unknown): value is string {
     const url = new URL(`https://${value}`);
     return url.host.toLowerCase() === value.toLowerCase() && url.pathname === "/";
   } catch {
-    return false;
+    return false; // This is a validation predicate; the config validator owns the user-facing invalid-origin message.
   }
 }
 

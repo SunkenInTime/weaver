@@ -34,10 +34,13 @@ pub const Store = struct {
         return .{ .io = io, .directory = directory, .path = path, .temporary_path = temporary_path };
     }
 
-    pub fn load(self: *const Store, allocator: std.mem.Allocator) ?Saved {
-        const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.path, allocator, .limited(max_file_bytes)) catch return null;
+    pub fn load(self: *const Store, allocator: std.mem.Allocator) !?Saved {
+        const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.path, allocator, .limited(max_file_bytes)) catch |err| switch (err) {
+            error.FileNotFound => return null,
+            else => return err,
+        };
         defer allocator.free(bytes);
-        return parse(bytes);
+        return parse(bytes) orelse error.InvalidGeometryRecord;
     }
 
     /// Write beside the destination, then rename over it — a killed

@@ -226,6 +226,10 @@ const Host = struct {
     thread_sample_ms: u64 = 0,
     slot_threads: [max_widgets]u32 = [_]u32{0} ** max_widgets,
     renderer_threads: u32 = 0,
+    status_write_failures: u64 = 0,
+    renderer_failure_count: u64 = 0,
+    renderer_failure_reason: [256]u8 = undefined,
+    renderer_failure_reason_len: usize = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -258,8 +262,7 @@ const Host = struct {
                 .stop_missing => self.stopSlot(slot, true),
                 .handle_exit => self.handleExit(slot, now_ms),
                 .launch => self.launch(slot, now_ms) catch |err| {
-                    slot.setReason("launch failed: {s}", .{@errorName(err)});
-                    supervisor.recordCrash(slot, now_ms, null);
+                    supervisor.recordLaunchFailure(slot, now_ms, err);
                 },
             }
         }
@@ -282,7 +285,11 @@ const Host = struct {
         const manifest = try std.json.parseFromSlice(Manifest, self.allocator, manifest_bytes, .{ .ignore_unknown_fields = true });
         defer manifest.deinit();
         supervisor.selectManifest(slot, manifest.value.subscribe, manifest.value.capabilities, manifest.value.renderBackend, self.force_software);
-        if (slot.wants_gpu) self.ensureRenderer(now_ms) catch {};
+        if (slot.wants_gpu) self.ensureRenderer(now_ms) catch {
+            // ensureRenderer records the named failure for status and owns
+            // retry/backoff. The widget may still start so it can reconnect
+            // as soon as the shared renderer recovers.
+        };
         var pipe_name_buffer: [256]u8 = undefined;
         var pipe_name: []const u8 = &.{};
         if (slot.wants_cpu or slot.wants_memory or slot.wants_audio or slot.wants_media or slot.wants_media_transport) {
@@ -329,7 +336,10 @@ const Host = struct {
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.platform.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
         slot.platform.backend_path_len = backend_path.len;
-        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch {};
+        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
         const backend_path_w = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, backend_path);
         defer self.allocator.free(backend_path_w);
         if (c.SetEnvironmentVariableW(env_backend_file, backend_path_w.ptr) == 0) return error.SetEnvironmentFailed;
@@ -386,11 +396,17 @@ const Host = struct {
             .none => {},
             .handle_exit => {
                 const process = self.renderer.platform.process.?;
+                var exit_code: c.DWORD = 1;
+                _ = c.GetExitCodeProcess(process, &exit_code);
                 _ = c.CloseHandle(process);
                 self.renderer.platform.process = null;
                 self.renderer.platform.pid = 0;
                 self.thread_sample_ms = 0;
                 supervisor.recordRendererExit(&self.renderer, now_ms);
+                self.noteRendererFailure(
+                    "renderer process exited: code={d}; retrying in {d}ms",
+                    .{ exit_code, self.renderer.next_restart_ms -| now_ms },
+                );
             },
             .stop => {
                 const process = self.renderer.platform.process.?;
@@ -408,6 +424,17 @@ const Host = struct {
 
     fn ensureRenderer(self: *Host, now_ms: u64) !void {
         if (self.force_software or self.renderer.platform.process != null or now_ms < self.renderer.next_restart_ms) return;
+        self.startRenderer(now_ms) catch |err| {
+            self.noteRendererFailure(
+                "renderer launch failed: {s}; retrying in 1000ms",
+                .{@errorName(err)},
+            );
+            return err;
+        };
+        self.noteRendererRecovery();
+    }
+
+    fn startRenderer(self: *Host, now_ms: u64) !void {
         const command = try std.fmt.allocPrint(self.allocator, "\"{s}\"", .{self.renderer_exe});
         defer self.allocator.free(command);
         const command_w_const = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, command);
@@ -437,6 +464,29 @@ const Host = struct {
         self.renderer.platform.previous_sample_ms = now_ms;
         self.renderer.platform.sample_count = 0;
         self.renderer.platform.sample_cursor = 0;
+    }
+
+    fn noteRendererFailure(self: *Host, comptime format: []const u8, args: anytype) void {
+        self.renderer_failure_count += 1;
+        if (self.renderer_failure_count == 1) {
+            var writer = std.Io.Writer.fixed(&self.renderer_failure_reason);
+            writer.print(format, args) catch {
+                writer = std.Io.Writer.fixed(&self.renderer_failure_reason);
+                writer.writeAll("renderer unavailable; retrying") catch unreachable;
+            };
+            self.renderer_failure_reason_len = writer.buffered().len;
+            std.log.err(
+                "{s}; affected GPU widgets expose this failure through weaver status; repeated failures are suppressed until recovery",
+                .{self.renderer_failure_reason[0..self.renderer_failure_reason_len]},
+            );
+        }
+    }
+
+    fn noteRendererRecovery(self: *Host) void {
+        if (self.renderer_failure_count == 0) return;
+        std.log.info("renderer recovered after {d} consecutive failures", .{self.renderer_failure_count});
+        self.renderer_failure_count = 0;
+        self.renderer_failure_reason_len = 0;
     }
 
     fn handleExit(self: *Host, slot: *Slot, now_ms: u64) void {
@@ -714,6 +764,13 @@ const Host = struct {
                 backend_allocations[slot_index] = std.Io.Dir.cwd().readFileAlloc(self.io, slot.platform.backendPath(), self.allocator, .limited(16)) catch null;
                 if (backend_allocations[slot_index]) |value| backend = value;
             }
+            const slot_reason = slot.reason();
+            const reason = if (slot_reason.len > 0)
+                slot_reason
+            else if (slot.wants_gpu and backend.len == 1 and backend[0] == '-' and self.renderer_failure_reason_len > 0)
+                self.renderer_failure_reason[0..self.renderer_failure_reason_len]
+            else
+                "";
             entries[entry_count] = .{
                 .name = slot.name(),
                 .pid = slot.platform.pid,
@@ -723,7 +780,7 @@ const Host = struct {
                 .backend = backend,
                 .uptime_seconds = if (slot.platform.process != null) (now_ms -| slot.started_ms) / 1000 else 0,
                 .state = slot.state,
-                .reason = slot.reason(),
+                .reason = reason,
             };
             entry_count += 1;
         }
@@ -744,10 +801,27 @@ const Host = struct {
             .audio_capture_starts = self.audio_provider.capture_starts,
             .audio_provider_frames = self.audio_provider.frame_count,
             .audio_last_error = self.audio_provider.last_error,
-        }, entries[0..entry_count]) catch return;
+        }, entries[0..entry_count]) catch |err| return self.noteStatusWriteFailure("encode", err);
         var cwd = std.Io.Dir.cwd();
-        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch return;
-        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
+        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch |err| return self.noteStatusWriteFailure("write temporary file", err);
+        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch |err| return self.noteStatusWriteFailure("publish", err);
+        self.noteStatusWriteRecovery();
+    }
+
+    fn noteStatusWriteFailure(self: *Host, operation: []const u8, err: anyerror) void {
+        self.status_write_failures += 1;
+        if (self.status_write_failures == 1) {
+            std.log.err(
+                "host status publication degraded while attempting to {s}: {s}; path={s}; repeated failures are suppressed until recovery",
+                .{ operation, @errorName(err), self.status_path },
+            );
+        }
+    }
+
+    fn noteStatusWriteRecovery(self: *Host) void {
+        if (self.status_write_failures == 0) return;
+        std.log.info("host status publication recovered after {d} consecutive failures", .{self.status_write_failures});
+        self.status_write_failures = 0;
     }
 
     fn ensureBundle(self: *Host, source: []const u8) !void {
@@ -836,6 +910,7 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(status_path);
     const status_temp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{status_path});
     defer allocator.free(status_temp_path);
+    cleanupBackendStatusFiles(init.io, directory);
     const art_cache_root = try std.fs.path.join(allocator, &.{ directory, "artcache" });
     defer allocator.free(art_cache_root);
     var media_art_cache = try art_cache.Cache.init(init.io, allocator, art_cache_root);
@@ -909,6 +984,24 @@ fn run(init: std.process.Init) !void {
         host.renderer.platform.process = null;
     }
     host.writeStatus(c.GetTickCount64());
+}
+
+fn cleanupBackendStatusFiles(io: std.Io, directory_path: []const u8) void {
+    var directory = std.Io.Dir.cwd().openDir(io, directory_path, .{ .iterate = true }) catch |err| {
+        std.log.warn("could not inspect renderer status sidecars: {s}", .{@errorName(err)});
+        return;
+    };
+    defer directory.close(io);
+    var iterator = directory.iterate();
+    while (iterator.next(io) catch |err| {
+        std.log.warn("renderer status sidecar scan stopped: {s}", .{@errorName(err)});
+        return;
+    }) |entry| {
+        if (entry.kind != .file or !std.mem.startsWith(u8, entry.name, "status.json.backend-")) continue;
+        directory.deleteFile(io, entry.name) catch |err| {
+            std.log.warn("could not remove orphan renderer status sidecar {s}: {s}", .{ entry.name, @errorName(err) });
+        };
+    }
 }
 
 fn signalEvent(name: [*:0]const u16) !void {

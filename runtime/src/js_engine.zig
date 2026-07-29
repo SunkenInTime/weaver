@@ -16,6 +16,11 @@ pub const Error = error{
     ScriptException,
 };
 
+const PendingRejection = struct {
+    promise: c.JSValue = qjs.undefinedValue(),
+    reason: c.JSValue = qjs.undefinedValue(),
+};
+
 /// A single-widget QuickJS isolate. It runs only when the Native SDK main loop
 /// enters `fireTimer`; no JS thread, OS timer, or hidden render loop exists.
 pub const Engine = struct {
@@ -25,6 +30,7 @@ pub const Engine = struct {
     provider: *provider_mod.Client,
     deadline_ms: u64 = 0,
     executing: bool = false,
+    pending_rejections: [8]PendingRejection = [_]PendingRejection{.{}} ** 8,
 
     pub fn create(
         allocator: std.mem.Allocator,
@@ -55,12 +61,18 @@ pub const Engine = struct {
         };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
+        c.JS_SetHostPromiseRejectionTracker(runtime, promiseRejectionTracker, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
         return self;
     }
 
     pub fn destroy(self: *Engine, allocator: std.mem.Allocator) void {
         self.flushStorage();
+        for (&self.pending_rejections) |*pending| {
+            c.JS_FreeValue(self.context, pending.promise);
+            c.JS_FreeValue(self.context, pending.reason);
+            pending.* = .{};
+        }
         bridge.deinit(self.context, &self.bridge_state);
         c.JS_FreeContext(self.context);
         c.JS_FreeRuntime(self.runtime);
@@ -97,17 +109,29 @@ pub const Engine = struct {
     }
 
     pub fn captureHotSwap(self: *Engine, allocator: std.mem.Allocator) ?[]u8 {
-        const result = self.callGlobal("__weaverCaptureHotSwap") catch return null;
+        const result = self.callGlobal("__weaverCaptureHotSwap") catch |err| {
+            std.log.warn("dev hot swap state capture failed; candidate will use fresh state: {s}", .{@errorName(err)});
+            return null;
+        };
         defer c.JS_FreeValue(self.context, result);
         if (!c.JS_IsString(result)) return null;
         var len: usize = 0;
-        const raw = c.JS_ToCStringLen2(self.context, &len, result, false) orelse return null;
+        const raw = c.JS_ToCStringLen2(self.context, &len, result, false) orelse {
+            std.log.warn("dev hot swap state capture could not be converted to UTF-8; candidate will use fresh state", .{});
+            return null;
+        };
         defer c.JS_FreeCString(self.context, raw);
-        return allocator.dupe(u8, raw[0..len]) catch null;
+        return allocator.dupe(u8, raw[0..len]) catch |err| {
+            std.log.warn("dev hot swap state capture allocation failed; candidate will use fresh state: {s}", .{@errorName(err)});
+            return null;
+        };
     }
 
     pub fn hotSwapAccepted(self: *Engine) bool {
-        const result = self.callGlobal("__weaverHotSwapAccepted") catch return false;
+        const result = self.callGlobal("__weaverHotSwapAccepted") catch |err| {
+            std.log.warn("dev hot swap state acceptance check failed; candidate will use fresh state: {s}", .{@errorName(err)});
+            return false;
+        };
         defer c.JS_FreeValue(self.context, result);
         return c.JS_ToBool(self.context, result) == 1;
     }
@@ -157,6 +181,10 @@ pub const Engine = struct {
         return bridge.hasActiveFetches(&self.bridge_state);
     }
 
+    pub fn renderFailed(self: *const Engine) bool {
+        return bridge.renderFailed(&self.bridge_state);
+    }
+
     pub fn drainFetches(self: *Engine) Error!void {
         self.beginTurn();
         defer self.endTurn();
@@ -190,7 +218,10 @@ pub const Engine = struct {
         while (true) {
             var job_context: ?*c.JSContext = null;
             const result = c.JS_ExecutePendingJob(self.runtime, &job_context);
-            if (result == 0) return;
+            if (result == 0) {
+                self.flushUnhandledRejections();
+                return;
+            }
             if (result < 0) return self.reportExceptionFrom(job_context orelse self.context);
         }
     }
@@ -250,22 +281,201 @@ pub const Engine = struct {
         logExceptionFrom(context);
         return error.ScriptException;
     }
+
+    fn flushUnhandledRejections(self: *Engine) void {
+        for (&self.pending_rejections) |*pending| {
+            if (c.JS_IsUndefined(pending.promise)) continue;
+            var detail_buffer: [6000]u8 = undefined;
+            const details = valueDetails(self.context, pending.reason, &detail_buffer);
+            if (self.bridge_state.emit_error_logs) std.log.err("widget unhandled promise rejection:\n{s}", .{details});
+            self.bridge_state.render_failed = true;
+            var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
+            const first_line_length = std.mem.indexOfScalar(u8, details, '\n') orelse details.len;
+            const first_line = details[0..@min(first_line_length, 150)];
+            const visible = std.fmt.bufPrint(
+                &visible_buffer,
+                "unhandled promise rejection\n{s}",
+                .{first_line},
+            ) catch "Unhandled promise rejection; see the per-widget log";
+            self.bridge_state.tree.showError(visible);
+            c.JS_FreeValue(self.context, pending.promise);
+            c.JS_FreeValue(self.context, pending.reason);
+            pending.* = .{};
+        }
+    }
 };
 
 fn logExceptionFrom(context: *c.JSContext) void {
     const exception = c.JS_GetException(context);
     defer c.JS_FreeValue(context, exception);
+    var buffer: [6000]u8 = undefined;
+    std.log.err("widget JavaScript exception:\n{s}", .{valueDetails(context, exception, &buffer)});
+}
+
+fn valueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8) []const u8 {
+    if (c.JS_IsError(value)) return errorValueDetails(context, value, buffer);
+    const rendered = c.JS_DupValue(context, value);
+    defer c.JS_FreeValue(context, rendered);
     var len: usize = 0;
-    const raw = c.JS_ToCStringLen2(context, &len, exception, false);
-    if (raw) |text| {
-        defer c.JS_FreeCString(context, text);
-        std.log.err("widget JavaScript exception: {s}", .{text[0..len]});
-    } else {
-        std.log.err("widget JavaScript exception", .{});
+    const raw = c.JS_ToCStringLen2(context, &len, rendered, false) orelse return "JavaScript value could not be formatted";
+    defer c.JS_FreeCString(context, raw);
+    const copied = @min(len, buffer.len);
+    @memcpy(buffer[0..copied], raw[0..copied]);
+    return buffer[0..copied];
+}
+
+fn errorValueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8) []const u8 {
+    const name_value = c.JS_GetPropertyStr(context, value, "name");
+    defer c.JS_FreeValue(context, name_value);
+    const message_value = c.JS_GetPropertyStr(context, value, "message");
+    defer c.JS_FreeValue(context, message_value);
+    const stack_value = c.JS_GetPropertyStr(context, value, "stack");
+    defer c.JS_FreeValue(context, stack_value);
+
+    var name_len: usize = 0;
+    const name_raw = c.JS_ToCStringLen2(context, &name_len, name_value, false);
+    defer if (name_raw) |raw| c.JS_FreeCString(context, raw);
+    var message_len: usize = 0;
+    const message_raw = c.JS_ToCStringLen2(context, &message_len, message_value, false);
+    defer if (message_raw) |raw| c.JS_FreeCString(context, raw);
+    var stack_len: usize = 0;
+    const stack_raw = c.JS_ToCStringLen2(context, &stack_len, stack_value, false);
+    defer if (stack_raw) |raw| c.JS_FreeCString(context, raw);
+
+    const name = if (name_raw) |raw| raw[0..name_len] else "Error";
+    const message = if (message_raw) |raw| raw[0..message_len] else "";
+    const stack = if (stack_raw) |raw| raw[0..stack_len] else "";
+    if (message.len == 0 or std.mem.indexOf(u8, stack, message) != null) {
+        const source = if (stack.len > 0) stack else name;
+        const copied = @min(source.len, buffer.len);
+        @memcpy(buffer[0..copied], source[0..copied]);
+        return buffer[0..copied];
     }
+
+    var cursor: usize = 0;
+    appendDetail(buffer, &cursor, name);
+    appendDetail(buffer, &cursor, ": ");
+    appendDetail(buffer, &cursor, message);
+    if (stack.len > 0) {
+        appendDetail(buffer, &cursor, "\n");
+        appendDetail(buffer, &cursor, stack);
+    }
+    return buffer[0..cursor];
+}
+
+fn appendDetail(buffer: []u8, cursor: *usize, value: []const u8) void {
+    const count = @min(value.len, buffer.len -| cursor.*);
+    @memcpy(buffer[cursor.* .. cursor.* + count], value[0..count]);
+    cursor.* += count;
+}
+
+fn promiseRejectionTracker(
+    context: ?*c.JSContext,
+    promise: c.JSValueConst,
+    reason: c.JSValueConst,
+    is_handled: bool,
+    opaque_context: ?*anyopaque,
+) callconv(.c) void {
+    const js = context orelse return;
+    const self: *Engine = @ptrCast(@alignCast(opaque_context orelse return));
+    const promise_pointer = c.JS_VALUE_GET_PTR(promise);
+    for (&self.pending_rejections) |*pending| {
+        if (c.JS_IsUndefined(pending.promise) or c.JS_VALUE_GET_PTR(pending.promise) != promise_pointer) continue;
+        if (is_handled) {
+            c.JS_FreeValue(js, pending.promise);
+            c.JS_FreeValue(js, pending.reason);
+            pending.* = .{};
+        }
+        return;
+    }
+    if (is_handled) return;
+    for (&self.pending_rejections) |*pending| {
+        if (!c.JS_IsUndefined(pending.promise)) continue;
+        pending.* = .{
+            .promise = c.JS_DupValue(js, promise),
+            .reason = c.JS_DupValue(js, reason),
+        };
+        return;
+    }
+    var buffer: [1024]u8 = undefined;
+    std.log.err("widget unhandled promise rejection queue exhausted; newest rejection:\n{s}", .{valueDetails(js, reason, &buffer)});
 }
 
 fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
     const self: *Engine = @ptrCast(@alignCast(context orelse return 1));
     return if (self.executing and platform.monotonicMilliseconds() >= self.deadline_ms) 1 else 0;
+}
+
+fn createTestEngine(tree: *tree_mod.Tree, store: *storage_mod.Store, provider: *provider_mod.Client) !*Engine {
+    return Engine.create(std.testing.allocator, tree, store, &.{}, provider, false);
+}
+
+test "a forced max_nodes failure is rolled back, named, and replaced by an error surface" {
+    var tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const committed = try tree.createNode(.text);
+    try tree.setText(committed, "healthy");
+    try tree.setRoot(committed);
+
+    var provider: provider_mod.Client = .{};
+    try provider.init(std.testing.io, null);
+    defer provider.deinit();
+    var store: storage_mod.Store = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .directory = ".",
+        .path = "weaver-js-engine-test-storage.json",
+        .temporary_path = "weaver-js-engine-test-storage.tmp",
+    };
+    const engine = try createTestEngine(&tree, &store, &provider);
+    defer engine.destroy(std.testing.allocator);
+    engine.bridge_state.emit_error_logs = false;
+
+    try engine.evaluate(
+        \\native.beginBatch();
+        \\try {
+        \\  for (let index = 0; index < 129; index += 1) native.createNode("panel");
+        \\  native.endBatch();
+        \\} catch (error) {
+        \\  native.abortBatch();
+        \\  native.reportError("render", String(error) + "\n" + (error.stack || ""));
+        \\}
+    , "budget-test.js");
+
+    try std.testing.expect(engine.renderFailed());
+    try std.testing.expectEqual(@as(usize, 2), tree.nodeCount());
+    try std.testing.expectEqual(tree_mod.Kind.column, (try tree.nodeConst(tree.root.?)).kind);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        (try tree.nodeConst(2)).textSlice(),
+        "node capacity exhausted: max_nodes=128, asked for 129",
+    ) != null);
+}
+
+test "unhandled promise rejection is visible while a handled rejection stays healthy" {
+    var rejected_tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
+    defer rejected_tree.deinit();
+    var provider: provider_mod.Client = .{};
+    try provider.init(std.testing.io, null);
+    defer provider.deinit();
+    var store: storage_mod.Store = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .directory = ".",
+        .path = "weaver-js-engine-test-storage.json",
+        .temporary_path = "weaver-js-engine-test-storage.tmp",
+    };
+    const rejected = try createTestEngine(&rejected_tree, &store, &provider);
+    defer rejected.destroy(std.testing.allocator);
+    rejected.bridge_state.emit_error_logs = false;
+    try rejected.evaluate("Promise.resolve().then(() => { throw new Error('async exploded'); });", "promise-test.js");
+    try std.testing.expect(rejected.renderFailed());
+    try std.testing.expect(std.mem.indexOf(u8, (try rejected_tree.nodeConst(2)).textSlice(), "async exploded") != null);
+
+    var handled_tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
+    defer handled_tree.deinit();
+    const handled = try createTestEngine(&handled_tree, &store, &provider);
+    defer handled.destroy(std.testing.allocator);
+    try handled.evaluate("Promise.reject(new Error('expected')).catch(() => {});", "handled-promise-test.js");
+    try std.testing.expect(!handled.renderFailed());
 }

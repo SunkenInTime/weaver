@@ -125,6 +125,7 @@ test "Windows art containment rejects traversal prefixes and namespaces" {
 test "resolver accepts only a real file under the canonical host art root" {
     if (builtin.os.tag != .windows) return error.SkipZigTest;
     const root = ".zig-cache/weaver-image-path-test";
+    // Test setup/teardown cleanup must not hide the containment assertion.
     std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
     const widget_root = try std.fs.path.join(std.testing.allocator, &.{ root, "widget" });

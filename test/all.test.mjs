@@ -6,3 +6,4 @@ import "../cli/test/weave.test.mjs";
 import "../cli/test/pack-boundary.test.mjs";
 import "../cli/test/lowered-budget.test.mjs";
 import "../cli/test/canvas-size.test.mjs";
+import "../cli/test/image-budget.test.mjs";

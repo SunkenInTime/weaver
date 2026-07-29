@@ -251,6 +251,7 @@ const TestEndpoint = struct {
         var buffer: [256]u8 = undefined;
         var writer = stream.writer(self.io, &buffer);
         writer.interface.writeAll("one\ntwo\nthree\nfour\nfive\n") catch return;
+        // The client-side queue assertion reports a fixture disconnect.
         writer.interface.flush() catch {};
     }
 };
@@ -266,6 +267,7 @@ test "inert Unix provider client retains a valid monotonic clock" {
 test "Unix provider transport frames lines and bounds its queue" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-test-{d}.sock", .{std.posix.system.getpid()});
+    // Test socket cleanup must not hide the transport assertion.
     std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     const address = try std.Io.net.UnixAddress.init(path);
@@ -325,6 +327,7 @@ test "Unix provider transport routes a short ack while the host stays connected"
     };
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-live-ack-test-{d}.sock", .{std.posix.system.getpid()});
+    // Test socket cleanup must not hide the ack assertion.
     std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     const address = try std.Io.net.UnixAddress.init(path);
@@ -376,11 +379,13 @@ test "Unix provider transport rejects an unterminated ack at EOF" {
             var buffer: [64]u8 = undefined;
             var writer = stream.writer(self.io, &buffer);
             writer.interface.writeAll("{\"ack\":7,\"ok\":true}") catch return;
+            // EOF is the fixture behavior; the client assertion owns failure.
             writer.interface.flush() catch {};
         }
     };
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-eof-test-{d}.sock", .{std.posix.system.getpid()});
+    // Test socket cleanup must not hide the protocol assertion.
     std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     const address = try std.Io.net.UnixAddress.init(path);
@@ -416,6 +421,7 @@ test "Unix provider command send has a deadline when the connected host stalls" 
     };
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-provider-stall-test-{d}.sock", .{std.posix.system.getpid()});
+    // Test socket cleanup must not hide the deadline assertion.
     std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
     const address = try std.Io.net.UnixAddress.init(path);

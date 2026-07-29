@@ -28,7 +28,9 @@ pub const Server = struct {
         var port_buffer: [8]u8 = undefined;
         const port_text = try std.fmt.bufPrint(&port_buffer, "{d}\n", .{self.port});
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = signal_path, .data = port_text });
-        errdefer std.Io.Dir.cwd().deleteFile(io, signal_path) catch {};
+        errdefer std.Io.Dir.cwd().deleteFile(io, signal_path) catch |err| {
+            std.log.warn("dev reload startup cleanup could not remove {s}: {s}", .{ signal_path, @errorName(err) });
+        };
         self.thread = try std.Thread.spawn(.{}, run, .{self});
     }
 
@@ -47,7 +49,11 @@ pub const Server = struct {
         }
         if (self.thread) |thread| thread.join();
         if (self.listener) |*listener| listener.deinit(io);
-        if (self.signal_path.len != 0) std.Io.Dir.cwd().deleteFile(io, self.signal_path) catch {};
+        if (self.signal_path.len != 0) {
+            std.Io.Dir.cwd().deleteFile(io, self.signal_path) catch |err| {
+                std.log.warn("dev reload shutdown could not remove {s}: {s}", .{ self.signal_path, @errorName(err) });
+            };
+        }
         self.thread = null;
         self.listener = null;
         self.io = null;
@@ -57,8 +63,23 @@ pub const Server = struct {
 
     fn run(self: *Server) void {
         const io = self.io orelse return;
+        var consecutive_accept_failures: u64 = 0;
         while (!self.stopping.load(.acquire)) {
-            const stream = self.listener.?.accept(io) catch return;
+            const stream = self.listener.?.accept(io) catch |err| {
+                consecutive_accept_failures += 1;
+                if (consecutive_accept_failures == 1) {
+                    std.log.err("dev reload listener accept failed: {s}; retrying and suppressing repeats until recovery", .{@errorName(err)});
+                }
+                std.Io.sleep(io, .fromMilliseconds(100), .awake) catch |sleep_err| {
+                    std.log.err("dev reload listener retry wait failed: {s}; reload listener is stopping", .{@errorName(sleep_err)});
+                    return;
+                };
+                continue;
+            };
+            if (consecutive_accept_failures != 0) {
+                std.log.info("dev reload listener recovered after {d} accept failures", .{consecutive_accept_failures});
+                consecutive_accept_failures = 0;
+            }
             stream.close(io);
             if (self.stopping.load(.acquire)) return;
             (self.notify orelse return)();
@@ -74,6 +95,7 @@ fn noteTestNotification() void {
 
 test "loopback connection emits one reload without a polling timer" {
     const signal_path = "weaver-dev-reload-test.port";
+    // Test setup/teardown cleanup must not hide the behavior under test.
     std.Io.Dir.cwd().deleteFile(std.testing.io, signal_path) catch {};
     defer std.Io.Dir.cwd().deleteFile(std.testing.io, signal_path) catch {};
     test_notifications.store(0, .release);

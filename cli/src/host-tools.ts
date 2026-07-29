@@ -192,7 +192,7 @@ function comparablePath(path: string, platform: NodeJS.Platform): string {
 function reclaimAbandonedLock(lockDirectory: string, ownerPath: string, staleMs: number): boolean {
   let ageMs: number;
   try { ageMs = Date.now() - statSync(lockDirectory).mtimeMs; }
-  catch { return true; }
+  catch { return true; /* The lock vanished between discovery and inspection, so there is nothing left to reclaim. */ }
   let pid: number | null = null;
   try {
     const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as { pid?: unknown };
@@ -204,7 +204,7 @@ function reclaimAbandonedLock(lockDirectory: string, ownerPath: string, staleMs:
     rmSync(lockDirectory, { recursive: true, force: true });
     return true;
   } catch {
-    return false;
+    return false; // The lock owner changed or access was denied; the bounded acquire loop reports timeout to the caller.
   }
 }
 
@@ -222,7 +222,7 @@ function lockOwnedBy(ownerPath: string, token: string): boolean {
     const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as { token?: unknown };
     return owner.token === token;
   } catch {
-    return false;
+    return false; // A missing, partial, or replaced owner file means this lease must not delete the lock.
   }
 }
 

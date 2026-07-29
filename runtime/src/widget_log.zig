@@ -8,6 +8,8 @@ var path_len: usize = 0;
 var old_path_buffer: [32768]u8 = undefined;
 var old_path_len: usize = 0;
 var mutex: std.atomic.Mutex = .unlocked;
+var write_failed = std.atomic.Value(bool).init(false);
+var fallback_reported = std.atomic.Value(bool).init(false);
 
 pub fn init(runtime_io: std.Io, path: []const u8) !void {
     if (path.len + ".old".len > path_buffer.len) return error.LogPathTooLong;
@@ -17,6 +19,10 @@ pub fn init(runtime_io: std.Io, path: []const u8) !void {
     @memcpy(old_path_buffer[path.len .. path.len + ".old".len], ".old");
     old_path_len = path.len + ".old".len;
     io = runtime_io;
+    var file = try std.Io.Dir.cwd().createFile(runtime_io, path, .{ .read = true, .truncate = false });
+    file.close(runtime_io);
+    write_failed.store(false, .release);
+    fallback_reported.store(false, .release);
 }
 
 pub fn logFn(
@@ -27,13 +33,17 @@ pub fn logFn(
 ) void {
     var buffer: [8192]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
-    writeTimestamp(&writer) catch return;
-    writer.print(" {s}", .{level.asText()}) catch return;
-    if (scope != .default) writer.print("({t})", .{scope}) catch return;
-    writer.writeAll(": ") catch return;
-    writer.print(format, args) catch return;
-    writer.writeByte('\n') catch return;
+    writeTimestamp(&writer) catch |err| return noteFailure(err);
+    writer.print(" {s}", .{level.asText()}) catch |err| return noteFailure(err);
+    if (scope != .default) writer.print("({t})", .{scope}) catch |err| return noteFailure(err);
+    writer.writeAll(": ") catch |err| return noteFailure(err);
+    writer.print(format, args) catch |err| return noteFailure(err);
+    writer.writeByte('\n') catch |err| return noteFailure(err);
     writeLine(writer.buffered());
+}
+
+pub fn failed() bool {
+    return write_failed.load(.acquire);
 }
 
 fn writeTimestamp(writer: *std.Io.Writer) !void {
@@ -54,6 +64,10 @@ fn writeTimestamp(writer: *std.Io.Writer) !void {
 }
 
 fn writeLine(line: []const u8) void {
+    writeLineFallible(line) catch |err| noteFailure(err);
+}
+
+fn writeLineFallible(line: []const u8) !void {
     const runtime_io = io orelse return;
     if (path_len == 0) return;
     while (!mutex.tryLock()) std.atomic.spinLoopHint();
@@ -66,14 +80,24 @@ fn writeLine(line: []const u8) void {
     if (shouldRotate(size, line.len)) {
         cwd.deleteFile(runtime_io, old_path) catch |err| switch (err) {
             error.FileNotFound => {},
-            else => return,
+            else => return err,
         };
-        cwd.rename(path, cwd, old_path, runtime_io) catch return;
+        try cwd.rename(path, cwd, old_path, runtime_io);
     }
-    var file = cwd.createFile(runtime_io, path, .{ .read = true, .truncate = false }) catch return;
+    var file = try cwd.createFile(runtime_io, path, .{ .read = true, .truncate = false });
     defer file.close(runtime_io);
-    const stat = file.stat(runtime_io) catch return;
-    file.writePositionalAll(runtime_io, line, stat.size) catch return;
+    const stat = try file.stat(runtime_io);
+    try file.writePositionalAll(runtime_io, line, stat.size);
+}
+
+fn noteFailure(err: anyerror) void {
+    write_failed.store(true, .release);
+    if (!fallback_reported.swap(true, .acq_rel)) {
+        std.debug.print(
+            "weaver widget log unavailable: {s}; path={s}; the widget window will show an error surface\n",
+            .{ @errorName(err), path_buffer[0..path_len] },
+        );
+    }
 }
 
 fn shouldRotate(size: u64, incoming: usize) bool {

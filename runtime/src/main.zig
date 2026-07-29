@@ -48,6 +48,7 @@ pub const Model = struct {
     media_deadline_ms: u64 = 0,
     provider_frames: u64 = 0,
     provider_batch_logged: bool = false,
+    provider_dispatch_failures: u64 = 0,
     slider_values: [tree_mod.max_nodes]f32 = @splat(0),
     images: [max_images]ImageAsset = [_]ImageAsset{.{}} ** max_images,
     image_count: usize = 0,
@@ -85,6 +86,9 @@ const ImageState = struct {
     observed_valid: bool = false,
     load_failure_count: u8 = 0,
     registered: bool = false,
+    failure: ?anyerror = null,
+    failure_label: [160]u8 = @splat(0),
+    failure_label_len: usize = 0,
 };
 
 pub const Msg = union(enum) {
@@ -113,14 +117,23 @@ var dev_reload_pending = std.atomic.Value(bool).init(false);
 var provider_wake_pending = std.atomic.Value(bool).init(false);
 var backend_status_io: ?std.Io = null;
 var backend_status_path: ?[]const u8 = null;
+var projection_failed_this_view: bool = false;
+var projection_failure_latched: bool = false;
 
 fn initEffects(model: *Model, effects: *Effects) void {
     for (model.images[0..model.image_count]) |image| {
         _ = effects.registerImageBytes(image.id, image.bytes) catch |err| {
-            std.log.err("widget image {d} failed to decode/register: {s}", .{ image.id, @errorName(err) });
+            if (findImageState(model, @intCast(image.id))) |state| {
+                recordImageFailure(state, err, image.bytes, "initial image decode/register");
+            } else {
+                std.log.err("initial image decode/register failed: image={d}, cause={s}", .{ image.id, @errorName(err) });
+            }
             continue;
         };
-        if (findImageState(model, @intCast(image.id))) |state| state.registered = true;
+        if (findImageState(model, @intCast(image.id))) |state| {
+            state.registered = true;
+            clearImageFailure(state);
+        }
     }
     syncTimers(model, effects);
 }
@@ -154,24 +167,18 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 return;
             }
             if (timer.key == provider_poll_key) {
-                drainProviderFrames(model, effects) catch |err| {
-                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
-                };
+                dispatchProviderFrames(model, effects, "provider poll");
                 syncTimers(model, effects);
                 return;
             }
             if (timer.key == media_deadline_key) {
                 model.media_deadline_ms = 0;
-                drainProviderFrames(model, effects) catch |err| {
-                    std.log.err("widget media deadline dispatch failed: {s}", .{@errorName(err)});
-                };
+                dispatchProviderFrames(model, effects, "media deadline");
                 syncTimers(model, effects);
                 return;
             }
             if (model.provider_poll_interval_ms <= 33) {
-                drainProviderFrames(model, effects) catch |err| {
-                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
-                };
+                dispatchProviderFrames(model, effects, "timer");
             }
             const before = model.tree.generation;
             (model.engine orelse return).fireTimer(timer.key, timer.timestamp_ns) catch |err| {
@@ -218,9 +225,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         },
         .canvas_frame => |timestamp_ns| {
             if (model.provider_poll_interval_ms <= 33) {
-                drainProviderFrames(model, effects) catch |err| {
-                    std.log.err("widget provider dispatch failed: {s}", .{@errorName(err)});
-                };
+                dispatchProviderFrames(model, effects, "canvas frame");
             }
             (model.engine orelse return).fireCanvasFrames(timestamp_ns) catch |err| {
                 std.log.err("widget canvas frame callback failed: {s}", .{@errorName(err)});
@@ -229,9 +234,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
         },
         .external_wake => |wake| {
             if (wake.provider) {
-                drainProviderFrames(model, effects) catch |err| {
-                    std.log.err("widget provider wake dispatch failed: {s}", .{@errorName(err)});
-                };
+                dispatchProviderFrames(model, effects, "provider wake");
             }
             if (wake.dev_reload) {
                 reloadIfChanged(model, effects) catch |err| {
@@ -334,12 +337,28 @@ fn drainProviderFrames(model: *Model, _: *Effects) !void {
     if (count > 1) model.provider_batch_logged = true;
 }
 
+fn dispatchProviderFrames(model: *Model, effects: *Effects, trigger: []const u8) void {
+    drainProviderFrames(model, effects) catch |err| {
+        model.provider_dispatch_failures += 1;
+        if (model.provider_dispatch_failures == 1) {
+            std.log.err(
+                "widget provider dispatch degraded during {s}: {s}; repeated failures are suppressed until recovery",
+                .{ trigger, @errorName(err) },
+            );
+        }
+        return;
+    };
+    if (model.provider_dispatch_failures != 0) {
+        std.log.info("widget provider dispatch recovered after {d} consecutive failures", .{model.provider_dispatch_failures});
+        model.provider_dispatch_failures = 0;
+    }
+}
+
 fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     const io = model.io orelse return;
     const stat = try std.Io.Dir.cwd().statFile(io, model.bundle_path, .{});
     const mtime = stat.mtime.nanoseconds;
     if (mtime == model.dev_seen_mtime) return;
-    model.dev_seen_mtime = mtime;
 
     const source = try std.Io.Dir.cwd().readFileAlloc(io, model.bundle_path, std.heap.page_allocator, .limited(1024 * 1024));
     defer std.heap.page_allocator.free(source);
@@ -372,11 +391,12 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     model.image_epoch +%= 1;
     if (model.image_epoch == 0) model.image_epoch = 1;
     model.tree.deinit();
-    model.tree = candidate_tree.*;
+    model.tree.moveFrom(candidate_tree);
     candidate_tree_moved = true;
     candidate.setTree(&model.tree);
     model.engine = candidate;
     old_engine.destroy(std.heap.page_allocator);
+    model.dev_seen_mtime = mtime;
     syncTimers(model, effects);
     std.log.info("dev hot swap applied ({s} root hook state)", .{if (preserved) "preserved" else "fresh"});
 }
@@ -394,6 +414,8 @@ fn evaluateCandidate(model: *Model, tree: *tree_mod.Tree, source: []const u8, se
     errdefer candidate.destroy(std.heap.page_allocator);
     if (seed) |value| try candidate.setHotSwapSeed(value);
     try candidate.evaluate(source, "bundle.js");
+    if (candidate.renderFailed()) return error.CandidateFirstRenderFailed;
+    if (tree.root == null) return error.CandidateDidNotRenderRoot;
     if (seed != null and !candidate.hotSwapAccepted()) return error.HotSwapMismatch;
     return candidate;
 }
@@ -599,8 +621,50 @@ fn onFrameRequested(_: *const Model) ?Msg {
 }
 
 fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
-    const root_id = model.tree.root orelse return ui.panel(.{ .window_drag = true }, .{});
-    return buildNode(ui, &model.tree, model.fonts, root_id, true);
+    if (widget_log.failed()) {
+        const foreground = native_sdk.canvas.Color.rgba8(255, 226, 230, 255);
+        const label = ui.text(.{
+            .text_scale = 0.86,
+            .wrap = true,
+            .text_max_lines = 5,
+            .style = .{ .foreground = foreground },
+        }, "WidgetLogUnavailable\nThe per-widget log cannot be written. Check the log directory and available disk space.");
+        return ui.panel(.{
+            .window_drag = true,
+            .padding = 12,
+            .grow = 1,
+            .cross = .center,
+            .main = .center,
+            .style = .{
+                .background = native_sdk.canvas.Color.rgba8(52, 12, 18, 255),
+                .foreground = foreground,
+            },
+        }, .{label});
+    }
+    projection_failed_this_view = false;
+    const root_id = model.tree.root orelse return projectionFailurePanel(ui, true);
+    const result = buildNode(ui, model, root_id, true);
+    if (!projection_failed_this_view and projection_failure_latched) {
+        std.log.info("widget native projection recovered after a degraded frame", .{});
+        projection_failure_latched = false;
+    }
+    return result;
+}
+
+fn noteProjectionFailure(comptime format: []const u8, args: anytype) void {
+    projection_failed_this_view = true;
+    if (projection_failure_latched) return;
+    projection_failure_latched = true;
+    std.log.err(format ++ "; marking this frame degraded and suppressing repeats until recovery", args);
+}
+
+fn projectionFailurePanel(ui: *WidgetUi, is_root: bool) WidgetUi.Node {
+    projection_failed_this_view = true;
+    return ui.panel(.{
+        .window_drag = is_root,
+        .grow = 1,
+        .style = .{ .background = native_sdk.canvas.Color.rgba8(98, 16, 28, 255) },
+    }, .{});
 }
 
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
@@ -655,7 +719,10 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
         @as(usize, @intFromBool(icon_elements != null));
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
-    const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch return source;
+    const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch |err| {
+        noteProjectionFailure("widget effect projection failed: cause={s}", .{@errorName(err)});
+        return source;
+    };
     @memcpy(combined[0..existing.len], existing);
     var cursor: usize = existing.len;
     if (retained.shadow) |shadow| {
@@ -688,8 +755,11 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
     return result;
 }
 
-fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_mod.Font, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
-    const retained = tree.nodeConst(id) catch return ui.panel(.{}, .{});
+fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: bool) WidgetUi.Node {
+    const retained = model.tree.nodeConst(id) catch |err| {
+        noteProjectionFailure("widget retained-node projection failed: node={d}, cause={s}", .{ id, @errorName(err) });
+        return projectionFailurePanel(ui, is_root);
+    };
     var options: WidgetUi.ElementOptions = .{
         .global_key = .{ .int = id },
         // Every widget drags by its whole surface: the root is one OS
@@ -783,7 +853,7 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
                 .medium => .medium,
                 .semibold, .bold => .bold,
             };
-            return attachEffects(ui, retained, resolveFontId(retained, fonts), ui.text(options, retained.textSlice()));
+            return attachEffects(ui, retained, resolveFontId(retained, model.fonts), ui.text(options, retained.textSlice()));
         }
         const span = [_]native_sdk.canvas.TextSpan{.{
             .text = retained.textSlice(),
@@ -794,11 +864,17 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             },
             .scale = retained.font_scale,
         }};
-        return attachEffects(ui, retained, resolveFontId(retained, fonts), ui.paragraph(options, &span));
+        return attachEffects(ui, retained, resolveFontId(retained, model.fonts), ui.paragraph(options, &span));
     }
-    const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch return ui.panel(.{}, .{});
+    const children = ui.arena.alloc(WidgetUi.Node, retained.child_count) catch |err| {
+        noteProjectionFailure(
+            "widget child projection capacity exhausted: node={d}, asked for {d}, cause={s}",
+            .{ id, retained.child_count, @errorName(err) },
+        );
+        return projectionFailurePanel(ui, is_root);
+    };
     for (retained.children[0..retained.child_count], 0..) |child_id, index| {
-        children[index] = buildNode(ui, tree, fonts, child_id, false);
+        children[index] = buildNode(ui, model, child_id, false);
     }
     const result = switch (retained.kind) {
         // SDK layout-only rows/columns do not paint their own style. A
@@ -836,10 +912,29 @@ fn buildNode(ui: *WidgetUi, tree: *const tree_mod.Tree, fonts: []const manifest_
             break :block options;
         }, .{}),
         .image => block: {
+            if (findImageStateConst(model, id)) |image_state| {
+                if (image_state.failure) |_| {
+                    options.cross = .center;
+                    options.main = .center;
+                    options.style.background = native_sdk.canvas.Color.rgba8(52, 12, 18, 255);
+                    options.style.foreground = native_sdk.canvas.Color.rgba8(255, 226, 230, 255);
+                    const label_options: WidgetUi.ElementOptions = .{
+                        .text_scale = 0.72,
+                        .text_alignment = .center,
+                        .wrap = true,
+                        .text_max_lines = 3,
+                        .style = .{ .foreground = native_sdk.canvas.Color.rgba8(255, 226, 230, 255) },
+                    };
+                    break :block ui.panel(options, .{ui.text(label_options, imageFailureLabel(image_state))});
+                }
+            }
             options.image = id;
             break :block ui.image(options);
         },
-        .canvas => ui.immediateCanvas(options, (tree.canvasStateConst(id) catch return ui.panel(.{}, .{})).slice()),
+        .canvas => ui.immediateCanvas(options, (model.tree.canvasStateConst(id) catch |err| {
+            noteProjectionFailure("widget canvas projection failed: node={d}, cause={s}", .{ id, @errorName(err) });
+            return projectionFailurePanel(ui, is_root);
+        }).slice()),
         .text => unreachable,
     };
     return attachEffects(ui, retained, null, result);
@@ -987,10 +1082,12 @@ fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, n
             state.registered = false;
         }
         try rememberRawSource(state, node.sourceSlice());
+        state.failure = err;
+        state.failure_label_len = 0;
         if (invalidImageSourceError(err)) {
             std.log.err("image source rejected by widget/art-cache containment: {s}", .{@errorName(err)});
         } else {
-            std.log.err("image source could not be resolved; keeping the prior image: {s}", .{@errorName(err)});
+            std.log.err("image source could not be resolved; prior registration is retained but the widget is showing a failure placeholder: {s}", .{@errorName(err)});
         }
         return;
     };
@@ -1005,17 +1102,20 @@ fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, n
         .limited(1024 * 1024),
     ) catch |err| {
         recordImageLoadFailure(state, resolved.path);
-        std.log.err("image reload read failed; keeping the prior image: {s}", .{@errorName(err)});
+        state.failure = err;
+        state.failure_label_len = 0;
+        std.log.err("image reload read failed; prior registration is retained but the widget is showing a failure placeholder: {s}", .{@errorName(err)});
         return;
     };
     defer std.heap.page_allocator.free(bytes);
     _ = effects.registerImageBytes(id, bytes) catch |err| {
         recordImageLoadFailure(state, resolved.path);
-        std.log.err("image reload decode/register failed; keeping the prior image: {s}", .{@errorName(err)});
+        recordImageFailure(state, err, bytes, "image reload decode/register");
         return;
     };
     replaceObserved(state, resolved.path, true);
     state.registered = true;
+    clearImageFailure(state);
 }
 
 test "image reload failures retry twice then settle until the source changes" {
@@ -1105,10 +1205,18 @@ pub fn main(init: std.process.Init) !void {
     // still lands on an attached display; a stale record (monitor
     // unplugged) falls back to the anchor. macOS validates in AppKit at
     // creation (constrainFrame), so only Windows pre-checks here.
-    const dragged: ?geometry_mod.Saved = if (geometry_store.load(allocator)) |saved|
-        (if (draggedOriginVisible(saved, loaded.manifest.size)) saved else null)
-    else
-        null;
+    const loaded_geometry = geometry_store.load(allocator) catch |err| geometry: {
+        std.log.warn("widget geometry ignored: {s}; path={s}", .{ @errorName(err), geometry_store.path });
+        break :geometry null;
+    };
+    const dragged: ?geometry_mod.Saved = if (loaded_geometry) |saved| geometry: {
+        if (draggedOriginVisible(saved, loaded.manifest.size)) break :geometry saved;
+        std.log.warn(
+            "widget geometry ignored because the saved window no longer intersects an attached display: x={d} y={d} scale={d}; path={s}",
+            .{ saved.x, saved.y, saved.scale, geometry_store.path },
+        );
+        break :geometry null;
+    } else null;
     var frame = manifest_mod.desktopFrame(loaded.manifest);
     if (dragged) |saved| {
         std.log.info("widget using persisted dragged position x={d} y={d}; manifest anchor is overridden until the geometry record is removed", .{ saved.x, saved.y });
@@ -1216,9 +1324,26 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
+    if (app_state.model.tree.root == null) {
+        std.log.err("widget bundle completed without rendering a root; expected the default widget() registration to render synchronously", .{});
+        app_state.model.tree.showError("WidgetDidNotRenderRoot\nThe bundle completed without rendering a widget root.");
+    }
     if (app_state.model.provider.fatalChannelFailure()) return error.FatalProviderChannelFailure;
-    try loadLocalImages(init.io, allocator, directory, &app_state.model);
-    try seedImageStates(&app_state.model);
+    if (loadLocalImages(init.io, allocator, directory, &app_state.model)) |_| {
+        seedImageStates(&app_state.model) catch |err| {
+            std.log.err("initial widget image state failed: {s}", .{@errorName(err)});
+            var buffer: [tree_mod.max_text_bytes]u8 = undefined;
+            const visible = std.fmt.bufPrint(&buffer, "image initialization failed\n{s}", .{@errorName(err)}) catch "image initialization failed; see the per-widget log";
+            app_state.model.tree.showError(visible);
+            app_state.model.image_count = 0;
+        };
+    } else |err| {
+        std.log.err("initial widget image load failed: {s}", .{@errorName(err)});
+        var buffer: [tree_mod.max_text_bytes]u8 = undefined;
+        const visible = std.fmt.bufPrint(&buffer, "image load failed\n{s}", .{@errorName(err)}) catch "image load failed; see the per-widget log";
+        app_state.model.tree.showError(visible);
+        app_state.model.image_count = 0;
+    }
 
     requested_software_backend = renderer_backend == .software;
     const dev_signal_path = try std.fs.path.join(allocator, &.{ directory, dev_reload.signal_file_name });
@@ -1234,7 +1359,7 @@ pub fn main(init: std.process.Init) !void {
     }
     var app = app_state.app();
     app.start_fn = startRendererDiagnostics;
-    try runner.runWithOptions(app, .{
+    runner.runWithOptions(app, .{
         .app_name = "weaver-widget",
         .window_title = loaded.manifest.name,
         .bundle_id = "com.weaver.widget",
@@ -1250,7 +1375,134 @@ pub fn main(init: std.process.Init) !void {
         .persist_window_state = false,
         .primary_display_anchor = if (builtin.os.tag == .macos and dragged == null) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
         .js_window_api = false,
-    }, init);
+    }, init) catch |err| {
+        std.log.err("widget runtime stopped after platform callback failure: {s}", .{@errorName(err)});
+        return err;
+    };
+}
+
+fn buildNodeForTest(
+    ui: *WidgetUi,
+    retained_tree: *const tree_mod.Tree,
+    fonts: []const manifest_mod.Font,
+    id: tree_mod.NodeId,
+    is_root: bool,
+) WidgetUi.Node {
+    var model: Model = .{
+        .tree = retained_tree.*,
+        .fonts = fonts,
+    };
+    return buildNode(ui, &model, id, is_root);
+}
+
+fn findImageStateConst(model: *const Model, id: tree_mod.NodeId) ?*const ImageState {
+    for (model.image_states[0..model.image_state_count]) |*state| {
+        if (state.id == id) return state;
+    }
+    return null;
+}
+
+fn imageFailureLabel(state: *const ImageState) []const u8 {
+    if (state.failure_label_len != 0) return state.failure_label[0..state.failure_label_len];
+    return if (state.failure) |err| @errorName(err) else "ImageUnavailable";
+}
+
+fn clearImageFailure(state: *ImageState) void {
+    state.failure = null;
+    state.failure_label_len = 0;
+}
+
+fn recordImageFailure(state: *ImageState, err: anyerror, encoded: []const u8, context: []const u8) void {
+    state.failure = err;
+    state.failure_label_len = 0;
+    if (err == error.ImageTooLarge) {
+        if (encodedImageDimensions(encoded)) |dimensions| {
+            const pixels = std.math.mul(usize, dimensions.width, dimensions.height) catch std.math.maxInt(usize);
+            const asked = std.math.mul(usize, pixels, 4) catch std.math.maxInt(usize);
+            const label = std.fmt.bufPrint(
+                &state.failure_label,
+                "ImageTooLarge\n{d}x{d} RGBA={d}\nmax_image_rgba_bytes=262144",
+                .{ dimensions.width, dimensions.height, asked },
+            ) catch {
+                const fallback = "ImageTooLarge\nmax_image_rgba_bytes=262144";
+                @memcpy(state.failure_label[0..fallback.len], fallback);
+                state.failure_label_len = fallback.len;
+                std.log.err("{s} failed: ImageTooLarge; max_image_rgba_bytes=262144", .{context});
+                return;
+            };
+            state.failure_label_len = label.len;
+            std.log.err(
+                "{s} failed: ImageTooLarge; dimensions={d}x{d}, max_image_rgba_bytes=262144, asked for {d}",
+                .{ context, dimensions.width, dimensions.height, asked },
+            );
+            return;
+        }
+        const label = "ImageTooLarge\nmax_image_rgba_bytes=262144";
+        @memcpy(state.failure_label[0..label.len], label);
+        state.failure_label_len = label.len;
+    } else if (err == error.ImageRegistryFull) {
+        const label = "ImageRegistryFull\nmax_images=16, asked for 17";
+        @memcpy(state.failure_label[0..label.len], label);
+        state.failure_label_len = label.len;
+        std.log.err("{s} failed: ImageRegistryFull; max_images=16, asked for 17", .{context});
+        return;
+    }
+    std.log.err("{s} failed: cause={s}", .{ context, @errorName(err) });
+}
+
+const EncodedImageDimensions = struct { width: usize, height: usize };
+
+fn encodedImageDimensions(bytes: []const u8) ?EncodedImageDimensions {
+    const png_signature = "\x89PNG\r\n\x1a\n";
+    if (bytes.len >= 24 and std.mem.eql(u8, bytes[0..8], png_signature)) {
+        return validImageDimensions(
+            std.mem.readInt(u32, bytes[16..20], .big),
+            std.mem.readInt(u32, bytes[20..24], .big),
+        );
+    }
+    if (bytes.len >= 10 and (std.mem.eql(u8, bytes[0..6], "GIF87a") or std.mem.eql(u8, bytes[0..6], "GIF89a"))) {
+        return validImageDimensions(
+            std.mem.readInt(u16, bytes[6..8], .little),
+            std.mem.readInt(u16, bytes[8..10], .little),
+        );
+    }
+    if (bytes.len >= 26 and std.mem.eql(u8, bytes[0..2], "BM")) {
+        const width = std.mem.readInt(i32, bytes[18..22], .little);
+        const height = std.mem.readInt(i32, bytes[22..26], .little);
+        if (width == std.math.minInt(i32) or height == std.math.minInt(i32)) return null;
+        return validImageDimensions(@abs(width), @abs(height));
+    }
+    if (bytes.len >= 4 and bytes[0] == 0xff and bytes[1] == 0xd8) {
+        var offset: usize = 2;
+        while (offset + 3 < bytes.len) {
+            while (offset < bytes.len and bytes[offset] != 0xff) offset += 1;
+            while (offset < bytes.len and bytes[offset] == 0xff) offset += 1;
+            if (offset >= bytes.len) break;
+            const marker = bytes[offset];
+            offset += 1;
+            if (marker == 0xd8 or marker == 0xd9 or marker == 0x01 or (marker >= 0xd0 and marker <= 0xd7)) continue;
+            if (offset + 2 > bytes.len) break;
+            const length: usize = std.mem.readInt(u16, bytes[offset..][0..2], .big);
+            if (length < 2 or length > bytes.len - offset) break;
+            const is_start_of_frame = switch (marker) {
+                0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf => true,
+                else => false,
+            };
+            if (is_start_of_frame and length >= 7) {
+                return validImageDimensions(
+                    std.mem.readInt(u16, bytes[offset + 5 ..][0..2], .big),
+                    std.mem.readInt(u16, bytes[offset + 3 ..][0..2], .big),
+                );
+            }
+            offset += length;
+        }
+    }
+    return null;
+}
+
+fn validImageDimensions(width: anytype, height: anytype) ?EncodedImageDimensions {
+    if (width <= 0 or height <= 0) return null;
+    return .{ .width = @intCast(width), .height = @intCast(height) };
 }
 
 /// A persisted origin is only trusted while a grabbable corner of the
@@ -1458,7 +1710,7 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try retained_tree.setFlexWrap(row, true);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, row, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, row, true));
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
@@ -1486,7 +1738,7 @@ test "attached effects combine builder metadata with box and text shadows" {
     });
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, text_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, text_node, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
@@ -1516,7 +1768,7 @@ test "path icon projection parses normalized geometry and preserves viewBox stro
     try retained_tree.setTextColor(icon_node, native_sdk.canvas.Color.rgb8(251, 191, 36));
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, icon_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, icon_node, true));
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.icon, built.root.kind);
     try std.testing.expectEqual(@as(f32, 48), built.root.frame.width);
     try std.testing.expectEqual(@as(f32, 24), built.root.frame.height);
@@ -1559,7 +1811,7 @@ test "showcase headline keeps exact registered face through bold and text shadow
     }};
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, &fonts, text_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &fonts, text_node, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| {
@@ -1599,7 +1851,7 @@ test "attached shadows preserve hover and pressed metadata" {
     });
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNode(&ui, &retained_tree, &.{}, panel, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, panel, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .hover_style => |style| try std.testing.expectEqual(@as(?f32, 0.8), style.opacity),
@@ -1661,7 +1913,7 @@ test "retained stack projects overlay kind and rounded content clipping" {
     try tree.appendChild(stack_id, label_id);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const projected = buildNode(&ui, &tree, &.{}, stack_id, false);
+    const projected = buildNodeForTest(&ui, &tree, &.{}, stack_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, projected.widget.kind);
     try std.testing.expect(projected.widget.layout.flags.clip_content);
     try std.testing.expectEqual(@as(?f32, 14), projected.widget.style.radius);
@@ -1683,7 +1935,7 @@ test "retained image projects fit tiling and class corner radii" {
     try tree.setNumberProp(image_id, "radiusTopRight", 3);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const projected = buildNode(&ui, &tree, &.{}, image_id, false);
+    const projected = buildNodeForTest(&ui, &tree, &.{}, image_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.image, projected.widget.kind);
     try std.testing.expectEqual(native_sdk.canvas.ImageFit.contain, projected.widget.image_fit);
     try std.testing.expect(projected.widget.image_tile);

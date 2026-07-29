@@ -24,6 +24,8 @@ globalThis.native = {
   setRoot(...args) { operations.push(["setRoot", ...args]); },
   beginBatch() { operations.push(["beginBatch"]); },
   endBatch() { operations.push(["endBatch"]); },
+  abortBatch() { operations.push(["abortBatch"]); },
+  reportError(...args) { operations.push(["reportError", ...args]); },
   setHandler(...args) { operations.push(["setHandler", ...args]); },
   onEvent(callback) { eventCallback = callback; },
   hostAvailable() { return hostAvailable; },
@@ -268,11 +270,108 @@ function isolatedNative() {
   let id = 0;
   return {
     createNode() { return ++id; }, setProp() {}, setText() {}, appendChild() {}, insertBefore() {}, removeNode() {}, setRoot() {},
-    beginBatch() {}, endBatch() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, onProvider() {},
+    beginBatch() {}, endBatch() {}, abortBatch() {}, reportError() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, onProvider() {},
     setInterval() { return 1; }, clearInterval() {}, onTimer() {}, setCanvasCommands() {}, onCanvasResize() {}, onCanvasFrame() {}, clearCanvasFrame() {},
     fetch: async () => ({ status: 200, body: "{}" }), storageRead() { return null; }, storageWrite() {}, log() {},
   };
 }
+
+async function runBoundaryFixture(mode) {
+  const source = `
+    import { h, useEffect, useInterval, useState, widget } from "./src/index.ts";
+    widget({ name: "Boundary fixture", size: [100, 50] }, () => {
+      const [failRender, setFailRender] = useState(false);
+      globalThis.triggerRenderFailure = () => setFailRender(true);
+      if (${JSON.stringify(mode)} === "render" && failRender) {
+        throw new Error("node capacity exhausted: max_nodes=128, asked for 129");
+      }
+      useEffect(() => {
+        if (${JSON.stringify(mode)} === "effect") throw new Error("effect exploded");
+        return () => {
+          if (${JSON.stringify(mode)} === "cleanup") throw new Error("cleanup exploded");
+        };
+      }, [failRender]);
+      useInterval(() => {
+        if (${JSON.stringify(mode)} === "timer") throw new Error("interval exploded");
+      }, 100);
+      return ${JSON.stringify(mode.startsWith("canvas"))}
+        ? h("canvas", {
+            class: "w-[10px] h-[10px]",
+            fps: 60,
+            onFrame() {
+              if (globalThis.failCallback) throw new Error("canvas exploded");
+            },
+          })
+        : h("text", null, "healthy");
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "error-boundary-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const fixtureOperations = [];
+  const timerCallbacks = new Map();
+  const frameCallbacks = new Map();
+  let id = 0;
+  let timerId = 0;
+  const native = {
+    ...isolatedNative(),
+    createNode(type) { fixtureOperations.push(["createNode", type]); return ++id; },
+    setCanvasCommands(...args) { fixtureOperations.push(["setCanvasCommands", ...args]); },
+    beginBatch() { fixtureOperations.push(["beginBatch"]); },
+    endBatch() { fixtureOperations.push(["endBatch"]); },
+    abortBatch() { fixtureOperations.push(["abortBatch"]); },
+    reportError(...args) { fixtureOperations.push(["reportError", ...args]); },
+    setInterval() { return ++timerId; },
+    onTimer(timer, callback) { timerCallbacks.set(timer, callback); },
+    onCanvasFrame(canvas, callback) { frameCallbacks.set(canvas, callback); },
+  };
+  const context = { native, failCallback: mode === "canvas-initial" };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+  return { context, fixtureOperations, timerCallbacks, frameCallbacks };
+}
+
+test("render errors abort the generation and report the named budget with a stack", async () => {
+  const fixture = await runBoundaryFixture("render");
+  assert.equal(fixture.fixtureOperations.filter(([name]) => name === "endBatch").length, 1);
+  fixture.context.triggerRenderFailure();
+  await Promise.resolve();
+  assert.equal(fixture.fixtureOperations.filter(([name]) => name === "beginBatch").length, 2);
+  assert.equal(fixture.fixtureOperations.filter(([name]) => name === "endBatch").length, 1);
+  assert.equal(fixture.fixtureOperations.filter(([name]) => name === "abortBatch").length, 1);
+  const report = fixture.fixtureOperations.find(([name]) => name === "reportError");
+  assert.equal(report[1], "render");
+  assert.match(report[2], /node capacity exhausted: max_nodes=128, asked for 129/);
+  assert.match(report[2], /\n\s+at /);
+});
+
+test("effects, intervals, and canvas frames report their callback scope", async () => {
+  const effect = await runBoundaryFixture("effect");
+  assert.equal(effect.fixtureOperations.find(([name]) => name === "reportError")[1], "effect callback");
+
+  const timer = await runBoundaryFixture("timer");
+  [...timer.timerCallbacks.values()][0]();
+  assert.equal(timer.fixtureOperations.find(([name]) => name === "reportError")[1], "useInterval callback");
+
+  const cleanup = await runBoundaryFixture("cleanup");
+  cleanup.context.triggerRenderFailure();
+  await Promise.resolve();
+  assert.equal(cleanup.fixtureOperations.find(([name]) => name === "reportError")[1], "effect cleanup callback");
+
+  const canvas = await runBoundaryFixture("canvas");
+  const submittedBefore = canvas.fixtureOperations.filter(([name]) => name === "setCanvasCommands").length;
+  canvas.context.failCallback = true;
+  [...canvas.frameCallbacks.values()][0](2);
+  const report = canvas.fixtureOperations.find(([name]) => name === "reportError");
+  assert.equal(report[1], "canvas onFrame callback");
+  assert.match(report[2], /canvas exploded/);
+  assert.equal(canvas.fixtureOperations.filter(([name]) => name === "setCanvasCommands").length, submittedBefore);
+
+  const initialCanvas = await runBoundaryFixture("canvas-initial");
+  assert.equal(initialCanvas.fixtureOperations.filter(([name]) => name === "endBatch").length, 0);
+  assert.equal(initialCanvas.fixtureOperations.filter(([name]) => name === "abortBatch").length, 1);
+  assert.equal(initialCanvas.fixtureOperations.find(([name]) => name === "reportError")[1], "canvas onFrame callback");
+});
 
 async function runHotSwapFixture({ seed, initial = "0", addedHook = false }) {
   const source = `
@@ -314,4 +413,7 @@ test("hot swap captures and seeds root hook slots only when every slot type matc
   assert.equal(changedType.fixtureAccepted, false);
   const changedOrder = await runHotSwapFixture({ seed: JSON.stringify(snapshot), addedHook: true });
   assert.equal(changedOrder.fixtureAccepted, false);
+
+  const malformed = await runHotSwapFixture({ seed: "not-json" });
+  assert.equal(malformed.fixtureAccepted, false);
 });

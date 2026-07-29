@@ -320,6 +320,7 @@ test "macOS HTTPS transport preserves policy, bounds, timeout, trust, and cancel
     const certificate_der = directory ++ "/certificate.der";
     const private_key = directory ++ "/private-key.pem";
     const port_file = directory ++ "/port";
+    // Test setup/teardown cleanup must not hide the transport assertion.
     cwd.deleteTree(io, directory) catch {};
     try cwd.createDirPath(io, directory);
     defer cwd.deleteTree(io, directory) catch {};
