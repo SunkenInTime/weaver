@@ -1020,7 +1020,10 @@ function readStorage(): Record<string, unknown> {
 
 function serializeStorage(values: Record<string, unknown>): string {
   const encoded = JSON.stringify(values);
-  if (utf8ByteLength(encoded) > STORAGE_QUOTA_BYTES) throw new Error("StorageQuotaExceeded: widget storage exceeds 256 KiB");
+  const encodedBytes = utf8ByteLength(encoded);
+  if (encodedBytes > STORAGE_QUOTA_BYTES) {
+    throw new Error(`StorageQuotaExceeded: max_storage_bytes=${STORAGE_QUOTA_BYTES}, asked for ${encodedBytes}`);
+  }
   return encoded;
 }
 

@@ -461,7 +461,7 @@ function rejectCaseCollisions(paths: string[]): void {
 
 function validateDisplayString(value: string, label: string): void {
   if (value.trim() === "" || /[\p{C}\p{Zl}\p{Zp}]/u.test(value)) {
-    throw new Error(`${label} must be a non-empty string without control characters`);
+    throw new Error(`${label} must be a non-empty string without control, line-separator, or paragraph-separator characters`);
   }
 }
 

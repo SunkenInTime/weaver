@@ -528,7 +528,10 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);
-        state(js).tree.setSource(id, value.bytes) catch |err| return failFmt(js, "set image source failed: {s}", .{@errorName(err)});
+        state(js).tree.setSource(id, value.bytes) catch |err| return if (err == error.TextTooLong)
+            failFmt(js, "image source capacity exhausted: max_source_bytes={d}, asked for {d}", .{ tree_mod.max_source_bytes, value.bytes.len })
+        else
+            failFmt(js, "set image source failed: {s}", .{@errorName(err)});
     } else if (std.mem.eql(u8, key.bytes, "iconPath")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "iconPath must be a string");
         defer c.JS_FreeCString(js, value.raw);

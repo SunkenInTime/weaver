@@ -1767,7 +1767,12 @@ function discoverWidgetFonts(directory: string): RuntimeFont[] {
   for (const entry of candidates) {
     const path = join(directory, entry.name);
     const stem = basename(entry.name, extname(entry.name));
-    if (Buffer.byteLength(stem, "utf8") > MAX_WIDGET_FONT_FAMILY_BYTES || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(stem)) {
+    const stemBytes = Buffer.byteLength(stem, "utf8");
+    if (stemBytes > MAX_WIDGET_FONT_FAMILY_BYTES) {
+      errors.push(`${entry.name}: font family capacity exhausted: max_font_family_bytes=${MAX_WIDGET_FONT_FAMILY_BYTES}, asked for ${stemBytes}`);
+      continue;
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(stem)) {
       errors.push(`${entry.name}: font file stems must be 1-63 letters, digits, underscores, or hyphens so font-[${stem || "name"}] is a valid class`);
       continue;
     }
