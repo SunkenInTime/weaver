@@ -7,7 +7,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedNativeCommit = "19e12bc6f95bf68c2f3adb6fa2f89afbeecbc024";
+const expectedNativeCommit = "8ab1b159a972690c3eb2c7be68525174d3ac59e6";
 
 function filesBelow(root) {
   const output = [];

@@ -22,6 +22,12 @@ pub const max_children: usize = 64;
 // contributes 1 KiB to each occupied Node; unoccupied slots stay untouched.
 // Pinned by cli/src/index.ts nativeWidgetTextByteLimit.
 pub const max_text_bytes: usize = 1024;
+// Image-source receipt (2026-07-30): shipped relative asset paths peak at 24
+// UTF-8 bytes and the provider wire admits 259-byte art paths. 1024 leaves
+// almost 4x headroom over that cross-process good case. Sources allocate their
+// exact length; even if all 1024 nodes were abused as images, retained source
+// storage is bounded to 1 MiB plus 1 MiB in an in-flight transaction snapshot.
+pub const max_source_bytes: usize = 1024;
 // Lucide 1.26.0 measures 2,099 UTF-8 bytes for its largest normalized path
 // ("puzzle"); shipped widgets measure 1,037 bytes. 8 KiB leaves 3.9x headroom.
 // Paths allocate their exact length, so the unused allowance costs no memory.
@@ -817,6 +823,7 @@ pub const Tree = struct {
     }
 
     pub fn setSource(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_source_bytes) return error.TextTooLong;
         const target = try self.node(id);
         if (std.mem.eql(u8, target.sourceSlice(), value)) return;
         const replacement = try self.allocator.dupe(u8, value);
@@ -1542,14 +1549,16 @@ test "a failed canvas batch preserves the last good frame and shared budget" {
     try std.testing.expectEqual(@as(usize, 1), (try tree.canvasStateConst(second)).command_count);
 }
 
-test "asset source paths allocate exactly and survive transaction snapshots" {
+test "asset source paths are bounded, allocate exactly, and survive transaction snapshots" {
     var tree: Tree = .{ .allocator = std.testing.allocator };
     defer tree.deinit();
     const image = try tree.createNode(.image);
-    const long_source = [_]u8{'a'} ** (max_text_bytes * 2);
+    const long_source = [_]u8{'a'} ** max_source_bytes;
     try tree.setSource(image, &long_source);
     try tree.beginBatch();
     try tree.setSource(image, "replacement.png");
     tree.abortBatch();
     try std.testing.expectEqualStrings(&long_source, (try tree.nodeConst(image)).sourceSlice());
+    const over_limit = [_]u8{'b'} ** (max_source_bytes + 1);
+    try std.testing.expectError(error.TextTooLong, tree.setSource(image, &over_limit));
 }

@@ -80,11 +80,11 @@ the start of this sweep.
 | `max_widget_depth` | 32 | Native SDK `widget_limits.zig:9`; CLI `index.ts:1076` | Y | N | 8 | keep; one canonical Native source |
 | `max_children` | 64 | `runtime/src/tree.zig:19`; CLI `index.ts:1077` | Y | N | 24 | resize 24 → 64 |
 | `max_text_bytes` | 1,024 | `runtime/src/tree.zig:24`; CLI `index.ts:1078` | Y | N | 122 shipped; 512-byte provider field | resize 192 → 1,024 |
-| `max_source_bytes` | — | former `runtime/src/tree.zig` | — | N | 24 | delete; exact heap allocation |
-| `max_icon_path_bytes` | 8 KiB | `runtime/src/tree.zig:29`; `cli/src/icon-paths.ts:9` | Y | N | 2,099 catalog; 1,037 shipped | keep |
-| `max_font_family_bytes` | 63 | `runtime/src/tree.zig:34`; CLI `index.ts:95` | Y | N | 17 | keep as shared font-stem format bound |
-| `max_canvases` | 8 | `runtime/src/tree.zig:40`; CLI `index.ts:1079` | Y | N | 1 | keep |
-| canvas commands / points / wire | 2,048 / 8,192 / 32,768 | `runtime/src/tree.zig:49-51`; SDK `reconciler.ts:13` | Y | Y | 336-rect meter | keep; wire is derived |
+| `max_source_bytes` | 1,024 | `runtime/src/tree.zig:30` | Y | N | 24 shipped; 259-byte provider path | resize 260 → 1,024; exact heap allocation |
+| `max_icon_path_bytes` | 8 KiB | `runtime/src/tree.zig:35`; `cli/src/icon-paths.ts:9` | Y | N | 2,099 catalog; 1,037 shipped | keep |
+| `max_font_family_bytes` | 63 | `runtime/src/tree.zig:40`; CLI `index.ts:95` | Y | N | 17 | keep as shared font-stem format bound |
+| `max_canvases` | 8 | `runtime/src/tree.zig:46`; CLI `index.ts:1079` | Y | N | 1 | keep |
+| canvas commands / points / wire | 2,048 / 8,192 / 32,768 | `runtime/src/tree.zig:55-57`; SDK `reconciler.ts:13` | Y | Y | 336-rect meter | keep; wire is derived |
 | `max_images` | 16 | `runtime/src/main.zig:78`; CLI `index.ts:1083`; Native SDK `canvas_limits.zig:120` | Y | N/Y | 6 | keep |
 | decoded image bytes | 1 MiB | `main.zig:81`; CLI `index.ts:1678`; Native SDK `canvas_limits.zig:121`, `platform/types.zig:264` | Y | N | 262,144 exactly | resize 256 KiB → 1 MiB |
 | encoded image stream | 2 MiB | `main.zig:86`; CLI `index.ts:1683` | Y | N | 1,025,239 historical | resize 1 MiB → 2 MiB |
@@ -146,8 +146,6 @@ until their slots draw.
 
 ## Limits removed
 
-- The 260-byte image `source` path. Relative asset paths now allocate their
-  exact authored length; containment remains the policy boundary.
 - The separate 256-byte `.weave` display-name and author caps. The 64 KiB
   manifest cap already bounds their aggregate storage.
 - The 200-line `weaver logs` tail. The command had already loaded the current
