@@ -81,4 +81,79 @@ state.
 
 ## Recorded results (append as you go)
 
-- (pending)
+### 2026-07-30 — named. The wall is the AGX driver's per-process Metal submission working set
+
+All measurements on this machine (`Mac15,6`, macOS 26.5.2 `25F84`), branch
+state weaver `78f8cdf` / native `6a8e6178`, fresh ReleaseFast build
+(finished 11:09:06; measured PID 63629 started 11:09:13). Probe sources and
+raw logs: `.zig-cache/macos-memory/gpu-ledger-wall/` (throwaway; never in a
+PR). Ledger numbers are the process's own
+`task_info(TASK_VM_INFO).ledger_tag_graphics_footprint`; footprints
+cross-checked with `footprint`/`vmmap --summary` attach, which works on this
+harness.
+
+**Reproduction (step 1):** fresh Myclock (240x110, dist manifest says
+`renderBackend: software`): 133.1 MB phys_footprint, flat over 5 samples.
+Prior morning session's vmmap of the same workload: 121 MB with **85 MB
+dirty "Owned physical footprint (unmapped) (graphics)" across 33 regions**
+(saved in the cache dir). A 960x440 software-backend variant: 159 MB with
+96.2 MB owned-unmapped-graphics — the wall barely scales with window size
+and hits the software path too, because both paths drive the same
+CAMetalLayer present loop.
+
+**The turn-it-on-and-off receipt.** A ~100-line bare probe (weaver's exact
+layer config: BGRA8, framebufferOnly=YES, opaque=YES,
+allowsNextDrawableTimeout=NO, 480x220 drawable) presenting clears in a
+sustained loop:
+
+| Probe workload | Graphics ledger (steady) | phys_footprint |
+|---|---:|---:|
+| Before loop starts | 82 KB | 9.0 MB |
+| 60 Hz present loop, 240x110 window | **95.6 MB** (established within the first ~5 frames) | 110.5 MB |
+| 1 Hz present loop | **95.5 MB** (held between presents) | 109.2 MB |
+| 0.2 Hz present loop (5 s gaps) | 0.2-3.3 MB (never establishes) | 12-14 MB |
+| 10 s after any loop stops | ≤1 MB | 13-14 MB |
+| Offscreen clears at 60 Hz — no window, no CAMetalLayer, no present | **96.1 MB** | 103.2 MB |
+| 60 Hz IOSurface content updates via plain CALayer, no Metal device | **0-16 KB** | 10.0 MB |
+| One process, N presenting CAMetalLayers (n=1/4/8, 60 Hz) | 95.6 / 103.3 / 112.7 MB | 109.5 / 122.5 / 136.9 MB |
+
+**The name:** the ~85-96 MB "owned physical footprint (unmapped)
+(graphics)" is the Apple GPU driver's **per-process command-submission
+working set** on this hardware/OS. It is committed as soon as a process
+submits Metal command buffers in a sustained cadence — presentation is not
+required (offscreen row), a window is not required, and the render target
+size barely matters. It is one arena per process (~95 MB) plus ~2.4 MB per
+additional presenting layer. The driver reclaims it after roughly 2-5
+seconds of submission silence (held at 1 s intervals, never established at
+5 s intervals, gone within 10 s of idle) — Weaver never goes silent because
+`renderFrame` presents unconditionally from a 60 Hz display timer
+(`appkit_host.m` layer setup / renderFrame), so every widget process pins
+the arena forever. The M2 Air's driver sizes this working set near zero for
+the same workload (34.3 MiB total footprint there); this is driver policy
+per hardware class, not anything Weaver allocates.
+
+**Why the earlier probes missed it:** the Phase 0 probes and this brief's
+bare-window floor presented exactly one frame — under the cadence
+threshold. The wall was never in window or device *setup*; it is in
+sustained *submission*.
+
+**Recommendation (decision stays with Dara):** the numbers point at the
+device-less widget process, two independent ways:
+
+1. In-process tuning cannot reach the target on this hardware. Damage-driven
+   presenting (stop the unconditional 60 Hz loop) only releases the arena
+   for widgets quieter than ~0.2 Hz; any live widget (a clock ticking
+   seconds) holds it. Worth doing anyway for battery/honesty, but it is not
+   the memory fix.
+2. A widget process that submits **no Metal at all** and shows frames via
+   IOSurface contents on a plain CALayer measures ~10 MB footprint even at
+   60 Hz content updates (probe row above). Whatever process renders pays
+   the ~95 MB arena once — that is the shared-renderer shape, now with the
+   receipt the 2026-07-30 correction demanded. Marginal cost signals in the
+   host look benign (~2.4 MB per extra presenting layer in one process; and
+   the host renders to IOSurfaces, not per-widget layers), but per-widget
+   host cost and the 30-minute drift check remain to be measured by that
+   plan's own gates.
+
+No weaver code was changed in this investigation; rendering and tests are
+untouched.
