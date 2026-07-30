@@ -280,9 +280,13 @@ For each PR:
   below. The probe result stands, but it answered the wrong question: the
   wall is workload-scoped, not window-scoped, and it reproduces on other
   hardware.**
-- Phase 1 (spike): **not started; Phase 0 forbids it.**
-- Phase 2 (slices — one line per merged PR): **not started; Phase 0 forbids
-  it.**
+- Phase 1 (spike): **not started.** Un-blocked 2026-07-30: the wall was
+  named (per-process Metal submission working set — see the "wall is
+  named" section below and `docs/gpu-ledger-wall-brief.md`) and Dara
+  re-approved the shared-renderer plan on that receipt. This is the next
+  work.
+- Phase 2 (slices — one line per merged PR): **not started; gated on
+  Phase 1.**
 
 ### 2026-07-30 continuation receipts
 
@@ -422,6 +426,48 @@ the architecture question when it only closed the baseline theory; and
 "reproduces on machine A, absent on machine B" was nearly misread twice
 (first as security software, then as measurement artifact). Both machines'
 numbers are honest; the difference is the finding.
+
+### 2026-07-30 — the wall is named; shared-renderer plan re-opened
+
+The GPU-ledger investigation (`docs/gpu-ledger-wall-brief.md`, "Recorded
+results") named the 85 MB with an on/off receipt from bare probes
+containing no Weaver code. Summary of what it is:
+
+- The Apple GPU driver's **per-process command-submission working set** on
+  the M3 Pro / macOS 26.5.2 class: ~95 MB committed as soon as a process
+  submits Metal command buffers in a sustained cadence (>= ~1 Hz), plus
+  ~2.4 MB per additional presenting layer. Presentation is not required —
+  offscreen renders trigger it; window/device setup alone does not
+  (~1 MB). Reclaimed after ~2-5 s of submission silence.
+- Weaver pins it forever on every widget because `renderFrame` presents
+  unconditionally from a 60 Hz display timer — including the software
+  backend, which presents through the same CAMetalLayer.
+- A device-less process showing frames via IOSurface contents on a plain
+  CALayer measures ~10 MB footprint even at 60 Hz content updates: the
+  compositing charge lands in WindowServer, never on the widget's ledger.
+- The M2 Air's driver sizes the same working set near zero (34.3 MiB
+  total). Driver policy per hardware class, not a Weaver allocation.
+
+Consequences for this plan, per Dara (2026-07-30): **the shared-renderer
+architecture is re-approved on the new receipt** — one render host pays
+the ~95 MB arena once, device-less widget processes pay ~0. The original
+Phase 0 gate stays honestly failed (its "Metal baseline" theory was
+wrong), but the new probes answer the question that gate was built to
+answer: the wall is real, it moves with whoever submits, and it is paid
+per process. Event-driven presenting (drop the unconditional 60 Hz pump;
+Windows already works this way — "frames exist only on demand") is worth
+doing for CPU/battery and makes the shared host cheap, but is NOT the
+memory fix by itself: 1 Hz submission still holds the full arena, so any
+live widget stays pinned until it stops submitting Metal at all.
+
+Phase 1 (the one-widget spike, myclock through an out-of-process Metal
+presenter into an IOSurface-backed CALayer) is therefore the next step,
+with its gates unchanged — expect the widget process in the 20s-30s MB
+given the measured ~10 MB device-less floor plus Myclock's ~31 MB
+software-content footprint on the Air. Note the Phase 1 gate numbers were
+written against Air-class content costs; on this machine the honest
+expectation is "widget footprint minus the ~95 MB arena", verified by
+vmmap category, not a single total.
 
 ## Validation status at handoff
 
