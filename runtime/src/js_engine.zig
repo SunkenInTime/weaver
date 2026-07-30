@@ -291,7 +291,7 @@ pub const Engine = struct {
             self.bridge_state.render_failed = true;
             var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
             const first_line_length = std.mem.indexOfScalar(u8, details, '\n') orelse details.len;
-            const first_line = details[0..@min(first_line_length, 150)];
+            const first_line = validUtf8Prefix(details[0..first_line_length], 150);
             const visible = std.fmt.bufPrint(
                 &visible_buffer,
                 "unhandled promise rejection\n{s}",
@@ -314,14 +314,12 @@ fn logExceptionFrom(context: *c.JSContext) void {
 
 fn valueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8) []const u8 {
     if (c.JS_IsError(value)) return errorValueDetails(context, value, buffer);
-    const rendered = c.JS_DupValue(context, value);
-    defer c.JS_FreeValue(context, rendered);
     var len: usize = 0;
-    const raw = c.JS_ToCStringLen2(context, &len, rendered, false) orelse return "JavaScript value could not be formatted";
+    const raw = c.JS_ToCStringLen2(context, &len, value, false) orelse return "JavaScript value could not be formatted";
     defer c.JS_FreeCString(context, raw);
-    const copied = @min(len, buffer.len);
-    @memcpy(buffer[0..copied], raw[0..copied]);
-    return buffer[0..copied];
+    const source = validUtf8Prefix(raw[0..len], buffer.len);
+    @memcpy(buffer[0..source.len], source);
+    return buffer[0..source.len];
 }
 
 fn errorValueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8) []const u8 {
@@ -347,9 +345,9 @@ fn errorValueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8)
     const stack = if (stack_raw) |raw| raw[0..stack_len] else "";
     if (message.len == 0 or std.mem.indexOf(u8, stack, message) != null) {
         const source = if (stack.len > 0) stack else name;
-        const copied = @min(source.len, buffer.len);
-        @memcpy(buffer[0..copied], source[0..copied]);
-        return buffer[0..copied];
+        const copied = validUtf8Prefix(source, buffer.len);
+        @memcpy(buffer[0..copied.len], copied);
+        return buffer[0..copied.len];
     }
 
     var cursor: usize = 0;
@@ -364,9 +362,15 @@ fn errorValueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8)
 }
 
 fn appendDetail(buffer: []u8, cursor: *usize, value: []const u8) void {
-    const count = @min(value.len, buffer.len -| cursor.*);
-    @memcpy(buffer[cursor.* .. cursor.* + count], value[0..count]);
-    cursor.* += count;
+    const copied = validUtf8Prefix(value, buffer.len -| cursor.*);
+    @memcpy(buffer[cursor.* .. cursor.* + copied.len], copied);
+    cursor.* += copied.len;
+}
+
+fn validUtf8Prefix(value: []const u8, maximum: usize) []const u8 {
+    var length = @min(value.len, maximum);
+    while (length > 0 and !std.unicode.utf8ValidateSlice(value[0..length])) length -= 1;
+    return value[0..length];
 }
 
 fn promiseRejectionTracker(
@@ -408,6 +412,12 @@ fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
 
 fn createTestEngine(tree: *tree_mod.Tree, store: *storage_mod.Store, provider: *provider_mod.Client) !*Engine {
     return Engine.create(std.testing.allocator, tree, store, &.{}, provider, false);
+}
+
+test "diagnostic truncation preserves UTF-8 boundaries" {
+    const details = "failure 💥";
+    try std.testing.expectEqualStrings("failure ", validUtf8Prefix(details, details.len - 1));
+    try std.testing.expectEqualStrings(details, validUtf8Prefix(details, details.len));
 }
 
 test "a forced max_nodes failure is rolled back, named, and replaced by an error surface" {

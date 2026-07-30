@@ -72,6 +72,7 @@ fn bridgeTimerCapacity() usize {
     return @import("bridge.zig").max_timers;
 }
 const max_images: usize = 16;
+const max_image_rgba_bytes: usize = native_sdk.max_registered_canvas_image_pixel_bytes;
 const max_image_load_attempts: u8 = 3;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
@@ -1383,16 +1384,11 @@ pub fn main(init: std.process.Init) !void {
 
 fn buildNodeForTest(
     ui: *WidgetUi,
-    retained_tree: *const tree_mod.Tree,
-    fonts: []const manifest_mod.Font,
+    model: *Model,
     id: tree_mod.NodeId,
     is_root: bool,
 ) WidgetUi.Node {
-    var model: Model = .{
-        .tree = retained_tree.*,
-        .fonts = fonts,
-    };
-    return buildNode(ui, &model, id, is_root);
+    return buildNode(ui, model, id, is_root);
 }
 
 fn findImageStateConst(model: *const Model, id: tree_mod.NodeId) ?*const ImageState {
@@ -1421,30 +1417,33 @@ fn recordImageFailure(state: *ImageState, err: anyerror, encoded: []const u8, co
             const asked = std.math.mul(usize, pixels, 4) catch std.math.maxInt(usize);
             const label = std.fmt.bufPrint(
                 &state.failure_label,
-                "ImageTooLarge\n{d}x{d} RGBA={d}\nmax_image_rgba_bytes=262144",
-                .{ dimensions.width, dimensions.height, asked },
-            ) catch {
-                const fallback = "ImageTooLarge\nmax_image_rgba_bytes=262144";
-                @memcpy(state.failure_label[0..fallback.len], fallback);
-                state.failure_label_len = fallback.len;
-                std.log.err("{s} failed: ImageTooLarge; max_image_rgba_bytes=262144", .{context});
-                return;
-            };
+                "ImageTooLarge\n{d}x{d} RGBA={d}\nmax_image_rgba_bytes={d}",
+                .{ dimensions.width, dimensions.height, asked, max_image_rgba_bytes },
+            ) catch unreachable;
             state.failure_label_len = label.len;
             std.log.err(
-                "{s} failed: ImageTooLarge; dimensions={d}x{d}, max_image_rgba_bytes=262144, asked for {d}",
-                .{ context, dimensions.width, dimensions.height, asked },
+                "{s} failed: ImageTooLarge; dimensions={d}x{d}, max_image_rgba_bytes={d}, asked for {d}",
+                .{ context, dimensions.width, dimensions.height, max_image_rgba_bytes, asked },
             );
             return;
         }
-        const label = "ImageTooLarge\nmax_image_rgba_bytes=262144";
-        @memcpy(state.failure_label[0..label.len], label);
+        const label = std.fmt.bufPrint(
+            &state.failure_label,
+            "ImageTooLarge\nmax_image_rgba_bytes={d}",
+            .{max_image_rgba_bytes},
+        ) catch unreachable;
         state.failure_label_len = label.len;
     } else if (err == error.ImageRegistryFull) {
-        const label = "ImageRegistryFull\nmax_images=16, asked for 17";
-        @memcpy(state.failure_label[0..label.len], label);
+        const label = std.fmt.bufPrint(
+            &state.failure_label,
+            "ImageRegistryFull\nmax_images={d}, asked for {d}",
+            .{ max_images, max_images + 1 },
+        ) catch unreachable;
         state.failure_label_len = label.len;
-        std.log.err("{s} failed: ImageRegistryFull; max_images=16, asked for 17", .{context});
+        std.log.err(
+            "{s} failed: ImageRegistryFull; max_images={d}, asked for {d}",
+            .{ context, max_images, max_images + 1 },
+        );
         return;
     }
     std.log.err("{s} failed: cause={s}", .{ context, @errorName(err) });
@@ -1702,15 +1701,15 @@ test "corner radius projection preserves authored values and maps retained unset
 test "painted row lowering preserves flex wrap on the inner layout node" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{};
-    const row = try retained_tree.createNode(.row);
-    const child = try retained_tree.createNode(.panel);
-    try retained_tree.appendChild(row, child);
-    try retained_tree.setBackground(row, native_sdk.canvas.Color.rgb8(20, 30, 40));
-    try retained_tree.setFlexWrap(row, true);
+    var model: Model = .{};
+    const row = try model.tree.createNode(.row);
+    const child = try model.tree.createNode(.panel);
+    try model.tree.appendChild(row, child);
+    try model.tree.setBackground(row, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    try model.tree.setFlexWrap(row, true);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, row, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, row, true));
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
@@ -1720,25 +1719,25 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
 test "attached effects combine builder metadata with box and text shadows" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{};
-    const text_node = try retained_tree.createNode(.text);
-    try retained_tree.setText(text_node, "styled");
-    try retained_tree.setNumberProp(text_node, "fontScale", 2);
-    try retained_tree.setTruncate(text_node, true);
-    try retained_tree.setShadow(text_node, .{
+    var model: Model = .{};
+    const text_node = try model.tree.createNode(.text);
+    try model.tree.setText(text_node, "styled");
+    try model.tree.setNumberProp(text_node, "fontScale", 2);
+    try model.tree.setTruncate(text_node, true);
+    try model.tree.setShadow(text_node, .{
         .offset = .{ .dx = 0, .dy = 1 },
         .blur = 4,
         .spread = 0,
         .color = native_sdk.canvas.Color.rgb8(0, 0, 0),
     });
-    try retained_tree.setTextShadow(text_node, .{
+    try model.tree.setTextShadow(text_node, .{
         .offset = .{ .dx = 1, .dy = 2 },
         .blur = 3,
         .color = native_sdk.canvas.Color.rgb8(10, 20, 30),
     });
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, text_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, text_node, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| try std.testing.expectEqual(@as(f32, 2), style.scale),
@@ -1757,18 +1756,18 @@ test "attached effects combine builder metadata with box and text shadows" {
 test "path icon projection parses normalized geometry and preserves viewBox stroke and color" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
-    defer retained_tree.deinit();
-    const icon_node = try retained_tree.createNode(.icon);
-    try retained_tree.setIconPath(icon_node, "M 1 2 L 3 4 C 5 6 7 8 9 10 Z");
-    try retained_tree.setIconViewBox(icon_node, "-2 -3 30 18");
-    try retained_tree.setNumberProp(icon_node, "iconStroke", 1.5);
-    try retained_tree.setNumberProp(icon_node, "width", 48);
-    try retained_tree.setNumberProp(icon_node, "height", 24);
-    try retained_tree.setTextColor(icon_node, native_sdk.canvas.Color.rgb8(251, 191, 36));
+    var model: Model = .{ .tree = .{ .allocator = std.testing.allocator } };
+    defer model.tree.deinit();
+    const icon_node = try model.tree.createNode(.icon);
+    try model.tree.setIconPath(icon_node, "M 1 2 L 3 4 C 5 6 7 8 9 10 Z");
+    try model.tree.setIconViewBox(icon_node, "-2 -3 30 18");
+    try model.tree.setNumberProp(icon_node, "iconStroke", 1.5);
+    try model.tree.setNumberProp(icon_node, "width", 48);
+    try model.tree.setNumberProp(icon_node, "height", 24);
+    try model.tree.setTextColor(icon_node, native_sdk.canvas.Color.rgb8(251, 191, 36));
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, icon_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, icon_node, true));
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.icon, built.root.kind);
     try std.testing.expectEqual(@as(f32, 48), built.root.frame.width);
     try std.testing.expectEqual(@as(f32, 24), built.root.frame.height);
@@ -1788,15 +1787,15 @@ test "path icon projection parses normalized geometry and preserves viewBox stro
 test "showcase headline keeps exact registered face through bold and text shadow" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{};
-    const text_node = try retained_tree.createNode(.text);
-    try retained_tree.setText(text_node, "SECOND NATURE");
-    try retained_tree.setNumberProp(text_node, "fontScale", 30.0 / 14.0);
-    try retained_tree.setNumberProp(text_node, "lineHeight", 1.2);
-    try retained_tree.setNumberProp(text_node, "letterSpacing", 0.75);
-    try retained_tree.setFontFamily(text_node, "GeistPixel-Square");
-    try retained_tree.setFontWeight(text_node, "bold");
-    try retained_tree.setTextShadow(text_node, .{
+    var model: Model = .{};
+    const text_node = try model.tree.createNode(.text);
+    try model.tree.setText(text_node, "SECOND NATURE");
+    try model.tree.setNumberProp(text_node, "fontScale", 30.0 / 14.0);
+    try model.tree.setNumberProp(text_node, "lineHeight", 1.2);
+    try model.tree.setNumberProp(text_node, "letterSpacing", 0.75);
+    try model.tree.setFontFamily(text_node, "GeistPixel-Square");
+    try model.tree.setFontWeight(text_node, "bold");
+    try model.tree.setTextShadow(text_node, .{
         .offset = .{ .dx = 0, .dy = 8 },
         .blur = 10,
         .color = native_sdk.canvas.Color.rgba8(0, 0, 0, 128),
@@ -1809,9 +1808,10 @@ test "showcase headline keeps exact registered face through bold and text shadow
         .weight = .regular,
         .file = "assets/GeistPixel-Square.ttf",
     }};
+    model.fonts = &fonts;
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &fonts, text_node, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, text_node, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .text_style => |style| {
@@ -1833,17 +1833,17 @@ test "showcase headline keeps exact registered face through bold and text shadow
 test "attached shadows preserve hover and pressed metadata" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
-    var retained_tree: tree_mod.Tree = .{};
-    const panel = try retained_tree.createNode(.panel);
-    try retained_tree.setNumberProp(panel, "hoverOpacity", 0.8);
-    try retained_tree.setNumberProp(panel, "pressedOpacity", 0.6);
-    try retained_tree.setInteractionShadow(panel, "pressedShadow", .{
+    var model: Model = .{};
+    const panel = try model.tree.createNode(.panel);
+    try model.tree.setNumberProp(panel, "hoverOpacity", 0.8);
+    try model.tree.setNumberProp(panel, "pressedOpacity", 0.6);
+    try model.tree.setInteractionShadow(panel, "pressedShadow", .{
         .offset = .{ .dy = 2 },
         .blur = 4,
         .color = native_sdk.canvas.Color.rgba8(0, 0, 0, 77),
     }, true);
-    try retained_tree.setInteractionShadowInset(panel, "pressedShadowInset", true);
-    try retained_tree.setShadow(panel, .{
+    try model.tree.setInteractionShadowInset(panel, "pressedShadowInset", true);
+    try model.tree.setShadow(panel, .{
         .offset = .{ .dx = 0, .dy = 2 },
         .blur = 4,
         .spread = 0,
@@ -1851,7 +1851,7 @@ test "attached shadows preserve hover and pressed metadata" {
     });
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const built = try ui.finalize(buildNodeForTest(&ui, &retained_tree, &.{}, panel, true));
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, panel, true));
     try std.testing.expectEqual(@as(usize, 3), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .hover_style => |style| try std.testing.expectEqual(@as(?f32, 0.8), style.opacity),
@@ -1899,21 +1899,21 @@ test "retained stack projects overlay kind and rounded content clipping" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
-    var tree: tree_mod.Tree = .{};
-    const stack_id = try tree.createNode(.stack);
-    const background_id = try tree.createNode(.panel);
-    const label_id = try tree.createNode(.text);
-    try tree.setNumberProp(stack_id, "width", 120);
-    try tree.setNumberProp(stack_id, "height", 64);
-    try tree.setNumberProp(stack_id, "radius", 14);
-    try tree.setNumberProp(stack_id, "radiusBottomLeft", 3);
-    try tree.setOverflowHidden(stack_id, true);
-    try tree.setText(label_id, "overlay");
-    try tree.appendChild(stack_id, background_id);
-    try tree.appendChild(stack_id, label_id);
+    var model: Model = .{};
+    const stack_id = try model.tree.createNode(.stack);
+    const background_id = try model.tree.createNode(.panel);
+    const label_id = try model.tree.createNode(.text);
+    try model.tree.setNumberProp(stack_id, "width", 120);
+    try model.tree.setNumberProp(stack_id, "height", 64);
+    try model.tree.setNumberProp(stack_id, "radius", 14);
+    try model.tree.setNumberProp(stack_id, "radiusBottomLeft", 3);
+    try model.tree.setOverflowHidden(stack_id, true);
+    try model.tree.setText(label_id, "overlay");
+    try model.tree.appendChild(stack_id, background_id);
+    try model.tree.appendChild(stack_id, label_id);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const projected = buildNodeForTest(&ui, &tree, &.{}, stack_id, false);
+    const projected = buildNodeForTest(&ui, &model, stack_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, projected.widget.kind);
     try std.testing.expect(projected.widget.layout.flags.clip_content);
     try std.testing.expectEqual(@as(?f32, 14), projected.widget.style.radius);
@@ -1927,15 +1927,15 @@ test "retained image projects fit tiling and class corner radii" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
-    var tree: tree_mod.Tree = .{};
-    const image_id = try tree.createNode(.image);
-    try tree.setImageFit(image_id, "contain");
-    try tree.setImageTile(image_id, true);
-    try tree.setNumberProp(image_id, "radius", 12);
-    try tree.setNumberProp(image_id, "radiusTopRight", 3);
+    var model: Model = .{};
+    const image_id = try model.tree.createNode(.image);
+    try model.tree.setImageFit(image_id, "contain");
+    try model.tree.setImageTile(image_id, true);
+    try model.tree.setNumberProp(image_id, "radius", 12);
+    try model.tree.setNumberProp(image_id, "radiusTopRight", 3);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const projected = buildNodeForTest(&ui, &tree, &.{}, image_id, false);
+    const projected = buildNodeForTest(&ui, &model, image_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.image, projected.widget.kind);
     try std.testing.expectEqual(native_sdk.canvas.ImageFit.contain, projected.widget.image_fit);
     try std.testing.expect(projected.widget.image_tile);

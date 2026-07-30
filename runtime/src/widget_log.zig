@@ -19,10 +19,13 @@ pub fn init(runtime_io: std.Io, path: []const u8) !void {
     @memcpy(old_path_buffer[path.len .. path.len + ".old".len], ".old");
     old_path_len = path.len + ".old".len;
     io = runtime_io;
-    var file = try std.Io.Dir.cwd().createFile(runtime_io, path, .{ .read = true, .truncate = false });
-    file.close(runtime_io);
     write_failed.store(false, .release);
     fallback_reported.store(false, .release);
+    var file = std.Io.Dir.cwd().createFile(runtime_io, path, .{ .read = true, .truncate = false }) catch |err| {
+        noteFailure(err);
+        return;
+    };
+    file.close(runtime_io);
 }
 
 pub fn logFn(
@@ -32,14 +35,42 @@ pub fn logFn(
     args: anytype,
 ) void {
     var buffer: [8192]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
-    writeTimestamp(&writer) catch |err| return noteFailure(err);
-    writer.print(" {s}", .{level.asText()}) catch |err| return noteFailure(err);
-    if (scope != .default) writer.print("({t})", .{scope}) catch |err| return noteFailure(err);
-    writer.writeAll(": ") catch |err| return noteFailure(err);
-    writer.print(format, args) catch |err| return noteFailure(err);
-    writer.writeByte('\n') catch |err| return noteFailure(err);
-    writeLine(writer.buffered());
+    const line = formatLogLine(level, scope, format, args, &buffer) catch |err| return noteFailure(err);
+    writeLine(line);
+}
+
+fn formatLogLine(
+    comptime level: std.log.Level,
+    comptime scope: @EnumLiteral(),
+    comptime format: []const u8,
+    args: anytype,
+    buffer: []u8,
+) ![]const u8 {
+    var writer = std.Io.Writer.fixed(buffer);
+    try writeTimestamp(&writer);
+    try writer.print(" {s}", .{level.asText()});
+    if (scope != .default) try writer.print("({t})", .{scope});
+    try writer.writeAll(": ");
+
+    const prefix_len = writer.buffered().len;
+    const suffix = "...\n";
+    if (buffer.len -| prefix_len < suffix.len) return error.LogLineBufferTooSmall;
+    const message_capacity = buffer.len - prefix_len - suffix.len;
+    var message_writer = std.Io.Writer.fixed(buffer[prefix_len .. prefix_len + message_capacity]);
+    var truncated = false;
+    message_writer.print(format, args) catch {
+        truncated = true;
+    };
+    var message_len = message_writer.buffered().len;
+    if (truncated) {
+        while (message_len > 0 and !std.unicode.utf8ValidateSlice(buffer[prefix_len .. prefix_len + message_len])) {
+            message_len -= 1;
+        }
+        @memcpy(buffer[prefix_len + message_len .. prefix_len + message_len + suffix.len], suffix);
+        return buffer[0 .. prefix_len + message_len + suffix.len];
+    }
+    buffer[prefix_len + message_len] = '\n';
+    return buffer[0 .. prefix_len + message_len + 1];
 }
 
 pub fn failed() bool {
@@ -64,7 +95,11 @@ fn writeTimestamp(writer: *std.Io.Writer) !void {
 }
 
 fn writeLine(line: []const u8) void {
-    writeLineFallible(line) catch |err| noteFailure(err);
+    writeLineFallible(line) catch |err| return noteFailure(err);
+    if (write_failed.swap(false, .acq_rel)) {
+        fallback_reported.store(false, .release);
+        std.debug.print("weaver widget log recovered; path={s}\n", .{path_buffer[0..path_len]});
+    }
 }
 
 fn writeLineFallible(line: []const u8) !void {
@@ -109,4 +144,12 @@ test "rotation threshold is one MiB and never rotates an empty file" {
     try std.testing.expect(!shouldRotate(0, rotate_bytes + 1));
     try std.testing.expect(!shouldRotate(rotate_bytes - 1, 1));
     try std.testing.expect(shouldRotate(rotate_bytes, 1));
+}
+
+test "oversized log messages are truncated without becoming log failures" {
+    var buffer: [128]u8 = undefined;
+    const message = "💥" ** 64;
+    const line = try formatLogLine(.err, .default, "{s}", .{message}, &buffer);
+    try std.testing.expect(std.mem.endsWith(u8, line, "...\n"));
+    try std.testing.expect(std.unicode.utf8ValidateSlice(line));
 }

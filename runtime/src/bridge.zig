@@ -269,6 +269,7 @@ fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValue
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 0) return fail(js, "endBatch expects no arguments");
     const authored_tree = state(js).tree;
+    if (!authored_tree.prepareEndBatch()) return qjs.undefinedValue();
     if (authored_tree.canvasAncestorViolation()) |violation| {
         return switch (violation.reason) {
             .clip => failFmt(
@@ -283,7 +284,7 @@ fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValue
             ),
         };
     }
-    authored_tree.endBatch();
+    authored_tree.commitBatch();
     return qjs.undefinedValue();
 }
 

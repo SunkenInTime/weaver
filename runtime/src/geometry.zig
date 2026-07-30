@@ -90,3 +90,21 @@ test "geometry parse rejects malformed and non-finite records" {
     try std.testing.expect(parse("{\"x\":1,\"y\":2,\"scale\":0}") == null);
     try std.testing.expect(parse("not json") == null);
 }
+
+test "geometry store surfaces a corrupt persisted record" {
+    const path = ".zig-cache/weaver-invalid-geometry-test.json";
+    const temporary_path = ".zig-cache/weaver-invalid-geometry-test.json.tmp";
+    var cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(std.testing.io, ".zig-cache");
+    cwd.deleteFile(std.testing.io, path) catch {};
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    try cwd.writeFile(std.testing.io, .{ .sub_path = path, .data = "not json" });
+
+    const store: Store = .{
+        .io = std.testing.io,
+        .directory = ".zig-cache",
+        .path = path,
+        .temporary_path = temporary_path,
+    };
+    try std.testing.expectError(error.InvalidGeometryRecord, store.load(std.testing.allocator));
+}

@@ -767,7 +767,7 @@ const Host = struct {
             const slot_reason = slot.reason();
             const reason = if (slot_reason.len > 0)
                 slot_reason
-            else if (slot.wants_gpu and backend.len == 1 and backend[0] == '-' and self.renderer_failure_reason_len > 0)
+            else if (slot.wants_gpu and self.renderer_failure_reason_len > 0)
                 self.renderer_failure_reason[0..self.renderer_failure_reason_len]
             else
                 "";

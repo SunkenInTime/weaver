@@ -213,9 +213,10 @@ pub const Tree = struct {
     batch_depth: u8 = 0,
     batch_changed: bool = false,
     transaction_snapshot: ?*Tree = null,
+    snapshot_storage: ?*Tree = null,
 
     pub fn deinit(self: *Tree) void {
-        self.discardSnapshot();
+        self.destroySnapshots();
         self.deinitNodes();
     }
 
@@ -229,22 +230,42 @@ pub const Tree = struct {
 
     pub fn beginBatch(self: *Tree) Error!void {
         if (self.batch_depth == 0) {
-            const snapshot = try self.allocator.create(Tree);
-            errdefer self.allocator.destroy(snapshot);
+            const snapshot = if (self.snapshot_storage) |storage| reuse: {
+                self.snapshot_storage = null;
+                break :reuse storage;
+            } else try self.allocator.create(Tree);
+            errdefer {
+                snapshot.deinitNodes();
+                snapshot.* = .{ .allocator = self.allocator };
+                self.snapshot_storage = snapshot;
+            }
             try self.cloneInto(snapshot);
             self.transaction_snapshot = snapshot;
         }
         self.batch_depth +|= 1;
     }
 
-    pub fn endBatch(self: *Tree) void {
-        if (self.batch_depth == 0) return;
+    /// Close one authored batch level. The outermost close is deliberately
+    /// split from commit so bridge validation can inspect only the complete
+    /// generation and still roll it back if validation fails.
+    pub fn prepareEndBatch(self: *Tree) bool {
+        if (self.batch_depth == 0) return false;
         self.batch_depth -= 1;
-        if (self.batch_depth == 0 and self.batch_changed) {
+        return self.batch_depth == 0;
+    }
+
+    pub fn commitBatch(self: *Tree) void {
+        if (self.batch_depth != 0) return;
+        if (self.batch_changed) {
             self.batch_changed = false;
             self.generation +%= 1;
         }
-        if (self.batch_depth == 0) self.discardSnapshot();
+        self.recycleSnapshot();
+    }
+
+    pub fn endBatch(self: *Tree) void {
+        if (!self.prepareEndBatch()) return;
+        self.commitBatch();
     }
 
     /// Restore the exact tree that was visible before the outermost authored
@@ -263,20 +284,22 @@ pub const Tree = struct {
         self.deinitNodes();
         self.* = snapshot.*;
         self.transaction_snapshot = null;
+        self.snapshot_storage = snapshot;
         rebaseCanvasPointSlices(snapshot, self);
-        allocator.destroy(snapshot);
+        snapshot.* = .{ .allocator = allocator };
     }
 
     pub fn moveFrom(self: *Tree, source: *Tree) void {
+        self.deinit();
+        const source_allocator = source.allocator;
         self.* = source.*;
-        self.transaction_snapshot = null;
         rebaseCanvasPointSlices(source, self);
-        source.transaction_snapshot = null;
+        source.* = .{ .allocator = source_allocator };
     }
 
     pub fn nodeCount(self: *const Tree) usize {
         var count: usize = 0;
-        for (self.nodes) |node_value| if (node_value.alive) {
+        for (&self.nodes) |*node_value| if (node_value.alive) {
             count += 1;
         };
         return count;
@@ -289,7 +312,7 @@ pub const Tree = struct {
     };
 
     pub fn canvasAncestorViolation(self: *const Tree) ?CanvasAncestorViolation {
-        for (self.nodes, 0..) |node_value, index| {
+        for (&self.nodes, 0..) |*node_value, index| {
             if (!node_value.alive or node_value.kind != .canvas) continue;
             const canvas_id: NodeId = @intCast(index + 1);
             var ancestor_id = node_value.parent;
@@ -307,11 +330,16 @@ pub const Tree = struct {
     /// error tree. This path has no fallible allocation, so even an OOM or
     /// exhausted authored budget cannot expose an uninitialized GPU surface.
     pub fn showError(self: *Tree, message: []const u8) void {
-        self.discardSnapshot();
+        self.recycleSnapshot();
         self.deinitNodes();
         const allocator = self.allocator;
+        const snapshot_storage = self.snapshot_storage;
         const next_generation = self.generation +% 1;
-        self.* = .{ .allocator = allocator, .generation = next_generation };
+        self.* = .{
+            .allocator = allocator,
+            .generation = next_generation,
+            .snapshot_storage = snapshot_storage,
+        };
 
         const root_id: NodeId = 1;
         const text_id: NodeId = 2;
@@ -352,6 +380,7 @@ pub const Tree = struct {
     fn cloneInto(self: *const Tree, destination: *Tree) Error!void {
         destination.* = self.*;
         destination.transaction_snapshot = null;
+        destination.snapshot_storage = null;
         for (&destination.nodes) |*node_value| node_value.icon_path = &.{};
         errdefer destination.deinitNodes();
         for (self.nodes, 0..) |node_value, index| {
@@ -362,12 +391,32 @@ pub const Tree = struct {
         rebaseCanvasPointSlices(self, destination);
     }
 
-    fn discardSnapshot(self: *Tree) void {
+    fn recycleSnapshot(self: *Tree) void {
         const snapshot = self.transaction_snapshot orelse return;
         self.transaction_snapshot = null;
         snapshot.transaction_snapshot = null;
+        snapshot.snapshot_storage = null;
         snapshot.deinitNodes();
-        self.allocator.destroy(snapshot);
+        snapshot.* = .{ .allocator = self.allocator };
+        std.debug.assert(self.snapshot_storage == null);
+        self.snapshot_storage = snapshot;
+    }
+
+    fn destroySnapshots(self: *Tree) void {
+        if (self.transaction_snapshot) |snapshot| {
+            self.transaction_snapshot = null;
+            snapshot.transaction_snapshot = null;
+            snapshot.snapshot_storage = null;
+            snapshot.deinitNodes();
+            self.allocator.destroy(snapshot);
+        }
+        if (self.snapshot_storage) |snapshot| {
+            self.snapshot_storage = null;
+            snapshot.transaction_snapshot = null;
+            snapshot.snapshot_storage = null;
+            snapshot.deinitNodes();
+            self.allocator.destroy(snapshot);
+        }
     }
 
     pub fn createNode(self: *Tree, kind: Kind) Error!NodeId {
@@ -1147,6 +1196,30 @@ test "a committed render batch advances one generation" {
     tree.endBatch();
     try std.testing.expectEqual(before +% 1, tree.generation);
     try std.testing.expectEqualStrings("committed", (try tree.nodeConst(label)).textSlice());
+}
+
+test "render transactions reuse snapshot storage and validate only the outer close" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const root = try tree.createNode(.column);
+    try tree.setRoot(root);
+
+    try tree.beginBatch();
+    try tree.beginBatch();
+    const canvas = try tree.createNode(.canvas);
+    try tree.setOverflowHidden(root, true);
+    try tree.appendChild(root, canvas);
+    try std.testing.expect(!tree.prepareEndBatch());
+    try tree.setOverflowHidden(root, false);
+    try std.testing.expect(tree.prepareEndBatch());
+    try std.testing.expect(tree.canvasAncestorViolation() == null);
+    tree.commitBatch();
+
+    const storage = tree.snapshot_storage.?;
+    try tree.beginBatch();
+    try std.testing.expect(tree.transaction_snapshot.? == storage);
+    tree.abortBatch();
+    try std.testing.expect(tree.snapshot_storage.? == storage);
 }
 
 test "error surface is deterministic and replaces authored content" {

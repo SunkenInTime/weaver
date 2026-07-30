@@ -491,9 +491,11 @@ async function devWidget(directory: string): Promise<void> {
       presentationFailureReported = true;
       const state = status ? `${status.state}${status.reason ? `: ${status.reason}` : ""}` : "absent from host status";
       process.stderr.write(`weaver dev ERROR: "${project.config.name}" has not presented a frame after 10 seconds (${state}); check weaver logs ${JSON.stringify(project.config.name)}\n`);
+      clearInterval(presentationWatch);
     } catch (error) {
       presentationFailureReported = true;
       process.stderr.write(`weaver dev ERROR: presentation health could not be read after 10 seconds: ${errorMessage(error)}\n`);
+      clearInterval(presentationWatch);
     }
   }, 1_000);
   presentationWatch.unref();
@@ -1565,7 +1567,7 @@ function validateSource(project: SourceProject): string[] {
             }
             if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
-              errors.push(locationMessage(project.sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
+              errors.push(locationMessage(sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
             }
             if (tag === "canvas") {
               const sizes = compiled as Record<string, unknown>;
