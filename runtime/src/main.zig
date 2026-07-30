@@ -1075,7 +1075,7 @@ fn invalidImageSourceError(err: anyerror) bool {
 
 fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, node: *const tree_mod.Node) !void {
     const resolver = model.image_resolver orelse return;
-    var state = findImageState(model, id) orelse try addImageState(model, id, node.lifetime);
+    const state = findImageState(model, id) orelse try addImageState(model, id, node.lifetime);
     const resolved = resolver.resolve(node.sourceSlice()) catch |err| {
         if (observedEquals(state, node.sourceSlice(), false)) return;
         if (invalidImageSourceError(err) and state.registered) {

@@ -443,12 +443,13 @@ async function devWidget(directory: string): Promise<void> {
     try {
       const next = await bundleWidget(directory);
       const configChanged = JSON.stringify(next.manifest) !== JSON.stringify(activeManifest);
-      activeManifest = next.manifest;
       if (configChanged) {
         signalHost("--signal-reload");
+        activeManifest = next.manifest;
         process.stdout.write("weaver dev restarted widget: window config changed\n");
       } else {
         await signalDevReload(directory);
+        activeManifest = next.manifest;
         process.stdout.write("weaver dev bundle ready for in-place hot swap\n");
       }
       if (staleBuild) {
@@ -1646,6 +1647,11 @@ function validateSource(project: SourceProject): string[] {
 }
 
 const nativeImagePixelByteLimit = 256 * 1024;
+const maxImageStreamBytes = 1024 * 1024;
+
+function imageStreamBudgetError(source: string, asked: number): string {
+  return `ImageStreamTooLarge: ${JSON.stringify(source)} is ${asked} encoded bytes; max_image_stream_bytes=${maxImageStreamBytes}, asked for ${asked}, headroom=${maxImageStreamBytes - asked}`;
+}
 
 function validateLocalImageAsset(directory: string, source: string): string | null {
   if (!source || isAbsolute(source) || source.split(/[\\/]/).includes("..")) {
@@ -1663,13 +1669,14 @@ function validateLocalImageAsset(directory: string, source: string): string | nu
     if (!pathsEqual(canonical, canonicalRoot) && !pathInside(canonicalRoot, canonical)) {
       return `WidgetAssetEscapesRoot: ${JSON.stringify(source)} resolves outside ${directory}`;
     }
+    const encodedSize = statSync(canonical).size;
+    if (encodedSize > maxImageStreamBytes) return imageStreamBudgetError(source, encodedSize);
     bytes = readFileSync(canonical);
   } catch (error) {
     return `ImageAssetUnreadable: ${JSON.stringify(source)} could not be read: ${errorMessage(error)}`;
   }
-  if (bytes.length > 1024 * 1024) {
-    return `ImageStreamTooLarge: ${JSON.stringify(source)} is ${bytes.length} encoded bytes; max_image_stream_bytes=1048576, asked for ${bytes.length}, headroom=${1024 * 1024 - bytes.length}`;
-  }
+  // Keep the post-read guard for a file that changes between stat and read.
+  if (bytes.length > maxImageStreamBytes) return imageStreamBudgetError(source, bytes.length);
   const dimensions = encodedImageDimensions(bytes);
   if (!dimensions) {
     return `ImageDecodeUnsupported: ${JSON.stringify(source)} has no readable PNG/JPEG/GIF/BMP dimensions; the runtime would fail this image only after launch`;

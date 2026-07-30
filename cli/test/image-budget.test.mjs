@@ -60,3 +60,16 @@ test("check accepts an image exactly at the decoded RGBA budget", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("check rejects an oversized encoded image before decoding it", () => {
+  const { root, widget } = fixture(256, 256);
+  try {
+    writeFileSync(join(widget, "cover.png"), Buffer.alloc(1024 * 1024 + 1));
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /ImageStreamTooLarge/);
+    assert.match(checked.stderr, /max_image_stream_bytes=1048576, asked for 1048577/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
