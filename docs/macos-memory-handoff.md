@@ -30,9 +30,10 @@ Noro art-shadow scrim, visualizer spectrum meter), so all current
 widgets are available as test subjects.
 
 - Native SDK memory work: branch `macos-memory-shared-renderer-prep`
-  (commit `600d6cf6`, on top of `45336f24`) in SunkenInTime/native — the
-  autorelease pools, framebufferOnly, analytic rounded clips, and the
-  (unverified) Metal tiled-image primitive. Setup:
+  (head `6a8e6178`; memory implementation `600d6cf6`, on top of
+  `45336f24`) in SunkenInTime/native — the autorelease pools,
+  framebufferOnly, analytic rounded clips, the Metal tiled-image primitive,
+  and diagnostics-only screenshot/cache/task-ledger receipts. Setup:
   `git submodule update --init`, then in `runtime/native-sdk`:
   `git fetch origin && git checkout macos-memory-shared-renderer-prep`.
 - `myclock/` at the repo root is the clean isolated-benchmark fixture
@@ -271,9 +272,106 @@ For each PR:
 
 ### Recorded results (append below as phases complete)
 
-- Phase 0 (probes): (pending)
-- Phase 1 (spike): (pending)
-- Phase 2 (slices — one line per merged PR): (pending)
+- Phase 0 (probes): **FALSIFIED on 2026-07-30; stop-and-report gate
+  fired.** Metal-window minus device-less IOSurface-window physical
+  footprint was 2.781 MiB at the same five-second checkpoint and 2.861 MiB
+  across the ten-sample means, not the expected 70-90 MB.
+- Phase 1 (spike): **not started; Phase 0 forbids it.**
+- Phase 2 (slices — one line per merged PR): **not started; Phase 0 forbids
+  it.**
+
+### 2026-07-30 continuation receipts
+
+Hardware was a MacBook Air `Mac14,2`, Apple M2, 8 GB, macOS 26.5.1
+(`25F80`). The T3 Code harness could not attach Apple's `footprint` or
+`vmmap` processes to another process: each command hung until explicitly
+terminated. The replacement measurement path was not RSS or an estimate:
+each throwaway probe called `task_info(mach_task_self(), TASK_VM_INFO, ...)`
+and recorded the kernel's `phys_footprint` plus graphics ledgers itself.
+Ten one-second `proc_pid_rusage(RUSAGE_INFO_V6).ri_phys_footprint` samples
+then matched that self-reported checkpoint byte-for-byte on the first sample
+and stayed within the spreads below. Probe source and raw JSON live only in
+`.zig-cache/macos-memory/phase0/`; they are throwaway and must not enter a
+PR.
+
+#### Tiled-image checkpoint — verified
+
+The rebuilt runtime binary completed at `00:35:21`; the measured Noro PID
+`16114` started at `00:35:27`, so this was not the stale-PID failure from
+the prior thread. The GPU screenshot hook produced both the composited PNG
+and a cache receipt:
+
+- raster cache: 33 entries / 3,917,992 bytes (3.737 MiB), down from the
+  prior 37 / 7.87 MB;
+- direct source-image textures: 4 entries / 133,840 bytes;
+- scratch textures: 3 entries / 49,152 bytes;
+- first present: 102 commands = 33 cache fills + 69 direct commands.
+
+The retained cache therefore fell by approximately the expected 4 MB. The
+fresh screenshot at
+`.zig-cache/macos-memory/noro-self-ledger/widget-canvas-p1.png` was opened
+and compared with `docs/mac-styling-2026-07-24/noro-shell.png`: the outer
+51 px rounded clip, tile orientation/seams/opacity, progress-strip bottom
+corners, button borders, and asymmetric corner radii remained intact.
+`zig build test-canvas --summary all` passed 841/841.
+
+The screenshot diagnostic deliberately makes the composite target
+CPU-readable, so its self-ledger is not used as the production footprint:
+57,901,872 bytes physical, including 13,352,960 bytes graphics. The clean
+non-diagnostic metal run below is the production number.
+
+#### Phase 0 floor probes — falsification finding
+
+Each row is ten one-second samples after a five-second warmup. Values are
+the XNU physical-footprint ledger, in MiB; the parenthesized bytes are the
+self-reported five-second checkpoint.
+
+| Probe | Min | Mean | Max | Self checkpoint | Graphics at checkpoint |
+|---|---:|---:|---:|---:|---:|
+| NSWindow + CAMetalLayer + Metal device + one quad | 11.204 | 11.233 | 11.313 | 11.313 (11,862,712) | 1,163,264 footprint + 2,424,832 no-footprint bytes |
+| NSWindow + plain CALayer + IOSurface contents | 8.329 | 8.373 | 8.532 | 8.532 (8,946,336) | 16,384 footprint + 0 no-footprint bytes |
+| no AppKit + allocated/filled IOSurface | 2.516 | 2.518 | 2.532 | 2.532 (2,654,616) | 0 bytes |
+
+The decisive delta is only 2,916,376 bytes (2.781 MiB) at the same
+checkpoint, or 2,999,935 bytes (2.861 MiB) between the sample means. The
+probe does **not** reproduce a device-scoped ~90 MB wall. This is
+falsification condition 1 from the approved plan, so the shared-renderer
+spike and production slices stop here.
+
+#### Where the current footprint actually lives
+
+Full Weaver measurements used the same ten one-second
+`ri_phys_footprint` samples. Each run was flat or had the spread shown in
+`.zig-cache/macos-memory/phase0/runtime-results.json`.
+
+| Workload | Mean physical footprint |
+|---|---:|
+| Myclock, metal | 35,929,314 bytes / 34.265 MiB |
+| Myclock, software | 32,824,570 bytes / 31.304 MiB |
+| Noro, metal production path | 52,429,664 bytes / 50.001 MiB |
+| Noro, forced software | 44,876,640 bytes / 42.798 MiB |
+
+The current Noro metal total decomposes without inventing categories:
+
+- 31.304 MiB: full Weaver + Myclock software floor;
+- 2.961 MiB: Myclock's metal-over-software delta;
+- 11.494 MiB: Noro's software content over Myclock software;
+- 4.242 MiB: Noro-specific GPU content above Myclock's metal delta.
+
+Those measured parts total 50.001 MiB. Moving rendering out of process
+cannot turn this widget into a 20s-MB process: even the forced-software Noro
+is 42.798 MiB, and the isolated device delta is under 3 MiB.
+
+The diagnostics-only `WEAVER_MEMORY_RECEIPT=1` line also rules out QuickJS
+as the wall. Noro's QuickJS allocator held 398,176 bytes (Myclock: 332,224
+bytes). The fixed Weaver `WidgetApp` value is 5,845,424 bytes and its
+retained `Tree` is 2,512,320 bytes. A `CanvasState` is 294,960 bytes, so the
+eight inline canvas slots account for 2,359,680 bytes of every `Tree` before
+a widget uses a canvas; the transaction path can retain another whole
+`Tree` as `snapshot_storage`. Lazy canvas capacity and the transaction
+representation are therefore evidence-led next investigation targets. They
+require a new plan; this handoff's shared-renderer plan is stopped by its
+own gate.
 
 ## Validation status at handoff
 
