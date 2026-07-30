@@ -276,6 +276,10 @@ For each PR:
   fired.** Metal-window minus device-less IOSurface-window physical
   footprint was 2.781 MiB at the same five-second checkpoint and 2.861 MiB
   across the ten-sample means, not the expected 70-90 MB.
+  **Partially rescinded later the same day — see "2026-07-30 correction"
+  below. The probe result stands, but it answered the wrong question: the
+  wall is workload-scoped, not window-scoped, and it reproduces on other
+  hardware.**
 - Phase 1 (spike): **not started; Phase 0 forbids it.**
 - Phase 2 (slices — one line per merged PR): **not started; Phase 0 forbids
   it.**
@@ -372,6 +376,69 @@ a widget uses a canvas; the transaction path can retain another whole
 representation are therefore evidence-led next investigation targets. They
 require a new plan; this handoff's shared-renderer plan is stopped by its
 own gate.
+
+### 2026-07-30 correction — the wall is real, workload-scoped, and machine-dependent
+
+Measured the same day on Dara's other machine, `Mac15,6` (MacBook Pro,
+Apple M3 Pro, 18 GB, macOS 26.5.2, build `25F84`), on a fresh ReleaseFast
+build of this exact branch state (weaver `73789e3`, native `6a8e6178`;
+widget PID start verified after build finish):
+
+| Measurement (Mac15,6) | Result |
+|---|---|
+| Bare NSWindow + CAMetalLayer + device + one cleared/presented frame | 9.705 MiB mean (10x1s samples; ~1.1 MB graphics footprint + 2.4 MB no-footprint) |
+| Bare NSWindow + plain CALayer + IOSurface contents, no Metal | 8.541 MiB mean |
+| Myclock, metal production path, live | **125.3 MB footprint (peak 128.3), of which 85 MB dirty "Owned physical footprint (unmapped) (graphics)", 33 regions** |
+
+The same branch state measures Myclock at 34.265 MiB on the `Mac14,2` Air.
+Conclusions, in order of importance:
+
+1. **The ~85-90 MB wall is real and current — on this hardware class.** It
+   is not stale-measurement error, not the `footprint` tool (the bare-probe
+   floors match the Air's within ~1.5 MiB using the same tool), and not
+   Dara's corporate security software (which would appear as mapped library
+   regions, not driver graphics ledger).
+2. **It is workload-scoped, not window-scoped.** A bare Metal window on the
+   same machine carries ~1 MB of graphics ledger; Weaver's trivial clock
+   carries 85 MB. Something Weaver's renderer does — canvas GPU surface
+   allocation, the per-second `gpu_surface_frame` redraw, texture/heap
+   allocation pattern — makes this GPU driver retain ~85 MB that the M2
+   driver does not.
+3. **The Phase 0 gate design was flawed, not the probes.** The probes
+   honestly measured window floors and found no device-scoped wall; but the
+   wall was never in the device setup. The falsification verdict stops the
+   original "move the Metal *baseline* into a shared host" plan — that
+   baseline genuinely does not exist. It does NOT settle whether an
+   out-of-process renderer is needed, because whatever allocates the 85 MB
+   would move with the rendering. Architecture stays on hold until the
+   allocation is named.
+
+Next investigation (new plan needed; evidence-led order):
+
+1. Reproduce here first: build ReleaseFast, run
+   `weaver-widget myclock/dist`, sample `footprint -p <pid>` — expect
+   ~120 MB with ~85 MB owned-unmapped-graphics on `Mac15,6`-class hardware.
+2. Discriminate presentation loop vs canvas surfaces: run the forced
+   software candidate on this machine (the prior thread measured software
+   at 128.6 MB — if that still holds, the trigger is in the CAMetalLayer
+   present loop, not canvas rendering). Find the forcing mechanism in the
+   runtime; the old bakeoff had a `software` candidate.
+3. Vary the redraw rate: a static widget (no timer) vs Myclock's 1 Hz
+   ticks. If the ledger grows with presents and plateaus at a high-water
+   mark, it is drawable/command-buffer pool retention; check whether the
+   85 MB appears immediately at first present or accumulates.
+4. A/B the two machines with identical `vmmap` + `footprint` on the same
+   widget; diff the graphics categories (here: 85 MB owned-unmapped dirty,
+   IOAccelerator 3.5 MB, IOSurface 432 KB).
+5. Bisect Weaver's Metal usage until the 85 MB has a name (which
+   allocation, which API pattern, which driver behavior). Only then decide
+   fix-in-process vs shared renderer — with a receipt.
+
+Do not repeat these mistakes: the falsified gate was treated as closing
+the architecture question when it only closed the baseline theory; and
+"reproduces on machine A, absent on machine B" was nearly misread twice
+(first as security software, then as measurement artifact). Both machines'
+numbers are honest; the difference is the finding.
 
 ## Validation status at handoff
 
