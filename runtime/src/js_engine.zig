@@ -97,6 +97,12 @@ pub const Engine = struct {
         return &self.bridge_state.timers;
     }
 
+    pub fn memoryUsage(self: *const Engine) c.JSMemoryUsage {
+        var usage: c.JSMemoryUsage = undefined;
+        c.JS_ComputeMemoryUsage(self.runtime, &usage);
+        return usage;
+    }
+
     pub fn setTree(self: *Engine, tree: *tree_mod.Tree) void {
         self.bridge_state.tree = tree;
     }

@@ -1325,6 +1325,31 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
+    if (init.environ_map.get("WEAVER_MEMORY_RECEIPT")) |value| {
+        if (value.len != 0 and !std.mem.eql(u8, value, "0")) {
+            const usage = engine.memoryUsage();
+            std.log.info(
+                "widget memory receipt model_bytes={d} widget_app_bytes={d} tree_bytes={d} node_bytes={d} canvas_state_bytes={d} engine_bytes={d} quickjs_malloc_bytes={d} quickjs_memory_used_bytes={d} quickjs_atoms_bytes={d} quickjs_strings_bytes={d} quickjs_objects_bytes={d} quickjs_properties_bytes={d} quickjs_shapes_bytes={d} quickjs_functions_bytes={d} quickjs_function_code_bytes={d}",
+                .{
+                    @sizeOf(Model),
+                    @sizeOf(WidgetApp),
+                    @sizeOf(tree_mod.Tree),
+                    @sizeOf(tree_mod.Node),
+                    @sizeOf(tree_mod.CanvasState),
+                    @sizeOf(js_engine.Engine),
+                    usage.malloc_size,
+                    usage.memory_used_size,
+                    usage.atom_size,
+                    usage.str_size,
+                    usage.obj_size,
+                    usage.prop_size,
+                    usage.shape_size,
+                    usage.js_func_size,
+                    usage.js_func_code_size,
+                },
+            );
+        }
+    }
     if (app_state.model.tree.root == null) {
         std.log.err("widget bundle completed without rendering a root; expected the default widget() registration to render synchronously", .{});
         app_state.model.tree.showError("WidgetDidNotRenderRoot\nThe bundle completed without rendering a widget root.");
