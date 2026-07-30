@@ -36,6 +36,17 @@ export default widget({
             : <image src="./assets/cover.jpg" fit="cover" class="size-full" />}
           <image src="./assets/GridTile.png" tile class="size-full" />
           <image src="./assets/GrainTile.png" tile class="size-full opacity-20" />
+          <column class="size-full justify-end">
+            {/* The text row below sits on the bottom edge of the cover art, and
+                the art can be any color — a white cover leaves white text on
+                white. This is a baked ramp: 36px of flat 78% scrim under the row
+                so it always reads, easing to nothing over the 56px above so the
+                shadow rises into the art with no visible edge. Baked, not drawn:
+                a <canvas> gets no host GPU surface under a clipping ancestor
+                (this well is overflow-hidden), and a stack of translucent panels
+                silently blanks the widget past the retained-tree node budget. */}
+            <image src="./assets/ArtShadow.png" fit="stretch" class="w-full h-[92px]" />
+          </column>
           <column class="size-full pt-[22px] pr-[24px] items-end">
             {playing
               ? <panel class="w-[10px] h-[10px] rounded-full bg-[#ff3b30]/78" />
