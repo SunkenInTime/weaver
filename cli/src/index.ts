@@ -1070,12 +1070,13 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
 
 // Runtime budget mirrors. The receipt and canonical values live beside the
 // storage they bound in runtime/src/tree.zig and native-sdk's
-// primitives/canvas/widget_limits.zig. Keep these pins in lockstep: check must
-// reject exactly what runtime would reject.
+// primitives/canvas/widget_limits.zig. release-audit.mjs enforces lockstep:
+// check must reject exactly what runtime would reject.
 const nativeWidgetNodeLimit = 1024;
 const nativeWidgetDepthLimit = 32;
 const nativeWidgetChildLimit = 64;
 const nativeWidgetTextByteLimit = 1024;
+const nativeWidgetSourceByteLimit = 1024;
 const nativeWidgetCanvasLimit = 8;
 // All shipped examples measured at most six retained images (noro-shell).
 // 16 leaves 2.7x headroom and pins the Native SDK registry slot count; decoded
@@ -1687,6 +1688,10 @@ function imageStreamBudgetError(source: string, asked: number): string {
 }
 
 function validateLocalImageAsset(directory: string, source: string): string | null {
+  const sourceBytes = Buffer.byteLength(source, "utf8");
+  if (sourceBytes > nativeWidgetSourceByteLimit) {
+    return `ImageSourceTooLong: ${JSON.stringify(source)} is ${sourceBytes} UTF-8 bytes; image source capacity exhausted: max_source_bytes=${nativeWidgetSourceByteLimit}, asked for ${sourceBytes}, headroom=${nativeWidgetSourceByteLimit - sourceBytes}. Use a shorter widget-relative path.`;
+  }
   if (!source || isAbsolute(source) || source.split(/[\\/]/).includes("..")) {
     return `InvalidImageSource: ${JSON.stringify(source)} is not a portable widget-relative asset path`;
   }

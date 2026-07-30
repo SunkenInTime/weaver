@@ -20,7 +20,7 @@ function pngHeader(width, height) {
   return bytes;
 }
 
-function fixture(width, height) {
+function fixture(width, height, source = "./cover.png") {
   const root = mkdtempSync(join(tmpdir(), "weaver-image-budget-"));
   const initialized = runCli(root, "init", "widget");
   assert.equal(initialized.status, 0, initialized.stderr);
@@ -30,7 +30,7 @@ function fixture(width, height) {
     join(widget, "widget.tsx"),
     `import { widget } from "@weaver/sdk";
 export default widget({ name: "Image Budget", size: [320, 200] }, () => (
-  <image src="./cover.png" class="w-[256px] h-[256px]" />
+  <image src=${JSON.stringify(source)} class="w-[256px] h-[256px]" />
 ));
 `,
     "utf8",
@@ -69,6 +69,35 @@ test("check rejects an oversized encoded image before decoding it", () => {
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /ImageStreamTooLarge/);
     assert.match(checked.stderr, /max_image_stream_bytes=2097152, asked for 2097153/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("source budget accepts exactly max_source_bytes using UTF-8 byte length", () => {
+  const source = "é".repeat(512);
+  assert.equal(Buffer.byteLength(source, "utf8"), 1024);
+  const { root, widget } = fixture(256, 256, source);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.doesNotMatch(checked.stderr, /ImageSourceTooLong/);
+    assert.match(checked.stderr, /ImageAssetUnreadable/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check rejects a static image source one UTF-8 byte over max_source_bytes", () => {
+  const source = `${"é".repeat(512)}a`;
+  assert.equal(Buffer.byteLength(source, "utf8"), 1025);
+  const { root, widget } = fixture(256, 256, source);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /ImageSourceTooLong/);
+    assert.match(checked.stderr, /max_source_bytes=1024, asked for 1025, headroom=-1/);
+    assert.doesNotMatch(checked.stderr, /ImageAssetUnreadable/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

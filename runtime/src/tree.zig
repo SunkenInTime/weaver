@@ -27,6 +27,8 @@ pub const max_text_bytes: usize = 1024;
 // almost 4x headroom over that cross-process good case. Sources allocate their
 // exact length; even if all 1024 nodes were abused as images, retained source
 // storage is bounded to 1 MiB plus 1 MiB in an in-flight transaction snapshot.
+// Pinned by cli/src/index.ts nativeWidgetSourceByteLimit; release-audit.mjs
+// enforces equality across the language boundary.
 pub const max_source_bytes: usize = 1024;
 // Lucide 1.26.0 measures 2,099 UTF-8 bytes for its largest normalized path
 // ("puzzle"); shipped widgets measure 1,037 bytes. 8 KiB leaves 3.9x headroom.
