@@ -39,20 +39,20 @@ export default widget({ name: "Image Budget", size: [320, 200] }, () => (
 }
 
 test("check reports exact decoded RGBA image budget math", () => {
-  const { root, widget } = fixture(257, 256);
+  const { root, widget } = fixture(513, 512);
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /ImageTooLarge/);
-    assert.match(checked.stderr, /257 \* 256 \* 4 = 263168 bytes/);
-    assert.match(checked.stderr, /max_image_rgba_bytes=262144 by 1024 bytes/);
+    assert.match(checked.stderr, /513 \* 512 \* 4 = 1050624 bytes/);
+    assert.match(checked.stderr, /max_image_rgba_bytes=1048576 by 2048 bytes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("check accepts an image exactly at the decoded RGBA budget", () => {
-  const { root, widget } = fixture(256, 256);
+  const { root, widget } = fixture(512, 512);
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 0, checked.stderr);
@@ -64,11 +64,11 @@ test("check accepts an image exactly at the decoded RGBA budget", () => {
 test("check rejects an oversized encoded image before decoding it", () => {
   const { root, widget } = fixture(256, 256);
   try {
-    writeFileSync(join(widget, "cover.png"), Buffer.alloc(1024 * 1024 + 1));
+    writeFileSync(join(widget, "cover.png"), Buffer.alloc(2 * 1024 * 1024 + 1));
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /ImageStreamTooLarge/);
-    assert.match(checked.stderr, /max_image_stream_bytes=1048576, asked for 1048577/);
+    assert.match(checked.stderr, /max_image_stream_bytes=2097152, asked for 2097153/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
