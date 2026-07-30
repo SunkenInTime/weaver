@@ -413,26 +413,9 @@ Conclusions, in order of importance:
    would move with the rendering. Architecture stays on hold until the
    allocation is named.
 
-Next investigation (new plan needed; evidence-led order):
-
-1. Reproduce here first: build ReleaseFast, run
-   `weaver-widget myclock/dist`, sample `footprint -p <pid>` — expect
-   ~120 MB with ~85 MB owned-unmapped-graphics on `Mac15,6`-class hardware.
-2. Discriminate presentation loop vs canvas surfaces: run the forced
-   software candidate on this machine (the prior thread measured software
-   at 128.6 MB — if that still holds, the trigger is in the CAMetalLayer
-   present loop, not canvas rendering). Find the forcing mechanism in the
-   runtime; the old bakeoff had a `software` candidate.
-3. Vary the redraw rate: a static widget (no timer) vs Myclock's 1 Hz
-   ticks. If the ledger grows with presents and plateaus at a high-water
-   mark, it is drawable/command-buffer pool retention; check whether the
-   85 MB appears immediately at first present or accumulates.
-4. A/B the two machines with identical `vmmap` + `footprint` on the same
-   widget; diff the graphics categories (here: 85 MB owned-unmapped dirty,
-   IOAccelerator 3.5 MB, IOSurface 432 KB).
-5. Bisect Weaver's Metal usage until the 85 MB has a name (which
-   allocation, which API pattern, which driver behavior). Only then decide
-   fix-in-process vs shared renderer — with a receipt.
+The investigation itself is separate work with its own brief:
+`docs/gpu-ledger-wall-brief.md` (runs on the `Mac15,6` machine, where the
+wall reproduces). This handoff's shared-renderer plan remains stopped.
 
 Do not repeat these mistakes: the falsified gate was treated as closing
 the architecture question when it only closed the baseline theory; and
