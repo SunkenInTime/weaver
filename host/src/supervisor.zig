@@ -184,19 +184,49 @@ pub fn markRunning(slot: anytype, now_ms: u64, artifact_mtime: i128) void {
 pub fn recordCrash(slot: anytype, now_ms: u64, exit_code: ?u32) void {
     if (backoff.recordCrash(&slot.crash_times, &slot.crash_count, now_ms)) {
         slot.state = .stopped;
-        slot.setReason("crashed after 3 restart attempts within 5 minutes{s}{?d}", .{ if (exit_code != null) ": exit code " else "", exit_code });
+        slot.setReason("runtime process crashed after 3 restart attempts within 5 minutes{s}{?d}", .{ if (exit_code != null) ": exit_code=" else "", exit_code });
         return;
     }
     slot.state = .backoff;
     slot.next_restart_ms = now_ms + backoff.delayMs(slot.crash_count);
-    slot.setReason("crashed; restart {d} in {d}s", .{ slot.crash_count, backoff.delayMs(slot.crash_count) / 1000 });
+    slot.setReason("runtime process crashed{s}{?d}; restart {d} in {d}s", .{
+        if (exit_code != null) ": exit_code=" else "",
+        exit_code,
+        slot.crash_count,
+        backoff.delayMs(slot.crash_count) / 1000,
+    });
+}
+
+pub fn recordLaunchFailure(slot: anytype, now_ms: u64, err: anyerror) void {
+    if (backoff.recordCrash(&slot.crash_times, &slot.crash_count, now_ms)) {
+        slot.state = .stopped;
+        slot.setReason("launch failed after 3 restart attempts within 5 minutes: {s}", .{@errorName(err)});
+        return;
+    }
+    slot.state = .backoff;
+    slot.next_restart_ms = now_ms + backoff.delayMs(slot.crash_count);
+    slot.setReason("launch failed: {s}; restart {d} in {d}s", .{
+        @errorName(err),
+        slot.crash_count,
+        backoff.delayMs(slot.crash_count) / 1000,
+    });
 }
 
 /// A fatal provider/command channel is process-fatal because the authenticated
 /// endpoint is intentionally created once per widget launch. Reuse the crash
 /// budget and backoff so a replacement process receives a fresh endpoint.
 pub fn recordChannelFailure(slot: anytype, now_ms: u64) void {
-    recordCrash(slot, now_ms, null);
+    if (backoff.recordCrash(&slot.crash_times, &slot.crash_count, now_ms)) {
+        slot.state = .stopped;
+        slot.setReason("provider channel failed after 3 restart attempts within 5 minutes", .{});
+        return;
+    }
+    slot.state = .backoff;
+    slot.next_restart_ms = now_ms + backoff.delayMs(slot.crash_count);
+    slot.setReason("provider channel failed; restart {d} in {d}s", .{
+        slot.crash_count,
+        backoff.delayMs(slot.crash_count) / 1000,
+    });
 }
 
 pub fn rendererDesired(slots: anytype, force_software: bool) bool {
@@ -460,6 +490,7 @@ test "slot state machine preserves subscriptions renderer policy and crash backo
     try std.testing.expectEqual(RunState.running, slot.state);
     recordCrash(&slot, 200, 7);
     try std.testing.expectEqual(RunState.backoff, slot.state);
+    try std.testing.expect(std.mem.indexOf(u8, slot.reason(), "exit_code=7") != null);
     try std.testing.expectEqual(@as(u64, 1200), slot.next_restart_ms);
     try std.testing.expectEqual(SlotAction.none, nextSlotAction(&slot, true, false, false, 1199));
     try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slot, true, false, false, 1200));
@@ -479,6 +510,7 @@ test "fatal provider channel restarts the slot and restores media delivery and t
     slot.platform.running = false;
     recordChannelFailure(slot, 200);
     try std.testing.expectEqual(RunState.backoff, slot.state);
+    try std.testing.expect(std.mem.startsWith(u8, slot.reason(), "provider channel failed"));
     try std.testing.expectEqual(SlotAction.none, nextSlotAction(slot, true, false, false, 1199));
     try std.testing.expectEqual(SlotAction.launch, nextSlotAction(slot, true, false, false, 1200));
 
@@ -490,6 +522,19 @@ test "fatal provider channel restarts the slot and restores media delivery and t
     try std.testing.expect(hasSubscription(&slots, .media, &fake));
     try std.testing.expect(slot.wants_media_transport);
     try std.testing.expect(!slot.media_sent);
+}
+
+test "launch backoff preserves the named cause developers need" {
+    var slot: FakeSlot = .{};
+    try slot.setRegistration(.{ .name = "Broken", .sourcePath = "/owned/broken", .enabled = true, .dev = false });
+    slot.state = .starting;
+
+    recordLaunchFailure(&slot, 200, error.CreateProcessFailed);
+
+    try std.testing.expectEqual(RunState.backoff, slot.state);
+    try std.testing.expect(std.mem.indexOf(u8, slot.reason(), "launch failed: CreateProcessFailed") != null);
+    try std.testing.expectEqual(SlotAction.none, nextSlotAction(&slot, true, false, false, 1199));
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slot, true, false, false, 1200));
 }
 
 test "portable status serializer keeps the public state spelling" {

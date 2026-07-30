@@ -22,6 +22,8 @@ pub const State = struct {
     canvas_resize_callback: c.JSValue = qjs.undefinedValue(),
     canvas_frames: [max_canvas_frames]CanvasFrameSlot = [_]CanvasFrameSlot{.{}} ** max_canvas_frames,
     fetches: [max_fetches]FetchSlot = [_]FetchSlot{.{}} ** max_fetches,
+    render_failed: bool = false,
+    emit_error_logs: bool = true,
 };
 
 pub const max_timers: usize = 16;
@@ -71,6 +73,8 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "setRoot", setRoot, 1);
     try setFunction(ctx, native, "beginBatch", beginBatch, 0);
     try setFunction(ctx, native, "endBatch", endBatch, 0);
+    try setFunction(ctx, native, "abortBatch", abortBatch, 0);
+    try setFunction(ctx, native, "reportError", reportError, 2);
     try setFunction(ctx, native, "setHandler", setHandler, 3);
     try setFunction(ctx, native, "onEvent", onEvent, 1);
     try setFunction(ctx, native, "hostAvailable", hostAvailable, 0);
@@ -92,8 +96,8 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     if (c.JS_IsException(console)) return error.QuickJs;
     errdefer c.JS_FreeValue(ctx, console);
     try setFunction(ctx, console, "log", consoleLog, 1);
-    try setFunction(ctx, console, "warn", consoleLog, 1);
-    try setFunction(ctx, console, "error", consoleLog, 1);
+    try setFunction(ctx, console, "warn", consoleWarn, 1);
+    try setFunction(ctx, console, "error", consoleError, 1);
     if (c.JS_SetPropertyStr(ctx, global, "console", console) < 0) return error.QuickJs;
 }
 
@@ -145,6 +149,10 @@ fn failFmt(ctx: *c.JSContext, comptime format: []const u8, args: anytype) c.JSVa
     return fail(ctx, message);
 }
 
+fn failProp(ctx: *c.JSContext, id: tree_mod.NodeId, key: []const u8, err: anyerror) c.JSValue {
+    return failFmt(ctx, "setProp failed: node={d}, property={s}, cause={s}", .{ id, key, @errorName(err) });
+}
+
 fn idArg(ctx: *c.JSContext, value: c.JSValueConst) !tree_mod.NodeId {
     var id: u32 = 0;
     if (c.JS_ToUint32(ctx, &id, value) < 0) return error.InvalidArgument;
@@ -163,7 +171,20 @@ fn createNode(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JS
     const kind_text = stringArg(js, argv[0]) catch return fail(js, "node type must be a string");
     defer c.JS_FreeCString(js, kind_text.raw);
     const kind = tree_mod.Kind.parse(kind_text.bytes) orelse return fail(js, "unsupported node type");
-    const id = state(js).tree.createNode(kind) catch return fail(js, "node capacity exhausted");
+    const bridge_state = state(js);
+    const id = bridge_state.tree.createNode(kind) catch |err| return switch (err) {
+        error.NodeLimit => failFmt(
+            js,
+            "node capacity exhausted: max_nodes={d}, asked for {d}",
+            .{ tree_mod.max_nodes, bridge_state.tree.nodeCount() + 1 },
+        ),
+        error.CanvasLimit => failFmt(
+            js,
+            "canvas capacity exhausted: max_canvases={d}, asked for {d}",
+            .{ tree_mod.max_canvases, tree_mod.max_canvases + 1 },
+        ),
+        else => failFmt(js, "createNode failed: {s}", .{@errorName(err)}),
+    };
     return c.JS_NewUint32(js, id);
 }
 
@@ -173,7 +194,14 @@ fn setText(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
     const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
     const value = stringArg(js, argv[1]) catch return fail(js, "text must be a string");
     defer c.JS_FreeCString(js, value.raw);
-    state(js).tree.setText(id, value.bytes) catch return fail(js, "setText failed");
+    state(js).tree.setText(id, value.bytes) catch |err| return switch (err) {
+        error.TextTooLong => failFmt(
+            js,
+            "text capacity exhausted: max_text_bytes={d}, asked for {d}",
+            .{ tree_mod.max_text_bytes, value.bytes.len },
+        ),
+        else => failFmt(js, "setText failed: {s}", .{@errorName(err)}),
+    };
     return qjs.undefinedValue();
 }
 
@@ -182,7 +210,16 @@ fn appendChild(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.J
     if (argc != 2) return fail(js, "appendChild expects parent and child ids");
     const parent = idArg(js, argv[0]) catch return fail(js, "invalid parent id");
     const child = idArg(js, argv[1]) catch return fail(js, "invalid child id");
-    state(js).tree.appendChild(parent, child) catch return fail(js, "appendChild failed");
+    const bridge_state = state(js);
+    const asked = if (bridge_state.tree.nodeConst(parent)) |node_value| node_value.child_count + 1 else |_| 0;
+    bridge_state.tree.appendChild(parent, child) catch |err| return switch (err) {
+        error.ChildLimit => failFmt(
+            js,
+            "child capacity exhausted: max_children={d}, asked for {d} on parent {d}",
+            .{ tree_mod.max_children, asked, parent },
+        ),
+        else => failFmt(js, "appendChild failed: {s}", .{@errorName(err)}),
+    };
     return qjs.undefinedValue();
 }
 
@@ -192,36 +229,100 @@ fn insertBefore(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
     const parent = idArg(js, argv[0]) catch return fail(js, "invalid parent id");
     const child = idArg(js, argv[1]) catch return fail(js, "invalid child id");
     const before = idArg(js, argv[2]) catch return fail(js, "invalid before id");
-    state(js).tree.insertBefore(parent, child, before) catch return fail(js, "insertBefore failed");
+    const bridge_state = state(js);
+    const asked = if (bridge_state.tree.nodeConst(parent)) |node_value| node_value.child_count + 1 else |_| 0;
+    bridge_state.tree.insertBefore(parent, child, before) catch |err| return switch (err) {
+        error.ChildLimit => failFmt(
+            js,
+            "child capacity exhausted: max_children={d}, asked for {d} on parent {d}",
+            .{ tree_mod.max_children, asked, parent },
+        ),
+        else => failFmt(js, "insertBefore failed: {s}", .{@errorName(err)}),
+    };
     return qjs.undefinedValue();
 }
 
 fn removeNode(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 1) return fail(js, "removeNode expects one id");
-    state(js).tree.removeNode(idArg(js, argv[0]) catch return fail(js, "invalid node id")) catch return fail(js, "removeNode failed");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
+    state(js).tree.removeNode(id) catch |err| return failFmt(js, "removeNode failed: node={d}, cause={s}", .{ id, @errorName(err) });
     return qjs.undefinedValue();
 }
 
 fn setRoot(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 1) return fail(js, "setRoot expects one id");
-    state(js).tree.setRoot(idArg(js, argv[0]) catch return fail(js, "invalid node id")) catch return fail(js, "setRoot failed");
+    const id = idArg(js, argv[0]) catch return fail(js, "invalid node id");
+    state(js).tree.setRoot(id) catch |err| return failFmt(js, "setRoot failed: node={d}, cause={s}", .{ id, @errorName(err) });
     return qjs.undefinedValue();
 }
 
 fn beginBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 0) return fail(js, "beginBatch expects no arguments");
-    state(js).tree.beginBatch();
+    state(js).tree.beginBatch() catch return fail(js, "render transaction could not snapshot the last committed tree");
     return qjs.undefinedValue();
 }
 
 fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 0) return fail(js, "endBatch expects no arguments");
-    state(js).tree.endBatch();
+    const authored_tree = state(js).tree;
+    if (!authored_tree.prepareEndBatch()) return qjs.undefinedValue();
+    if (authored_tree.canvasAncestorViolation()) |violation| {
+        return switch (violation.reason) {
+            .clip => failFmt(
+                js,
+                "CanvasNeedsUnclippedAncestors: canvas node {d} is under overflow-hidden ancestor {d}; a host GPU surface cannot be clipped",
+                .{ violation.canvas_id, violation.ancestor_id },
+            ),
+            .opacity => failFmt(
+                js,
+                "CanvasNeedsOpaqueAncestors: canvas node {d} is under opacity ancestor {d}; a host GPU surface cannot be placed behind an opacity layer",
+                .{ violation.canvas_id, violation.ancestor_id },
+            ),
+        };
+    }
+    authored_tree.commitBatch();
     return qjs.undefinedValue();
+}
+
+fn abortBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 0) return fail(js, "abortBatch expects no arguments");
+    state(js).tree.abortBatch();
+    return qjs.undefinedValue();
+}
+
+fn reportError(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    const js = ctx orelse return qjs.exceptionValue();
+    if (argc != 2) return fail(js, "reportError expects scope and details");
+    const scope = stringArg(js, argv[0]) catch return fail(js, "reportError scope must be a string");
+    defer c.JS_FreeCString(js, scope.raw);
+    const details = stringArg(js, argv[1]) catch return fail(js, "reportError details must be a string");
+    defer c.JS_FreeCString(js, details.raw);
+    const bridge_state = state(js);
+    bridge_state.render_failed = true;
+
+    const log_details = details.bytes[0..@min(details.bytes.len, 6000)];
+    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ scope.bytes, log_details });
+
+    var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
+    const visible_scope = scope.bytes[0..@min(scope.bytes.len, 48)];
+    const first_line_length = std.mem.indexOfScalar(u8, details.bytes, '\n') orelse details.bytes.len;
+    const first_line = details.bytes[0..@min(first_line_length, 128)];
+    const visible = std.fmt.bufPrint(
+        &visible_buffer,
+        "{s} failed\n{s}",
+        .{ visible_scope, first_line },
+    ) catch "Widget callback failed; see the per-widget log";
+    bridge_state.tree.showError(visible);
+    return qjs.undefinedValue();
+}
+
+pub fn renderFailed(bridge_state: *const State) bool {
+    return bridge_state.render_failed;
 }
 
 fn setHandler(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
@@ -344,7 +445,7 @@ fn discardMediaCallback(ctx: *c.JSContext, bridge_state: *State, index: usize) v
 fn storageRead(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValueConst) callconv(.c) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     if (argc != 0) return fail(js, "storageRead expects no arguments");
-    const bytes = state(js).storage.read() catch return fail(js, "storageRead failed");
+    const bytes = state(js).storage.read() catch |err| return failFmt(js, "storageRead failed: cause={s}", .{@errorName(err)});
     if (bytes) |value| return c.JS_NewStringLen(js, value.ptr, value.len);
     return qjs.nullValue();
 }
@@ -355,9 +456,9 @@ fn storageWrite(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
     const value = stringArg(js, argv[0]) catch return fail(js, "storageWrite expects one JSON string");
     defer c.JS_FreeCString(js, value.raw);
     state(js).storage.write(value.bytes) catch |err| return if (err == error.StorageQuotaExceeded)
-        fail(js, "StorageQuotaExceeded: widget storage exceeds 64 KB")
+        failFmt(js, "StorageQuotaExceeded: max_storage_bytes={d}, asked for {d}", .{ storage_mod.quota_bytes, value.bytes.len })
     else
-        fail(js, "storageWrite failed");
+        failFmt(js, "storageWrite failed: cause={s}", .{@errorName(err)});
     return qjs.undefinedValue();
 }
 
@@ -372,13 +473,13 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         defer c.JS_FreeCString(js, value.raw);
         const color = if (value.bytes.len == 0) null else parseColor(value.bytes) orelse return fail(js, "color must be #RRGGBBAA");
         if (std.mem.eql(u8, key.bytes, "background")) {
-            state(js).tree.setBackground(id, color) catch return fail(js, "setProp failed");
+            state(js).tree.setBackground(id, color) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "textColor")) {
-            state(js).tree.setTextColor(id, color) catch return fail(js, "setProp failed");
+            state(js).tree.setTextColor(id, color) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "borderColor")) {
-            state(js).tree.setBorderColor(id, color) catch return fail(js, "setProp failed");
+            state(js).tree.setBorderColor(id, color) catch |err| return failProp(js, id, key.bytes, err);
         } else {
-            state(js).tree.setInteractionColor(id, key.bytes, color) catch return fail(js, "setProp failed");
+            state(js).tree.setInteractionColor(id, key.bytes, color) catch |err| return failProp(js, id, key.bytes, err);
         }
     } else if (std.mem.eql(u8, key.bytes, "shadow") or std.mem.eql(u8, key.bytes, "textShadow") or
         std.mem.eql(u8, key.bytes, "hoverShadow") or std.mem.eql(u8, key.bytes, "pressedShadow"))
@@ -387,27 +488,30 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         defer c.JS_FreeCString(js, value.raw);
         if (std.mem.eql(u8, key.bytes, "shadow")) {
             const shadow = if (value.bytes.len == 0) null else parseBoxShadow(value.bytes) orelse return fail(js, "shadow must be 'x y blur spread #RRGGBBAA'");
-            state(js).tree.setShadow(id, shadow) catch return fail(js, "setProp failed");
+            state(js).tree.setShadow(id, shadow) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "textShadow")) {
             const shadow = if (value.bytes.len == 0) null else parseTextShadow(value.bytes) orelse return fail(js, "textShadow must be 'x y blur #RRGGBBAA'");
-            state(js).tree.setTextShadow(id, shadow) catch return fail(js, "setProp failed");
+            state(js).tree.setTextShadow(id, shadow) catch |err| return failProp(js, id, key.bytes, err);
         } else if (value.bytes.len == 0) {
-            state(js).tree.setInteractionShadow(id, key.bytes, null, false) catch return fail(js, "setProp failed");
+            state(js).tree.setInteractionShadow(id, key.bytes, null, false) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, value.bytes, "none")) {
-            state(js).tree.setInteractionShadow(id, key.bytes, null, true) catch return fail(js, "setProp failed");
+            state(js).tree.setInteractionShadow(id, key.bytes, null, true) catch |err| return failProp(js, id, key.bytes, err);
         } else {
             const shadow = parseBoxShadow(value.bytes) orelse return fail(js, "state shadow must be 'x y blur spread #RRGGBBAA' or none");
-            state(js).tree.setInteractionShadow(id, key.bytes, shadow, true) catch return fail(js, "setProp failed");
+            state(js).tree.setInteractionShadow(id, key.bytes, shadow, true) catch |err| return failProp(js, id, key.bytes, err);
         }
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);
-        state(js).tree.setSource(id, value.bytes) catch return fail(js, "image source is too long");
+        state(js).tree.setSource(id, value.bytes) catch |err| return if (err == error.TextTooLong)
+            failFmt(js, "image source capacity exhausted: max_source_bytes={d}, asked for {d}", .{ tree_mod.max_source_bytes, value.bytes.len })
+        else
+            failFmt(js, "set image source failed: {s}", .{@errorName(err)});
     } else if (std.mem.eql(u8, key.bytes, "iconPath")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "iconPath must be a string");
         defer c.JS_FreeCString(js, value.raw);
         state(js).tree.setIconPath(id, value.bytes) catch |err| return if (err == error.IconPathTooLong)
-            fail(js, "iconPath exceeds the 8192-byte per-node limit")
+            failFmt(js, "icon path capacity exhausted: max_icon_path_bytes={d}, asked for {d}", .{ tree_mod.max_icon_path_bytes, value.bytes.len })
         else
             fail(js, "invalid iconPath");
     } else if (std.mem.eql(u8, key.bytes, "iconViewBox")) {
@@ -444,19 +548,19 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
         const value = c.JS_ToBool(js, argv[2]);
         if (value < 0) return fail(js, "property must be boolean");
         if (std.mem.eql(u8, key.bytes, "truncate")) {
-            state(js).tree.setTruncate(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setTruncate(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "overflowHidden")) {
-            state(js).tree.setOverflowHidden(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setOverflowHidden(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "flexWrap")) {
-            state(js).tree.setFlexWrap(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setFlexWrap(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "tabularNums")) {
-            state(js).tree.setTabularNums(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setTabularNums(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "imageTile")) {
-            state(js).tree.setImageTile(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setImageTile(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else if (std.mem.eql(u8, key.bytes, "hoverShadowInset") or std.mem.eql(u8, key.bytes, "pressedShadowInset")) {
-            state(js).tree.setInteractionShadowInset(id, key.bytes, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setInteractionShadowInset(id, key.bytes, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         } else {
-            state(js).tree.setShadowInset(id, value != 0) catch return fail(js, "setProp failed");
+            state(js).tree.setShadowInset(id, value != 0) catch |err| return failProp(js, id, key.bytes, err);
         }
     } else {
         var value: f64 = 0;
@@ -483,7 +587,7 @@ fn setInterval(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.J
         timer.* = .{ .id = id, .interval_ms = @intCast(milliseconds), .active = true };
         return c.JS_NewInt64(js, @intCast(id));
     }
-    return fail(js, "timer capacity exhausted");
+    return failFmt(js, "timer capacity exhausted: max_timers={d}, asked for {d}", .{ max_timers, max_timers + 1 });
 }
 
 fn clearInterval(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
@@ -554,8 +658,8 @@ fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [
     const source: [*]const f64 = @ptrCast(@alignCast(buffer + byte_offset));
     @memcpy(canvas_wire_scratch[0..length], source[0..length]);
     state(js).tree.setCanvasCommands(id, canvas_wire_scratch[0..length]) catch |err| return switch (err) {
-        error.CanvasCommandLimit => failFmt(js, "canvas batch exceeds {d} draw commands (max_canvas_commands); draw fewer commands per frame", .{tree_mod.max_canvas_commands}),
-        error.CanvasPointLimit => failFmt(js, "canvas batch exceeds {d} polyline points (max_canvas_points)", .{tree_mod.max_canvas_points}),
+        error.CanvasCommandLimit => failFmt(js, "canvas command capacity exhausted: max_canvas_commands={d}, asked for at least {d}", .{ tree_mod.max_canvas_commands, tree_mod.max_canvas_commands + 1 }),
+        error.CanvasPointLimit => failFmt(js, "canvas point capacity exhausted: max_canvas_points={d}, asked for at least {d}", .{ tree_mod.max_canvas_points, tree_mod.max_canvas_points + 1 }),
         error.InvalidNode => fail(js, "invalid canvas node id"),
         else => fail(js, "malformed canvas command batch (non-finite value or truncated command)"),
     };
@@ -580,7 +684,11 @@ fn onCanvasFrame(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c
         }
         if (free == null and slot.node_id == 0) free = slot;
     }
-    const slot = free orelse return fail(js, "canvas frame callback capacity exhausted");
+    const slot = free orelse return failFmt(
+        js,
+        "canvas frame callback capacity exhausted: max_canvas_frames={d}, asked for {d}",
+        .{ max_canvas_frames, max_canvas_frames + 1 },
+    );
     slot.* = .{ .node_id = id, .callback = c.JS_DupValue(js, argv[1]) };
     return qjs.undefinedValue();
 }
@@ -900,6 +1008,20 @@ fn log(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueCo
 }
 
 fn consoleLog(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    return consoleWrite(ctx, argc, argv, .info);
+}
+
+fn consoleWarn(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    return consoleWrite(ctx, argc, argv, .warn);
+}
+
+fn consoleError(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSValueConst) callconv(.c) c.JSValue {
+    return consoleWrite(ctx, argc, argv, .err);
+}
+
+const ConsoleLevel = enum { info, warn, err };
+
+fn consoleWrite(ctx: ?*c.JSContext, argc: c_int, argv: [*c]c.JSValueConst, level: ConsoleLevel) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
     var buffer: [4096]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
@@ -911,7 +1033,11 @@ fn consoleLog(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JS
         defer c.JS_FreeCString(js, raw);
         writer.writeAll(raw[0..len]) catch break;
     }
-    std.log.info("widget console: {s}", .{writer.buffered()});
+    switch (level) {
+        .info => std.log.info("widget console: {s}", .{writer.buffered()}),
+        .warn => std.log.warn("widget console: {s}", .{writer.buffered()}),
+        .err => std.log.err("widget console: {s}", .{writer.buffered()}),
+    }
     return qjs.undefinedValue();
 }
 

@@ -61,3 +61,49 @@ test("check accepts a canvas with explicit pixel sizes", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("check rejects a canvas below an overflow-hidden ancestor", () => {
+  const canvas = `<stack class="w-[312px] h-[71px] overflow-hidden"><canvas class="w-[312px] h-[71px]" fps={0} onFrame={() => {}} /></stack>`;
+  const { root, widget } = fixture(source(canvas));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsUnclippedAncestors/);
+    assert.match(checked.stderr, /overflow-hidden <stack> ancestor/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check rejects a canvas below an opacity ancestor", () => {
+  const canvas = `<column class="opacity-50"><canvas class="w-[312px] h-[71px]" fps={0} onFrame={() => {}} /></column>`;
+  const { root, widget } = fixture(source(canvas));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsOpaqueAncestors/);
+    assert.match(checked.stderr, /opacity <column> ancestor/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check carries canvas prerequisites across a component boundary", () => {
+  const widgetSource = `import { widget } from "@weaver/sdk";
+function Surface() {
+  return <canvas class="w-[312px] h-[71px]" fps={0} onFrame={() => {}} />;
+}
+export default widget({ name: "Canvas Component", size: [320, 200] }, () => (
+  <stack class="w-[312px] h-[71px] overflow-hidden"><Surface /></stack>
+));
+`;
+  const { root, widget } = fixture(widgetSource);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsUnclippedAncestors/);
+    assert.match(checked.stderr, /statically lowered component tree/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

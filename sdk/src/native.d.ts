@@ -11,6 +11,8 @@ interface WeaverNativeBridge {
   setRoot(id: number): void;
   beginBatch(): void;
   endBatch(): void;
+  abortBatch(): void;
+  reportError(scope: string, details: string): void;
   setHandler(id: number, kind: "press" | "doublepress" | "rightpress" | "change", enabled: boolean): void;
   onEvent(callback: (id: number, kind: "press" | "doublepress" | "rightpress" | "change", payload: number | NativePressPayload | null) => void): void;
   hostAvailable(): boolean;

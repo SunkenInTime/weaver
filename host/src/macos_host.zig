@@ -87,12 +87,31 @@ const ControlServer = struct {
     }
 
     fn threadMain(self: *ControlServer) void {
+        var consecutive_accept_failures: u64 = 0;
         while (true) {
             self.mutex.lockUncancelable(self.io);
             const stopping = self.stopping;
             self.mutex.unlock(self.io);
             if (stopping) return;
-            const stream = self.listener.accept(self.io) catch return;
+            const stream = self.listener.accept(self.io) catch |err| {
+                self.mutex.lockUncancelable(self.io);
+                const now_stopping = self.stopping;
+                self.mutex.unlock(self.io);
+                if (now_stopping) return;
+                consecutive_accept_failures += 1;
+                if (consecutive_accept_failures == 1) {
+                    std.log.err("host control listener accept failed: {s}; retrying and suppressing repeats until recovery", .{@errorName(err)});
+                }
+                std.Io.sleep(self.io, .fromMilliseconds(100), .awake) catch |sleep_err| {
+                    std.log.err("host control listener retry wait failed: {s}; control listener is stopping", .{@errorName(sleep_err)});
+                    return;
+                };
+                continue;
+            };
+            if (consecutive_accept_failures != 0) {
+                std.log.info("host control listener recovered after {d} accept failures", .{consecutive_accept_failures});
+                consecutive_accept_failures = 0;
+            }
             self.handle(stream);
             stream.close(self.io);
         }
@@ -184,12 +203,34 @@ const ProviderEndpoint = struct {
     }
 
     fn acceptMain(self: *ProviderEndpoint) void {
+        var consecutive_accept_failures: u64 = 0;
         while (true) {
             self.mutex.lockUncancelable(self.io);
             const stopping = self.stopping;
             self.mutex.unlock(self.io);
             if (stopping) return;
-            const stream = self.listener.accept(self.io) catch return;
+            const stream = self.listener.accept(self.io) catch |err| {
+                self.mutex.lockUncancelable(self.io);
+                const now_stopping = self.stopping;
+                self.mutex.unlock(self.io);
+                if (now_stopping) return;
+                consecutive_accept_failures += 1;
+                if (consecutive_accept_failures == 1) {
+                    std.log.err(
+                        "widget provider listener accept failed for pid={d}: {s}; retrying and suppressing repeats until recovery",
+                        .{ self.expected_pid, @errorName(err) },
+                    );
+                }
+                std.Io.sleep(self.io, .fromMilliseconds(100), .awake) catch |sleep_err| {
+                    std.log.err("widget provider listener retry wait failed: {s}; provider listener is stopping", .{@errorName(sleep_err)});
+                    return;
+                };
+                continue;
+            };
+            if (consecutive_accept_failures != 0) {
+                std.log.info("widget provider listener recovered after {d} accept failures", .{consecutive_accept_failures});
+                consecutive_accept_failures = 0;
+            }
             const actual_pid = peerPid(stream);
             if (actual_pid != self.expected_pid) {
                 std.log.warn(
@@ -389,6 +430,7 @@ const Host = struct {
     /// command framer, and ack writer without invoking a private-framework
     /// helper on a player-less CI runner.
     automation_seam: bool = false,
+    status_write_failures: u64 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -439,8 +481,7 @@ const Host = struct {
                 .stop_missing => self.stopSlot(slot, true),
                 .handle_exit => self.handleExit(slot, now_ms),
                 .launch => self.launch(slot, now_ms) catch |err| {
-                    slot.setReason("launch failed: {s}", .{@errorName(err)});
-                    supervisor.recordCrash(slot, now_ms, null);
+                    supervisor.recordLaunchFailure(slot, now_ms, err);
                 },
             }
         }
@@ -570,7 +611,10 @@ const Host = struct {
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.platform.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
         slot.platform.backend_path_len = backend_path.len;
-        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch {};
+        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
 
         var environment = try self.environ_map.clone(self.allocator);
         defer environment.deinit();
@@ -857,10 +901,27 @@ const Host = struct {
             .audio_capture_starts = self.audio_provider.capture_starts,
             .audio_provider_frames = self.audio_provider.frame_count,
             .audio_last_error = self.audio_provider.last_error,
-        }, entries[0..entry_count]) catch return;
+        }, entries[0..entry_count]) catch |err| return self.noteStatusWriteFailure("encode", err);
         var cwd = std.Io.Dir.cwd();
-        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch return;
-        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch return;
+        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch |err| return self.noteStatusWriteFailure("write temporary file", err);
+        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch |err| return self.noteStatusWriteFailure("publish", err);
+        self.noteStatusWriteRecovery();
+    }
+
+    fn noteStatusWriteFailure(self: *Host, operation: []const u8, err: anyerror) void {
+        self.status_write_failures += 1;
+        if (self.status_write_failures == 1) {
+            std.log.err(
+                "host status publication degraded while attempting to {s}: {s}; path={s}; repeated failures are suppressed until recovery",
+                .{ operation, @errorName(err), self.status_path },
+            );
+        }
+    }
+
+    fn noteStatusWriteRecovery(self: *Host) void {
+        if (self.status_write_failures == 0) return;
+        std.log.info("host status publication recovered after {d} consecutive failures", .{self.status_write_failures});
+        self.status_write_failures = 0;
     }
 };
 
@@ -972,6 +1033,7 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(status_path);
     const status_temp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{status_path});
     defer allocator.free(status_temp_path);
+    cleanupBackendStatusFiles(init.io, data_root);
     const control = try ControlServer.start(init.io, allocator, control_path);
     defer control.deinit();
 
@@ -1053,6 +1115,24 @@ fn run(init: std.process.Init) !void {
         std.process.exit(1);
     }
     host.writeStatus(monotonicMilliseconds());
+}
+
+fn cleanupBackendStatusFiles(io: std.Io, directory_path: []const u8) void {
+    var directory = std.Io.Dir.cwd().openDir(io, directory_path, .{ .iterate = true }) catch |err| {
+        std.log.warn("could not inspect renderer status sidecars: {s}", .{@errorName(err)});
+        return;
+    };
+    defer directory.close(io);
+    var iterator = directory.iterate();
+    while (iterator.next(io) catch |err| {
+        std.log.warn("renderer status sidecar scan stopped: {s}", .{@errorName(err)});
+        return;
+    }) |entry| {
+        if (entry.kind != .file or !std.mem.startsWith(u8, entry.name, "status.json.backend-")) continue;
+        directory.deleteFile(io, entry.name) catch |err| {
+            std.log.warn("could not remove orphan renderer status sidecar {s}: {s}", .{ entry.name, @errorName(err) });
+        };
+    }
 }
 
 const MediaAdapterPaths = struct {

@@ -428,6 +428,12 @@ async function devWidget(directory: string): Promise<void> {
   let rebuilding = false;
   let pending = false;
   let debounce: NodeJS.Timeout | undefined;
+  let staleBuild: { since: Date; firstError: string } | null = null;
+  const staleReminder = setInterval(() => {
+    if (!staleBuild) return;
+    process.stderr.write(`weaver dev OUT OF DATE since ${staleBuild.since.toISOString()}: ${staleBuild.firstError}\n`);
+  }, 10_000);
+  staleReminder.unref();
   const rebuild = async (): Promise<void> => {
     if (rebuilding) {
       pending = true;
@@ -437,16 +443,25 @@ async function devWidget(directory: string): Promise<void> {
     try {
       const next = await bundleWidget(directory);
       const configChanged = JSON.stringify(next.manifest) !== JSON.stringify(activeManifest);
-      activeManifest = next.manifest;
       if (configChanged) {
         signalHost("--signal-reload");
+        activeManifest = next.manifest;
         process.stdout.write("weaver dev restarted widget: window config changed\n");
       } else {
         await signalDevReload(directory);
+        activeManifest = next.manifest;
         process.stdout.write("weaver dev bundle ready for in-place hot swap\n");
+      }
+      if (staleBuild) {
+        process.stdout.write(`weaver dev caught up; the widget now matches disk (was out of date since ${staleBuild.since.toISOString()})\n`);
+        staleBuild = null;
       }
     } catch (error) {
       printFailure(error);
+      if (!staleBuild) {
+        staleBuild = { since: new Date(), firstError: firstFailureLine(error) };
+        process.stderr.write(`weaver dev OUT OF DATE since ${staleBuild.since.toISOString()}: ${staleBuild.firstError}; the window is still running the last good bundle\n`);
+      }
     } finally {
       rebuilding = false;
       if (pending) {
@@ -455,11 +470,36 @@ async function devWidget(directory: string): Promise<void> {
       }
     }
   };
-  const watcher = watch(join(directory, "widget.tsx"), () => {
+  const watcher = watch(directory, { recursive: true }, (_event, filename) => {
+    const changed = filename?.toString().replace(/\\/g, "/") ?? "";
+    if (changed === "dist" || changed.startsWith("dist/") ||
+        changed === ".git" || changed.startsWith(".git/") ||
+        changed === ".weaver-dev-port") return;
     clearTimeout(debounce);
     debounce = setTimeout(() => void rebuild(), 100);
   });
-  process.stdout.write(`weaver dev watching ${join(directory, "widget.tsx")}\n`);
+  process.stdout.write(`weaver dev watching source, assets, and fonts under ${directory}\n`);
+  const presentationDeadline = Date.now() + 10_000;
+  let presentationFailureReported = false;
+  const presentationWatch = setInterval(() => {
+    if (presentationFailureReported || Date.now() < presentationDeadline) return;
+    try {
+      const status = readStatus().widgets.find((widget) => widget.name === project.config.name);
+      if (status && status.backend !== "-") {
+        clearInterval(presentationWatch);
+        return;
+      }
+      presentationFailureReported = true;
+      const state = status ? `${status.state}${status.reason ? `: ${status.reason}` : ""}` : "absent from host status";
+      process.stderr.write(`weaver dev ERROR: "${project.config.name}" has not presented a frame after 10 seconds (${state}); check weaver logs ${JSON.stringify(project.config.name)}\n`);
+      clearInterval(presentationWatch);
+    } catch (error) {
+      presentationFailureReported = true;
+      process.stderr.write(`weaver dev ERROR: presentation health could not be read after 10 seconds: ${errorMessage(error)}\n`);
+      clearInterval(presentationWatch);
+    }
+  }, 1_000);
+  presentationWatch.unref();
   await new Promise<void>((resolvePromise) => {
     let stopping = false;
     const stop = (): void => {
@@ -468,6 +508,8 @@ async function devWidget(directory: string): Promise<void> {
       watcher.close();
       logFollower.stop();
       clearTimeout(debounce);
+      clearInterval(staleReminder);
+      clearInterval(presentationWatch);
       void (async () => {
         try {
           const shutdownWarnings: string[] = [];
@@ -730,7 +772,7 @@ function abandonedInstallStage(path: string, name: string): boolean {
   const staleMs = 5 * 60_000;
   let ageMs: number;
   try { ageMs = Date.now() - statSync(path).mtimeMs; }
-  catch { return false; }
+  catch { return false; /* The directory disappeared or changed owner during the cleanup sweep; a later mutation retries. */ }
   if (ageMs <= staleMs) return false;
   const pid = /^\.install-(\d+)-/.exec(name)?.[1];
   if (!pid) return true;
@@ -773,6 +815,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function firstFailureLine(error: unknown): string {
+  const details = error instanceof WeaverFailure ? error.details : [errorMessage(error)];
+  return (details[0] ?? "unknown rebuild failure").split(/\r?\n/, 1)[0];
+}
+
 async function upHost(announce: boolean): Promise<void> {
   assertHostLifecycleAvailable("up");
   assertHostBuilt();
@@ -809,8 +856,9 @@ function showStatus(json: boolean): void {
   try {
     const document = readStatus();
     process.stdout.write(`${json ? JSON.stringify(document, null, 2) : formatStatus(document)}\n`);
-  } catch {
-    throw new WeaverFailure([`weaverd has not published status yet at ${statusPath()}`]);
+    for (const warning of statusDivergenceWarnings(document)) process.stderr.write(`weaver status warning: ${warning}\n`);
+  } catch (error) {
+    throw new WeaverFailure([`weaverd status is unavailable at ${statusPath()}: ${errorMessage(error)}`]);
   }
 }
 
@@ -1005,8 +1053,58 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
 
 const nativeWidgetNodeLimit = 128;
 const nativeWidgetDepthLimit = 32;
+const nativeWidgetChildLimit = 24;
+const nativeWidgetTextByteLimit = 192;
+const nativeWidgetCanvasLimit = 8;
+const nativeWidgetImageLimit = 16;
 
-interface LoweredTreeMetrics { nodes: number; depth: number }
+interface LoweredTreeMetrics {
+  nodes: number;
+  roots: number;
+  depth: number;
+  maxChildren: number;
+  canvases: number;
+  images: number;
+  maxTextBytes: number;
+  clippedCanvas: boolean;
+  opacityCanvas: boolean;
+}
+
+function statusDivergenceWarnings(document: ReturnType<typeof readStatus>): string[] {
+  const warnings: string[] = [];
+  try {
+    const ageMs = Date.now() - statSync(statusPath()).mtimeMs;
+    if (ageMs > 5_000) {
+      warnings.push(`host status has not updated for ${Math.floor(ageMs / 1000)}s; status publication may be failing and the values above may be stale`);
+    }
+  } catch (error) {
+    warnings.push(`host status freshness could not be checked: ${errorMessage(error)}`);
+  }
+  try {
+    const registry = readRegistry();
+    const registered = new Set(registry.widgets.map((widget) => widget.name));
+    const reported = new Set(document.widgets.map((widget) => widget.name));
+    const missing = [...registered].filter((name) => !reported.has(name));
+    const extra = [...reported].filter((name) => !registered.has(name));
+    if (missing.length > 0) warnings.push(`registry widgets absent from host status: ${missing.join(", ")}; reload did not converge`);
+    if (extra.length > 0) warnings.push(`host status widgets absent from the registry: ${extra.join(", ")}; uninstall/restore did not converge`);
+  } catch (error) {
+    warnings.push(`registry/status reconciliation could not read the registry: ${errorMessage(error)}`);
+  }
+  try {
+    const path = statusPath();
+    const prefix = `${basename(path)}.backend-`;
+    const sidecars = readdirSync(dirname(path), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.startsWith(prefix));
+    const liveBackends = document.widgets.filter((widget) => widget.backend !== "-").length;
+    if (sidecars.length > liveBackends) {
+      warnings.push(`${sidecars.length - liveBackends} orphan renderer status sidecar(s) remain next to ${path}; restart weaverd to reconcile them`);
+    }
+  } catch (error) {
+    warnings.push(`renderer status sidecars could not be reconciled: ${errorMessage(error)}`);
+  }
+  return warnings;
+}
 
 function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
   type JsxRoot = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
@@ -1130,13 +1228,55 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   };
   const maximum = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
     nodes: Math.max(0, ...values.map((value) => value.nodes)),
+    roots: Math.max(0, ...values.map((value) => value.roots)),
     depth: Math.max(0, ...values.map((value) => value.depth)),
+    maxChildren: Math.max(0, ...values.map((value) => value.maxChildren)),
+    canvases: Math.max(0, ...values.map((value) => value.canvases)),
+    images: Math.max(0, ...values.map((value) => value.images)),
+    maxTextBytes: Math.max(0, ...values.map((value) => value.maxTextBytes)),
+    clippedCanvas: values.some((value) => value.clippedCanvas),
+    opacityCanvas: values.some((value) => value.opacityCanvas),
   });
-  const isStaticPrimitive = (expression: ts.Expression): boolean => {
+  const staticPrimitiveText = (expression: ts.Expression): string | null => {
     let current = expression;
     while (ts.isParenthesizedExpression(current)) current = current.expression;
-    return ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current) ||
-      (ts.isPrefixUnaryExpression(current) && ts.isNumericLiteral(current.operand));
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current)) return current.text;
+    if (ts.isPrefixUnaryExpression(current) && ts.isNumericLiteral(current.operand)) {
+      return `${current.operator === ts.SyntaxKind.MinusToken ? "-" : current.operator === ts.SyntaxKind.PlusToken ? "+" : ""}${current.operand.text}`;
+    }
+    return null;
+  };
+  const emptyMetrics = (): LoweredTreeMetrics => ({
+    nodes: 0, roots: 0, depth: 0, maxChildren: 0, canvases: 0, images: 0, maxTextBytes: 0,
+    clippedCanvas: false, opacityCanvas: false,
+  });
+  const combineSiblings = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
+    nodes: values.reduce((sum, value) => sum + value.nodes, 0),
+    roots: values.reduce((sum, value) => sum + value.roots, 0),
+    depth: Math.max(0, ...values.map((value) => value.depth)),
+    maxChildren: Math.max(0, ...values.map((value) => value.maxChildren)),
+    canvases: values.reduce((sum, value) => sum + value.canvases, 0),
+    images: values.reduce((sum, value) => sum + value.images, 0),
+    maxTextBytes: Math.max(0, ...values.map((value) => value.maxTextBytes)),
+    clippedCanvas: values.some((value) => value.clippedCanvas),
+    opacityCanvas: values.some((value) => value.opacityCanvas),
+  });
+  const canvasLayer = (node: ts.JsxElement | ts.JsxSelfClosingElement): "clip" | "opacity" | null => {
+    const { tag, attributes } = tagAndAttributes(node);
+    if (/^[A-Z]/.test(tag)) return null;
+    const sourceFile = node.getSourceFile();
+    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
+    if (classText === null) return null;
+    try {
+      const compiled = compileClass(classText);
+      if (compiled.overflowHidden === true) return "clip";
+      if (typeof compiled.opacity === "number" && compiled.opacity < 1) return "opacity";
+    } catch {
+      // The ordinary class validator reports the malformed utility.
+    }
+    return null;
   };
   const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
     const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
@@ -1145,18 +1285,17 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
         if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
           result.push(metrics(child, visiting));
         } else if (parentTag !== "text" && ts.isJsxText(child) && child.getText().trim() !== "") {
-          result.push({ nodes: 1, depth: 1 });
+          result.push({ ...emptyMetrics(), nodes: 1, roots: 1, depth: 1 });
         } else if (parentTag !== "text" && ts.isJsxExpression(child) && child.expression) {
           const roots = expressionRoots(child.expression);
           if (roots.length > 0) result.push(maximum(roots.map((root) => metrics(root, visiting))));
-          else if (isStaticPrimitive(child.expression)) result.push({ nodes: 1, depth: 1 });
+          else if (staticPrimitiveText(child.expression) !== null) result.push({ ...emptyMetrics(), nodes: 1, roots: 1, depth: 1 });
         }
       }
       return result;
     };
     if (ts.isJsxFragment(node)) {
-      const children = childMetrics(node.children, null);
-      return { nodes: children.reduce((sum, child) => sum + child.nodes, 0), depth: Math.max(0, ...children.map((child) => child.depth)) };
+      return combineSiblings(childMetrics(node.children, null));
     }
     const { tag } = tagAndAttributes(node);
     const component = componentScopes.get(node.getSourceFile())?.get(tag);
@@ -1166,10 +1305,36 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       return maximum(component.roots.map((root) => metrics(root, next)));
     }
     const children = ts.isJsxElement(node) ? childMetrics(node.children, tag) : [];
+    const combinedChildren = combineSiblings(children);
     const ownDepth = isPaintedLayout(node, tag) ? 2 : 1;
+    let textBytes = 0;
+    if (tag === "text" && ts.isJsxElement(node)) {
+      let text = "";
+      let complete = true;
+      for (const child of node.children) {
+        if (ts.isJsxText(child)) text += child.getText();
+        else if (ts.isJsxExpression(child) && child.expression) {
+          const value = staticPrimitiveText(child.expression);
+          if (value === null) complete = false;
+          else text += value;
+        } else if (!ts.isJsxExpression(child) || child.expression) {
+          complete = false;
+        }
+      }
+      if (complete) textBytes = Buffer.byteLength(text, "utf8");
+    }
+    const directChildren = combinedChildren.roots;
+    const layer = canvasLayer(node);
     return {
-      nodes: ownDepth + children.reduce((sum, child) => sum + child.nodes, 0),
-      depth: ownDepth + Math.max(0, ...children.map((child) => child.depth)),
+      nodes: ownDepth + combinedChildren.nodes,
+      roots: 1,
+      depth: ownDepth + combinedChildren.depth,
+      maxChildren: Math.max(combinedChildren.maxChildren, directChildren, ownDepth === 2 ? 1 : 0),
+      canvases: combinedChildren.canvases + (tag === "canvas" ? 1 : 0),
+      images: combinedChildren.images + (tag === "image" ? 1 : 0),
+      maxTextBytes: Math.max(combinedChildren.maxTextBytes, textBytes),
+      clippedCanvas: combinedChildren.clippedCanvas || (layer === "clip" && combinedChildren.canvases > 0),
+      opacityCanvas: combinedChildren.opacityCanvas || (layer === "opacity" && combinedChildren.canvases > 0),
     };
   };
   const exportNode = project.sourceFile.statements.find(ts.isExportAssignment);
@@ -1184,10 +1349,28 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   const evidenceNode = roots[0];
   const limitation = " The static estimate follows the exported widget through local components and one level of relative imports; runtime limits remain authoritative for dynamic collections and unresolved component output.";
   if (lowered.nodes > nativeWidgetNodeLimit) {
-    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); painted <row>/<column> elements add an inner layout node.${limitation}`));
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); node capacity exhausted: max_nodes=${nativeWidgetNodeLimit}, asked for ${lowered.nodes}, headroom=${nativeWidgetNodeLimit - lowered.nodes}. Painted <row>/<column> elements add an inner layout node.${limitation}`));
   }
   if (lowered.depth > nativeWidgetDepthLimit) {
     errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level.${limitation}`));
+  }
+  if (lowered.maxChildren > nativeWidgetChildLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetChildLimit: one authored parent lowers to ${lowered.maxChildren} direct Native children; child capacity exhausted: max_children=${nativeWidgetChildLimit}, asked for ${lowered.maxChildren}, headroom=${nativeWidgetChildLimit - lowered.maxChildren}.${limitation}`));
+  }
+  if (lowered.maxTextBytes > nativeWidgetTextByteLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetTextLimit: one static <text> value is ${lowered.maxTextBytes} UTF-8 bytes; text capacity exhausted: max_text_bytes=${nativeWidgetTextByteLimit}, asked for ${lowered.maxTextBytes}, headroom=${nativeWidgetTextByteLimit - lowered.maxTextBytes}.${limitation}`));
+  }
+  if (lowered.canvases > nativeWidgetCanvasLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetCanvasLimit: this tree contains ${lowered.canvases} canvases; canvas capacity exhausted: max_canvases=${nativeWidgetCanvasLimit}, asked for ${lowered.canvases}, headroom=${nativeWidgetCanvasLimit - lowered.canvases}.${limitation}`));
+  }
+  if (lowered.images > nativeWidgetImageLimit) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetImageLimit: this tree contains ${lowered.images} images; image registry capacity exhausted: max_images=${nativeWidgetImageLimit}, asked for ${lowered.images}, headroom=${nativeWidgetImageLimit - lowered.images}.${limitation}`));
+  }
+  if (lowered.clippedCanvas && !errors.some((error) => error.includes("CanvasNeedsUnclippedAncestors"))) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `CanvasNeedsUnclippedAncestors: a reachable <canvas> is under an overflow-hidden ancestor in the statically lowered component tree. A host GPU surface cannot participate in ancestor clipping; move the canvas outside that ancestor and apply clipping inside onFrame.${limitation}`));
+  }
+  if (lowered.opacityCanvas && !errors.some((error) => error.includes("CanvasNeedsOpaqueAncestors"))) {
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `CanvasNeedsOpaqueAncestors: a reachable <canvas> is under an opacity ancestor in the statically lowered component tree. A host GPU surface cannot be placed behind an opacity layer; move the canvas outside that ancestor and apply opacity inside onFrame.${limitation}`));
   }
 }
 
@@ -1323,7 +1506,7 @@ function validateSource(project: SourceProject): string[] {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (ts.isJsxElement(current) && current.openingElement !== node) {
-        const tag = current.openingElement.tagName.getText(project.sourceFile);
+        const tag = current.openingElement.tagName.getText(current.getSourceFile());
         if (tag === "button" || tag === "slider") return "pressable";
         if (/^[A-Z]/.test(tag)) return "component-boundary";
       }
@@ -1339,27 +1522,53 @@ function validateSource(project: SourceProject): string[] {
     }
     return "none";
   };
+  const canvasAncestorProblem = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): { tag: string; kind: "clip" | "opacity" } | null => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isJsxElement(current) && current.openingElement !== node) {
+        const sourceFile = current.getSourceFile();
+        const tag = current.openingElement.tagName.getText(sourceFile);
+        if (/^[A-Z]/.test(tag)) return null;
+        const attribute = current.openingElement.attributes.properties.find((candidate): candidate is ts.JsxAttribute =>
+          ts.isJsxAttribute(candidate) && candidate.name.getText(sourceFile) === "class");
+        const classText = attribute ? jsxStringValue(attribute.initializer) : "";
+        if (classText !== null) {
+          try {
+            const compiled = compileClass(classText);
+            if (compiled.overflowHidden === true) return { tag, kind: "clip" };
+            if (typeof compiled.opacity === "number" && compiled.opacity < 1) return { tag, kind: "opacity" };
+          } catch {
+            // The ordinary class validator reports the malformed utility.
+          }
+        }
+      }
+      if (ts.isFunctionLike(current)) return null;
+      current = current.parent;
+    }
+    return null;
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      const tag = node.tagName.getText(project.sourceFile);
-      const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "class");
+      const sourceFile = node.getSourceFile();
+      const tag = node.tagName.getText(sourceFile);
+      const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
         const classText = jsxStringValue(classAttribute.initializer);
-        if (classText === null) errors.push(locationMessage(project.sourceFile, classAttribute, "class must be a literal string so weaver check can validate every utility"));
+        if (classText === null) errors.push(locationMessage(sourceFile, classAttribute, "class must be a literal string so weaver check can validate every utility"));
         else {
           try {
             const compiled = compileClass(classText);
             const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
             if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
               errors.push(locationMessage(
-                project.sourceFile,
+                sourceFile,
                 classAttribute,
                 `NearestPressableAncestor: state variants on non-pressable <${tag}> require a nearest <button> or <slider> ancestor. Fix: move the utility to the pressable node or place this node inside one.`,
               ));
             }
             if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
-              errors.push(locationMessage(project.sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
+              errors.push(locationMessage(sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
             }
             if (tag === "canvas") {
               const sizes = compiled as Record<string, unknown>;
@@ -1368,7 +1577,7 @@ function validateSource(project: SourceProject): string[] {
                 if (percent || sizes[axis] === undefined) {
                   const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
                   errors.push(locationMessage(
-                    project.sourceFile,
+                    sourceFile,
                     classAttribute,
                     `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
                   ));
@@ -1376,24 +1585,41 @@ function validateSource(project: SourceProject): string[] {
               }
             }
           }
-          catch (error) { errors.push(locationMessage(project.sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
+          catch (error) { errors.push(locationMessage(sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
         }
       }
       if (tag === "canvas" && !classAttribute) {
-        errors.push(locationMessage(project.sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
+        errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
+      }
+      if (tag === "canvas") {
+        const problem = canvasAncestorProblem(node);
+        if (problem) {
+          const name = problem.kind === "clip" ? "CanvasNeedsUnclippedAncestors" : "CanvasNeedsOpaqueAncestors";
+          const cause = problem.kind === "clip"
+            ? `overflow-hidden <${problem.tag}> ancestor`
+            : `opacity <${problem.tag}> ancestor`;
+          errors.push(locationMessage(
+            sourceFile,
+            node,
+            `${name}: <canvas> is under an ${cause}. A host GPU surface cannot participate in ancestor clipping or opacity layers, so the canvas would be denied and the widget could blank. Fix: move the canvas outside that ancestor and apply clipping/opacity inside onFrame.`,
+          ));
+        }
       }
       if (tag === "image") {
-        const sourceAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(project.sourceFile) === "src");
+        const sourceAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "src");
         const source = sourceAttribute ? jsxStringValue(sourceAttribute.initializer) : null;
         if (source !== null && (/^[a-z][a-z0-9+.-]*:/i.test(source) || source.startsWith("//"))) {
-          errors.push(locationMessage(project.sourceFile, sourceAttribute ?? node, "RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path"));
+          errors.push(locationMessage(sourceFile, sourceAttribute ?? node, "RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path"));
+        } else if (source !== null) {
+          const problem = validateLocalImageAsset(project.directory, source);
+          if (problem) errors.push(locationMessage(sourceFile, sourceAttribute ?? node, problem));
         }
       }
       if (tag === "icon") {
         try {
-          resolveIconSpec(project.sourceFile, node.attributes);
+          resolveIconSpec(sourceFile, node.attributes);
         } catch (error) {
-          errors.push(locationMessage(project.sourceFile, node, error instanceof Error ? error.message : String(error)));
+          errors.push(locationMessage(sourceFile, node, error instanceof Error ? error.message : String(error)));
         }
       }
     }
@@ -1405,19 +1631,95 @@ function validateSource(project: SourceProject): string[] {
       const argument = node.arguments[0];
       if (argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) {
         const host = originHost(argument.text);
-        if (host === null) errors.push(locationMessage(project.sourceFile, argument, "wfetch requires an https:// URL"));
-        else if (!originDeclared(project.config.origins ?? [], host)) errors.push(locationMessage(project.sourceFile, argument, originNotDeclaredMessage(host)));
+        if (host === null) errors.push(locationMessage(node.getSourceFile(), argument, "wfetch requires an https:// URL"));
+        else if (!originDeclared(project.config.origins ?? [], host)) errors.push(locationMessage(node.getSourceFile(), argument, originNotDeclaredMessage(host)));
       }
     }
     ts.forEachChild(node, visit);
   };
-  visit(project.sourceFile);
+  for (const sourceFile of project.sourceFiles) visit(sourceFile);
   for (const provider of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) errors.push(`useProvider("${provider}") requires subscribe: ["${provider}"] in the widget config`);
   }
   validateMediaTransportCapability(project, errors);
   validateLoweredTreeBudgets(project, errors);
   return errors;
+}
+
+const nativeImagePixelByteLimit = 256 * 1024;
+const maxImageStreamBytes = 1024 * 1024;
+
+function imageStreamBudgetError(source: string, asked: number): string {
+  return `ImageStreamTooLarge: ${JSON.stringify(source)} is ${asked} encoded bytes; max_image_stream_bytes=${maxImageStreamBytes}, asked for ${asked}, headroom=${maxImageStreamBytes - asked}`;
+}
+
+function validateLocalImageAsset(directory: string, source: string): string | null {
+  if (!source || isAbsolute(source) || source.split(/[\\/]/).includes("..")) {
+    return `InvalidImageSource: ${JSON.stringify(source)} is not a portable widget-relative asset path`;
+  }
+  const relativeSource = source.startsWith("./") || source.startsWith(".\\") ? source.slice(2) : source;
+  const path = resolve(directory, relativeSource);
+  if (!pathsEqual(path, directory) && !pathInside(directory, path)) {
+    return `WidgetAssetEscapesRoot: ${JSON.stringify(source)} resolves outside ${directory}`;
+  }
+  let bytes: Buffer;
+  try {
+    const canonical = realpathSync(path);
+    const canonicalRoot = realpathSync(directory);
+    if (!pathsEqual(canonical, canonicalRoot) && !pathInside(canonicalRoot, canonical)) {
+      return `WidgetAssetEscapesRoot: ${JSON.stringify(source)} resolves outside ${directory}`;
+    }
+    const encodedSize = statSync(canonical).size;
+    if (encodedSize > maxImageStreamBytes) return imageStreamBudgetError(source, encodedSize);
+    bytes = readFileSync(canonical);
+  } catch (error) {
+    return `ImageAssetUnreadable: ${JSON.stringify(source)} could not be read: ${errorMessage(error)}`;
+  }
+  // Keep the post-read guard for a file that changes between stat and read.
+  if (bytes.length > maxImageStreamBytes) return imageStreamBudgetError(source, bytes.length);
+  const dimensions = encodedImageDimensions(bytes);
+  if (!dimensions) {
+    return `ImageDecodeUnsupported: ${JSON.stringify(source)} has no readable PNG/JPEG/GIF/BMP dimensions; the runtime would fail this image only after launch`;
+  }
+  const decodedBytes = dimensions.width * dimensions.height * 4;
+  if (!Number.isSafeInteger(decodedBytes) || decodedBytes > nativeImagePixelByteLimit) {
+    return `ImageTooLarge: ${JSON.stringify(source)} is ${dimensions.width}x${dimensions.height}; decoded RGBA is ${dimensions.width} * ${dimensions.height} * 4 = ${decodedBytes} bytes, exceeding max_image_rgba_bytes=${nativeImagePixelByteLimit} by ${decodedBytes - nativeImagePixelByteLimit} bytes. Resize it to at most 256x256 (or any dimensions whose pixel product is <= 65,536).`;
+  }
+  return null;
+}
+
+function encodedImageDimensions(bytes: Buffer): { width: number; height: number } | null {
+  if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return validImageDimensions(bytes.readUInt32BE(16), bytes.readUInt32BE(20));
+  }
+  if (bytes.length >= 10 && (bytes.toString("ascii", 0, 6) === "GIF87a" || bytes.toString("ascii", 0, 6) === "GIF89a")) {
+    return validImageDimensions(bytes.readUInt16LE(6), bytes.readUInt16LE(8));
+  }
+  if (bytes.length >= 26 && bytes.toString("ascii", 0, 2) === "BM") {
+    return validImageDimensions(Math.abs(bytes.readInt32LE(18)), Math.abs(bytes.readInt32LE(22)));
+  }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 3 < bytes.length) {
+      while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1;
+      while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+      if (offset >= bytes.length) break;
+      const marker = bytes[offset++];
+      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (offset + 2 > bytes.length) break;
+      const length = bytes.readUInt16BE(offset);
+      if (length < 2 || offset + length > bytes.length) break;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker) && length >= 7) {
+        return validImageDimensions(bytes.readUInt16BE(offset + 5), bytes.readUInt16BE(offset + 3));
+      }
+      offset += length;
+    }
+  }
+  return null;
+}
+
+function validImageDimensions(width: number, height: number): { width: number; height: number } | null {
+  return Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? { width, height } : null;
 }
 
 function discoverWidgetFonts(directory: string): RuntimeFont[] {

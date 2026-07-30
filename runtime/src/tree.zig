@@ -212,8 +212,15 @@ pub const Tree = struct {
     next_node_lifetime: u64 = 1,
     batch_depth: u8 = 0,
     batch_changed: bool = false,
+    transaction_snapshot: ?*Tree = null,
+    snapshot_storage: ?*Tree = null,
 
     pub fn deinit(self: *Tree) void {
+        self.destroySnapshots();
+        self.deinitNodes();
+    }
+
+    fn deinitNodes(self: *Tree) void {
         const allocator = self.allocator;
         for (&self.nodes) |*entry| {
             if (entry.icon_path.len > 0) allocator.free(entry.icon_path);
@@ -221,16 +228,194 @@ pub const Tree = struct {
         }
     }
 
-    pub fn beginBatch(self: *Tree) void {
+    pub fn beginBatch(self: *Tree) Error!void {
+        if (self.batch_depth == 0) {
+            const snapshot = if (self.snapshot_storage) |storage| reuse: {
+                self.snapshot_storage = null;
+                break :reuse storage;
+            } else try self.allocator.create(Tree);
+            errdefer {
+                snapshot.deinitNodes();
+                snapshot.* = .{ .allocator = self.allocator };
+                self.snapshot_storage = snapshot;
+            }
+            try self.cloneInto(snapshot);
+            self.transaction_snapshot = snapshot;
+        }
         self.batch_depth +|= 1;
     }
 
-    pub fn endBatch(self: *Tree) void {
-        if (self.batch_depth == 0) return;
+    /// Close one authored batch level. The outermost close is deliberately
+    /// split from commit so bridge validation can inspect only the complete
+    /// generation and still roll it back if validation fails.
+    pub fn prepareEndBatch(self: *Tree) bool {
+        if (self.batch_depth == 0) return false;
         self.batch_depth -= 1;
-        if (self.batch_depth == 0 and self.batch_changed) {
+        return self.batch_depth == 0;
+    }
+
+    pub fn commitBatch(self: *Tree) void {
+        if (self.batch_depth != 0) return;
+        if (self.batch_changed) {
             self.batch_changed = false;
             self.generation +%= 1;
+        }
+        self.recycleSnapshot();
+    }
+
+    pub fn endBatch(self: *Tree) void {
+        if (!self.prepareEndBatch()) return;
+        self.commitBatch();
+    }
+
+    /// Restore the exact tree that was visible before the outermost authored
+    /// batch. A JavaScript exception may occur after arbitrary create/remove/
+    /// prop operations; copying the bounded tree is deliberately boring and
+    /// makes the renderer's contract absolute: a failed generation is never
+    /// observable.
+    pub fn abortBatch(self: *Tree) void {
+        const snapshot = self.transaction_snapshot orelse {
+            self.batch_depth = 0;
+            self.batch_changed = false;
+            return;
+        };
+        const allocator = self.allocator;
+        self.transaction_snapshot = null;
+        self.deinitNodes();
+        self.* = snapshot.*;
+        self.transaction_snapshot = null;
+        self.snapshot_storage = snapshot;
+        rebaseCanvasPointSlices(snapshot, self);
+        snapshot.* = .{ .allocator = allocator };
+    }
+
+    pub fn moveFrom(self: *Tree, source: *Tree) void {
+        self.deinit();
+        const source_allocator = source.allocator;
+        self.* = source.*;
+        rebaseCanvasPointSlices(source, self);
+        source.* = .{ .allocator = source_allocator };
+    }
+
+    pub fn nodeCount(self: *const Tree) usize {
+        var count: usize = 0;
+        for (&self.nodes) |*node_value| if (node_value.alive) {
+            count += 1;
+        };
+        return count;
+    }
+
+    pub const CanvasAncestorViolation = struct {
+        canvas_id: NodeId,
+        ancestor_id: NodeId,
+        reason: enum { clip, opacity },
+    };
+
+    pub fn canvasAncestorViolation(self: *const Tree) ?CanvasAncestorViolation {
+        for (&self.nodes, 0..) |*node_value, index| {
+            if (!node_value.alive or node_value.kind != .canvas) continue;
+            const canvas_id: NodeId = @intCast(index + 1);
+            var ancestor_id = node_value.parent;
+            while (ancestor_id) |id| {
+                const ancestor = self.nodeConst(id) catch break;
+                if (ancestor.overflow_hidden) return .{ .canvas_id = canvas_id, .ancestor_id = id, .reason = .clip };
+                if (ancestor.opacity < 1) return .{ .canvas_id = canvas_id, .ancestor_id = id, .reason = .opacity };
+                ancestor_id = ancestor.parent;
+            }
+        }
+        return null;
+    }
+
+    /// Replace an invalid authored generation with a deterministic retained
+    /// error tree. This path has no fallible allocation, so even an OOM or
+    /// exhausted authored budget cannot expose an uninitialized GPU surface.
+    pub fn showError(self: *Tree, message: []const u8) void {
+        self.recycleSnapshot();
+        self.deinitNodes();
+        const allocator = self.allocator;
+        const snapshot_storage = self.snapshot_storage;
+        const next_generation = self.generation +% 1;
+        self.* = .{
+            .allocator = allocator,
+            .generation = next_generation,
+            .snapshot_storage = snapshot_storage,
+        };
+
+        const root_id: NodeId = 1;
+        const text_id: NodeId = 2;
+        self.nodes[0] = .{
+            .alive = true,
+            .lifetime = self.next_node_lifetime,
+            .kind = .column,
+            .children = block: {
+                var children: [max_children]NodeId = @splat(0);
+                children[0] = text_id;
+                break :block children;
+            },
+            .child_count = 1,
+            .padding = 12,
+            .gap = 6,
+            .grow = 1,
+            .background = native_sdk.canvas.Color.rgba8(52, 12, 18, 255),
+        };
+        self.next_node_lifetime +%= 1;
+        self.nodes[1] = .{
+            .alive = true,
+            .lifetime = self.next_node_lifetime,
+            .kind = .text,
+            .parent = root_id,
+            .text_color = native_sdk.canvas.Color.rgba8(255, 226, 230, 255),
+            .font_scale = 0.86,
+            .font_weight = .semibold,
+            .line_height = 1.25,
+            .line_clamp = 6,
+        };
+        self.next_node_lifetime +%= 1;
+        const safe_length = validUtf8Prefix(message, @min(message.len, max_text_bytes));
+        @memcpy(self.nodes[1].text[0..safe_length], message[0..safe_length]);
+        self.nodes[1].text_len = safe_length;
+        self.root = root_id;
+    }
+
+    fn cloneInto(self: *const Tree, destination: *Tree) Error!void {
+        destination.* = self.*;
+        destination.transaction_snapshot = null;
+        destination.snapshot_storage = null;
+        for (&destination.nodes) |*node_value| node_value.icon_path = &.{};
+        errdefer destination.deinitNodes();
+        for (self.nodes, 0..) |node_value, index| {
+            if (node_value.icon_path.len > 0) {
+                destination.nodes[index].icon_path = try self.allocator.dupe(u8, node_value.icon_path);
+            }
+        }
+        rebaseCanvasPointSlices(self, destination);
+    }
+
+    fn recycleSnapshot(self: *Tree) void {
+        const snapshot = self.transaction_snapshot orelse return;
+        self.transaction_snapshot = null;
+        snapshot.transaction_snapshot = null;
+        snapshot.snapshot_storage = null;
+        snapshot.deinitNodes();
+        snapshot.* = .{ .allocator = self.allocator };
+        std.debug.assert(self.snapshot_storage == null);
+        self.snapshot_storage = snapshot;
+    }
+
+    fn destroySnapshots(self: *Tree) void {
+        if (self.transaction_snapshot) |snapshot| {
+            self.transaction_snapshot = null;
+            snapshot.transaction_snapshot = null;
+            snapshot.snapshot_storage = null;
+            snapshot.deinitNodes();
+            self.allocator.destroy(snapshot);
+        }
+        if (self.snapshot_storage) |snapshot| {
+            self.snapshot_storage = null;
+            snapshot.transaction_snapshot = null;
+            snapshot.snapshot_storage = null;
+            snapshot.deinitNodes();
+            self.allocator.destroy(snapshot);
         }
     }
 
@@ -841,6 +1026,28 @@ pub const Tree = struct {
     }
 };
 
+fn rebaseCanvasPointSlices(source: *const Tree, destination: *Tree) void {
+    for (&destination.canvases, 0..) |*canvas, canvas_index| {
+        const source_canvas = &source.canvases[canvas_index];
+        for (canvas.commands[0..canvas.command_count]) |*command| {
+            switch (command.*) {
+                .polyline => |polyline| {
+                    const byte_offset = @intFromPtr(polyline.points.ptr) - @intFromPtr(&source_canvas.points);
+                    const point_offset = byte_offset / @sizeOf(native_sdk.geometry.PointF);
+                    command.polyline.points = canvas.points[point_offset .. point_offset + polyline.points.len];
+                },
+                else => {},
+            }
+        }
+    }
+}
+
+fn validUtf8Prefix(value: []const u8, maximum: usize) usize {
+    var length = maximum;
+    while (length > 0 and !std.unicode.utf8ValidateSlice(value[0..length])) : (length -= 1) {}
+    return length;
+}
+
 test "node lifetime changes when a removed image id is reused" {
     var tree: Tree = .{};
     const first = try tree.createNode(.image);
@@ -939,6 +1146,114 @@ test "tree owns a bounded hierarchy" {
     try std.testing.expectError(error.Cycle, tree.appendChild(label, root));
     try tree.removeNode(label);
     try std.testing.expectError(error.InvalidNode, tree.node(label));
+}
+
+test "aborting a render batch restores the exact committed tree" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const root = try tree.createNode(.column);
+    const label = try tree.createNode(.text);
+    const icon = try tree.createNode(.icon);
+    const canvas = try tree.createNode(.canvas);
+    try tree.setText(label, "committed");
+    try tree.setIconPath(icon, "M 0 0 L 1 1");
+    try tree.setCanvasCommands(canvas, &.{ 5, 1, 0xffffffff, 2, 1, 2, 3, 4 });
+    try tree.appendChild(root, label);
+    try tree.appendChild(root, icon);
+    try tree.appendChild(root, canvas);
+    try tree.setRoot(root);
+    const committed_generation = tree.generation;
+
+    try tree.beginBatch();
+    try tree.setText(label, "partial");
+    try tree.setIconPath(icon, "M 20 20 L 30 30");
+    try tree.setCanvasCommands(canvas, &.{ 5, 2, 0xff0000ff, 3, 10, 11, 12, 13, 14, 15 });
+    const partial = try tree.createNode(.panel);
+    try tree.appendChild(root, partial);
+    tree.abortBatch();
+
+    try std.testing.expectEqual(committed_generation, tree.generation);
+    try std.testing.expectEqual(@as(usize, 4), tree.nodeCount());
+    try std.testing.expectEqualStrings("committed", (try tree.nodeConst(label)).textSlice());
+    try std.testing.expectEqualStrings("M 0 0 L 1 1", (try tree.nodeConst(icon)).iconPathSlice());
+    try std.testing.expectError(error.InvalidNode, tree.nodeConst(partial));
+    const restored_canvas = try tree.canvasStateConst(canvas);
+    try std.testing.expectEqual(@as(usize, 2), restored_canvas.commands[0].polyline.points.len);
+    try std.testing.expectEqual(@as(f32, 1), restored_canvas.commands[0].polyline.points[0].x);
+    try std.testing.expectEqual(@as(f32, 4), restored_canvas.commands[0].polyline.points[1].y);
+}
+
+test "a committed render batch advances one generation" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const root = try tree.createNode(.column);
+    try tree.setRoot(root);
+    const before = tree.generation;
+    try tree.beginBatch();
+    const label = try tree.createNode(.text);
+    try tree.setText(label, "committed");
+    try tree.appendChild(root, label);
+    tree.endBatch();
+    try std.testing.expectEqual(before +% 1, tree.generation);
+    try std.testing.expectEqualStrings("committed", (try tree.nodeConst(label)).textSlice());
+}
+
+test "render transactions reuse snapshot storage and validate only the outer close" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const root = try tree.createNode(.column);
+    try tree.setRoot(root);
+
+    try tree.beginBatch();
+    try tree.beginBatch();
+    const canvas = try tree.createNode(.canvas);
+    try tree.setOverflowHidden(root, true);
+    try tree.appendChild(root, canvas);
+    try std.testing.expect(!tree.prepareEndBatch());
+    try tree.setOverflowHidden(root, false);
+    try std.testing.expect(tree.prepareEndBatch());
+    try std.testing.expect(tree.canvasAncestorViolation() == null);
+    tree.commitBatch();
+
+    const storage = tree.snapshot_storage.?;
+    try tree.beginBatch();
+    try std.testing.expect(tree.transaction_snapshot.? == storage);
+    tree.abortBatch();
+    try std.testing.expect(tree.snapshot_storage.? == storage);
+}
+
+test "error surface is deterministic and replaces authored content" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    _ = try tree.createNode(.canvas);
+    tree.showError("render failed\nnode capacity exhausted: max_nodes=128, asked for 129");
+    try std.testing.expectEqual(@as(usize, 2), tree.nodeCount());
+    try std.testing.expectEqual(@as(NodeId, 1), tree.root.?);
+    try std.testing.expectEqual(Kind.column, (try tree.nodeConst(1)).kind);
+    try std.testing.expectEqual(Kind.text, (try tree.nodeConst(2)).kind);
+    try std.testing.expectEqualStrings(
+        "render failed\nnode capacity exhausted: max_nodes=128, asked for 129",
+        (try tree.nodeConst(2)).textSlice(),
+    );
+}
+
+test "canvas ancestor violations name clipping and opacity separately" {
+    var tree: Tree = .{};
+    const root = try tree.createNode(.column);
+    const opacity = try tree.createNode(.panel);
+    const canvas = try tree.createNode(.canvas);
+    try tree.setOverflowHidden(root, true);
+    try tree.appendChild(root, opacity);
+    try tree.appendChild(opacity, canvas);
+    const clipped = tree.canvasAncestorViolation().?;
+    try std.testing.expectEqual(canvas, clipped.canvas_id);
+    try std.testing.expectEqual(root, clipped.ancestor_id);
+    try std.testing.expectEqual(.clip, clipped.reason);
+    try tree.setOverflowHidden(root, false);
+    try tree.setNumberProp(opacity, "opacity", 0.5);
+    const faded = tree.canvasAncestorViolation().?;
+    try std.testing.expectEqual(opacity, faded.ancestor_id);
+    try std.testing.expectEqual(.opacity, faded.reason);
 }
 
 test "interaction style storage stays fixed and bounded" {

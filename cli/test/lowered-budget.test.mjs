@@ -90,7 +90,8 @@ export default widget({ name: "Branch Budget", size: [320, 200] }, () => <Branch
 });
 
 test("check does not sum mutually exclusive JSX return branches", () => {
-  const branch = () => `<column>${Array.from({ length: 70 }, () => "<row />").join("")}</column>`;
+  const group = () => `<column>${Array.from({ length: 20 }, () => "<row />").join("")}</column>`;
+  const branch = () => `<column>${Array.from({ length: 4 }, group).join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 function Branch({ first }: { first: boolean }) {
   if (first) return (${branch()});
@@ -102,6 +103,44 @@ export default widget({ name: "Branch Maximum", size: [320, 200] }, () => <Branc
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 0, checked.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check names the direct-child budget and authored ask", () => {
+  const children = Array.from({ length: 25 }, () => "<row />").join("");
+  const { root, widget } = fixture(source(`<column>${children}</column>`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetChildLimit/);
+    assert.match(checked.stderr, /max_children=24, asked for 25, headroom=-1/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check names the static text byte budget and authored ask", () => {
+  const { root, widget } = fixture(source(`<text>${"x".repeat(193)}</text>`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetTextLimit/);
+    assert.match(checked.stderr, /max_text_bytes=192, asked for 193, headroom=-1/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check names the canvas budget and authored ask", () => {
+  const canvases = Array.from({ length: 9 }, () => '<canvas class="w-[10px] h-[10px]" fps={0} onFrame={() => {}} />').join("");
+  const { root, widget } = fixture(source(`<column>${canvases}</column>`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetCanvasLimit/);
+    assert.match(checked.stderr, /max_canvases=8, asked for 9, headroom=-1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

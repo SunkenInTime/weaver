@@ -608,6 +608,7 @@ function applyStateUtility(output: CompileOutput, state: "hover" | "pressed", ut
     try {
       applyUtility(variant, utility);
     } catch {
+      // Replace the lower-level utility parse error with the authored state variant and its supported forms.
       throw unsupportedStateUtility(authored, state);
     }
     const keys = Object.keys(variant) as (keyof CompileOutput)[];
@@ -640,6 +641,7 @@ function applyStateUtility(output: CompileOutput, state: "hover" | "pressed", ut
   try {
     applyUtility(variant, utility);
   } catch {
+    // Replace the lower-level utility parse error with the authored state variant and its supported forms.
     throw unsupportedStateUtility(authored, state);
   }
   const keys = Object.keys(variant) as (keyof CompileOutput)[];
