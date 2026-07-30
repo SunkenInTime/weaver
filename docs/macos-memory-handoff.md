@@ -235,6 +235,41 @@ single-digit MB per widget); widget processes stay flat. Then hold the
 flat, not drifting. Super-linear host growth or upward drift is a
 stop-and-report finding per the falsification list above.
 
+#### Phase 1 kickoff calibration (2026-07-30, after the wall was named)
+
+Approved to run on `Mac15,6` (the M3 Pro) — the machine where the
+submission arena exists, so the gates have teeth; the M2 Air is the
+post-pass cross-check, not the spike machine. Read
+`docs/gpu-ledger-wall-brief.md` (recorded results) and
+`docs/gpu-ledger-session-2026-07-30.md` before starting; the wall's name
+changes how this phase is judged:
+
+- **Recalibrated gate:** the original "widget lands in the 20s-30s" was
+  written against Air content costs. The success criterion here is
+  categorical, not a bare total: the widget process's graphics ledger
+  (`vmmap` "owned unmapped graphics" / `ledger_tag_graphics_footprint`)
+  stays at ~0 — the ~95 MB arena must not appear in any widget process —
+  and the widget total is judged as myclock content cost without the
+  arena. The host pays the arena once; that is by design, not a failure.
+- **The widget side must submit no Metal at all.** The blueprint is the
+  probe's IOSurface-contents-on-plain-CALayer row (~10 MB at 60 Hz content
+  updates). Probe sources: `.zig-cache/macos-memory/gpu-ledger-wall/`.
+  Any Metal submission from the widget process at >=1 Hz cadence recommits
+  the arena and fails the phase, whatever the total reads.
+- **Do not mix in event-driven presenting.** Killing the unconditional
+  60 Hz pump is separately approved, Windows-proven work — but it is not
+  the memory fix (1 Hz still holds the arena) and bundling it into the
+  spike muddies the receipt. The host may keep the dumb 60 Hz loop for
+  this phase.
+- **Expected host shape, from the N-layer probe:** ~95 MB arena plus
+  ~2.4 MB per additional presenting layer — and the host can render
+  widget frames to IOSurfaces offscreen, so N widgets need not mean N
+  presenting layers. The scaling check validates per-widget host cost and
+  the 30-minute drift, which the probes did not cover.
+- Stale-PID discipline applies (this machine had seven stale
+  weaver-widget processes at the last session's start): PID start time >
+  build finish time, every measurement.
+
 ### Phase 2 — build the winning implementation as reviewed slices
 
 Only if Phase 1's gate confirms an obviously winning design (if it does
