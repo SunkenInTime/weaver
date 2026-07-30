@@ -330,11 +330,11 @@ fn reportError(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.J
     const bridge_state = state(js);
     bridge_state.render_failed = true;
 
+    const visible_scope = scope.bytes[0..@min(scope.bytes.len, max_visible_error_scope_bytes)];
     const log_details = details.bytes[0..@min(details.bytes.len, max_logged_error_detail_bytes)];
-    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ scope.bytes, log_details });
+    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ visible_scope, log_details });
 
     var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
-    const visible_scope = scope.bytes[0..@min(scope.bytes.len, max_visible_error_scope_bytes)];
     const first_line_length = std.mem.indexOfScalar(u8, details.bytes, '\n') orelse details.bytes.len;
     const first_line = details.bytes[0..@min(first_line_length, max_visible_error_line_bytes)];
     const visible = std.fmt.bufPrint(
