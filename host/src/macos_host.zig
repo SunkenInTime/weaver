@@ -612,8 +612,30 @@ const Host = struct {
 
     fn stopRenderHost(self: *Host) void {
         const pid = self.render_host_process orelse return;
-        self.removeChildMarker(pid);
+        // Same escalation as widget teardown: the marker is removed only
+        // after the process is actually dead and reaped — a TERM-ignoring
+        // host must never outlive its recovery marker, or the next weaverd
+        // cannot find the orphan.
         posix.kill(pid, .TERM) catch {};
+        var status: c_int = 0;
+        const deadline = monotonicMilliseconds() + 1500;
+        var dead = false;
+        while (monotonicMilliseconds() < deadline) {
+            const result = posix.system.waitpid(pid, &status, posix.W.NOHANG);
+            if (posix.errno(result) == .CHILD or (posix.errno(result) == .SUCCESS and result != 0)) {
+                dead = true;
+                break;
+            }
+            std.Io.sleep(self.io, .fromMilliseconds(20), .awake) catch break;
+        }
+        if (!dead) {
+            posix.kill(pid, .KILL) catch {};
+            while (true) {
+                const result = posix.system.waitpid(pid, &status, 0);
+                if (posix.errno(result) != .INTR) break;
+            }
+        }
+        self.removeChildMarker(pid);
         self.render_host_process = null;
     }
 

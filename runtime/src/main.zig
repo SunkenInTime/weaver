@@ -1203,7 +1203,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
-        std.debug.print("usage: weaver-widget [--dev | --render-host <bootstrap-name>] <widget-directory>\n", .{});
+        std.debug.print("usage: weaver-widget [--dev] <widget-directory> | weaver-widget --render-host <bootstrap-name>\n", .{});
         return error.InvalidArguments;
     }
     const directory = args[if (dev) 2 else 1];
