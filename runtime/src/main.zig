@@ -1189,9 +1189,26 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
+    // Shared render host mode: this process becomes the one Metal-owning
+    // renderer every macOS widget talks to (weaverd spawns and supervises
+    // it; docs/macos-memory-handoff.md carries the receipts). It never
+    // loads a widget bundle.
+    if (builtin.os.tag == .macos and args.len == 3 and std.mem.eql(u8, args[1], "--render-host")) {
+        const seam = struct {
+            extern fn native_sdk_appkit_render_host_run(name: [*:0]const u8) c_int;
+        };
+        const name_z = try allocator.dupeZ(u8, args[2]);
+        if (seam.native_sdk_appkit_render_host_run(name_z.ptr) != 0) return error.RenderHostStartFailed;
+        return;
+    }
     const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
-        std.debug.print("usage: weaver-widget [--dev] <widget-directory>\n", .{});
+        // The render-host form is parsed only on macOS; advertise it only
+        // where it is accepted.
+        std.debug.print(if (builtin.os.tag == .macos)
+            "usage: weaver-widget [--dev] <widget-directory> | weaver-widget --render-host <bootstrap-name>\n"
+        else
+            "usage: weaver-widget [--dev] <widget-directory>\n", .{});
         return error.InvalidArguments;
     }
     const directory = args[if (dev) 2 else 1];
