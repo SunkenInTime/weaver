@@ -8,6 +8,11 @@ pub fn build(b: *std.Build) void {
     }), .{
         .name = "weaver-widget",
         .widget_profile = true,
+        // One runtime event per 30 Hz Canvas completion otherwise opens,
+        // stats, appends, and closes native-sdk.jsonl on every frame. Widget
+        // diagnostics live in the dedicated per-widget log; explicit
+        // profiling builds can still opt back in with -Dtrace=events|all.
+        .trace_default = .off,
     });
     const weaver_options = b.addOptions();
     weaver_options.addOption(bool, "automation_seam", automation_seam);

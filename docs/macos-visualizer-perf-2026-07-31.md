@@ -55,7 +55,30 @@ Raw total-CPU samples:
 - full rebuild: `5.868174, 7.737061, 6.794842, 6.864278, 4.869452, 6.811353, 5.816060, 6.839024, 6.832127, 5.822501`
 - retained update: `2.932559, 3.889978, 3.885490, 3.904691, 3.888527, 2.906125, 3.872326, 3.881980, 3.890509, 2.918751`
 
+## Widget trace default
+
+After the retained-update run, the same treatment was rebuilt
+with `-Dtrace=off`. The ordinary Native SDK `events` mode writes every runtime
+event to `native-sdk.jsonl`; for a Canvas Widget that means an open/stat/
+append/close cycle at every completion frame. Weaver already has a dedicated
+per-widget diagnostic log, and explicit profiling builds retain
+`-Dtrace=events|runtime|all`, so the production Widget default now omits this
+continuous event journal.
+
+| Variant | Mean CPU | Per-process CPU: host / widget / widget | WindowServer | Frames | Physical footprint | RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| Retained update, event trace | 3.597% | 0.778% / 1.458% / 1.361% | 2.431% | 264 | 43,875,553.6 B | 222,919,065.6 B |
+| Retained update, trace off | 2.818% | 0.875% / 0.972% / 0.972% | 2.430% | 268 | 44,042,716.0 B | 223,266,406.4 B |
+
+Disabling the continuous event journal reduced total CPU by **21.7%** and the
+two Widget processes' combined CPU by **31.0%**, while the treatment delivered
+four more frames. Memory differences at this size are run noise, not a claim.
+
+Raw trace-off total-CPU samples:
+
+- `2.900773, 2.935771, 1.941347, 2.905832, 2.919207, 2.927449, 2.907781, 2.920701, 2.916573, 2.904058`
+
 Do not compare the absolute CPU values between the two sections: the first
-pair ran while WindowServer was consuming about 43% of a core and the second
-while it consumed about 2%. The within-section adjacent A/B comparisons are
-the receipts.
+pair ran while WindowServer was consuming about 43% of a core and the later
+runs while it consumed about 2%. The within-section adjacent A/B comparisons
+are the receipts.
