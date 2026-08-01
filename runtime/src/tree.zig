@@ -239,8 +239,10 @@ pub const CanvasState = struct {
 };
 
 /// JS mutates this tree; the Native SDK view is a pure derivation of it.
-/// `generation` advances only for an effective mutation, which gives the app
-/// loop one cheap batch boundary for future no-op timer callbacks.
+/// `generation` advances only for an effective retained-tree mutation.
+/// Immediate canvas pixels have their own `canvas_generation`, so a draw-only
+/// frame does not trigger unrelated authored-tree work such as image-source
+/// synchronization.
 pub const Tree = struct {
     allocator: std.mem.Allocator = std.heap.page_allocator,
     // Occupancy makes the large node arena a lazy reservation: never inspect
@@ -251,6 +253,7 @@ pub const Tree = struct {
     canvases: [max_canvases]CanvasState = undefined,
     root: ?NodeId = null,
     generation: u64 = 0,
+    canvas_generation: u64 = 0,
     next_node_lifetime: u64 = 1,
     batch_depth: u8 = 0,
     batch_changed: bool = false,
@@ -980,7 +983,7 @@ pub const Tree = struct {
         canvas.fingerprint = fingerprint;
         canvas.command_layout_width = canvas.layout_width;
         canvas.command_layout_height = canvas.layout_height;
-        self.changed();
+        self.canvas_generation +%= 1;
     }
 
     pub fn appendChild(self: *Tree, parent_id: NodeId, child_id: NodeId) Error!void {
@@ -1492,7 +1495,13 @@ test "canvas wire decodes packed colors and polyline points" {
         4,          8,
         9,          3,
     };
+    const retained_generation = tree.generation;
+    const canvas_generation = tree.canvas_generation;
     try tree.setCanvasCommands(id, &wire);
+    try std.testing.expectEqual(retained_generation, tree.generation);
+    try std.testing.expectEqual(canvas_generation +% 1, tree.canvas_generation);
+    try tree.setCanvasCommands(id, &wire);
+    try std.testing.expectEqual(canvas_generation +% 1, tree.canvas_generation);
     const canvas = try tree.canvasStateConst(id);
     try std.testing.expectEqual(@as(usize, 3), canvas.command_count);
     try std.testing.expectEqual(@as(usize, 3), canvas.point_count);
@@ -1504,6 +1513,7 @@ test "canvas wire decodes packed colors and polyline points" {
     try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).layout_width);
     try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).layout_height);
     try tree.setCanvasCommands(id, &wire);
+    try std.testing.expectEqual(canvas_generation +% 2, tree.canvas_generation);
     try std.testing.expectEqual(@as(f32, 96), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.width);
     try std.testing.expectEqual(@as(f32, 48), (try tree.canvasStateConst(id)).commands[0].fill_rect.rect.height);
 }

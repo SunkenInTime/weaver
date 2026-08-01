@@ -79,6 +79,13 @@ export function useRef<T>(initial: T): { current: T };
 export function useEffect(fn: () => void | (() => void), deps?: unknown[]): void;
 export function useInterval(fn: () => void, ms: number): void;   // native-clocked, auto-cleaned
 export function useProvider(name: "time"): TimeData;             // M1: "time" only
+export function useProviderSignal(name: "time"): Signal<TimeData>;
+
+export interface Signal<T> {
+  readonly value: T;
+  subscribe(listener: (value: T) => void): () => void;
+  map<U>(project: (value: T) => U): Signal<U>;
+}
 
 export interface TimeData {   // updates once per second while subscribed
   hh: string; mm: string; ss: string;             // zero-padded locale-agnostic
@@ -91,6 +98,14 @@ export interface TimeData {   // updates once per second while subscribed
 Rules: hooks follow React's rules (top level, stable order). `useProvider`
 requires the provider in `config.subscribe` — checked at `weaver check`,
 error: `useProvider("time") requires subscribe: ["time"] in the widget config`.
+
+`useProvider` is the declarative path: each value schedules a component render.
+`useProviderSignal` is the high-frequency retained path: it updates `.value`
+without rendering the component. A canvas samples `.value` inside `onFrame`.
+A `<text>` may contain one mapped signal, which updates only that native text
+node; format the whole label in `signal.map(...)`. `subscribe` is for edge
+transitions such as waking a paused canvas, not for rebuilding the tree on each
+provider frame.
 
 ## Hot swap
 `weaver dev` evaluates a valid changed bundle in a fresh JS context before replacing the running one.
@@ -105,7 +120,7 @@ Evaluation failure leaves the prior context, window, and state running; window-c
 | `<column>` | yes | — |
 | `<row>` | yes | — |
 | `<panel>` | yes | — (a styled box; column layout) |
-| `<text>` | yes | — (children: strings/numbers only) |
+| `<text>` | yes | — (children: strings/numbers, or one `Signal<string \| number>`) |
 | `<icon>` | yes | exactly one of literal `name` or literal `d`; custom paths also accept `viewBox`/`stroke`; no children |
 | `<image>` | check-error "arrives in M2" | `src` |
 | `<button>` | check-error "arrives in M2" | `onPress` |
@@ -273,6 +288,8 @@ interface CanvasCtx {
 ```ts
 useProvider("audio")  // { rms: number, bands: number[] }   32 bands 0..1, 30 Hz,
                       // system loopback — silence sends nothing (idle-zero)
+useProviderSignal("audio") // same data without scheduling a root render;
+                           // canvas reads .value, text binds with .map(...)
 useProvider("media")  // { title: string, artist: string, album: string,
                       //   playing: boolean, positionMs: number, durationMs: number }
                       // change-pushed; 1 Hz position while playing

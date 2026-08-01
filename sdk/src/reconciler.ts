@@ -17,7 +17,7 @@ const MAX_CANVAS_WIRE_VALUES = 32_768;
 // the clamp itself retains no memory.
 const MAX_CANVAS_FPS = 60;
 
-export type WidgetChild = VNode | string | number | null | undefined | false;
+export type WidgetChild = VNode | string | number | Signal<string | number> | null | undefined | false;
 export type Component = () => VNode;
 export type NodeType = "column" | "row" | "stack" | "panel" | "text" | "icon" | "button" | "slider" | "image" | "canvas";
 export type ProviderName = "time" | "cpu" | "memory" | "audio" | "media";
@@ -55,6 +55,11 @@ export interface TimeData {
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
 export interface AudioData { rms: number; bands: number[] }
+export interface Signal<out T> {
+  readonly value: T;
+  subscribe(listener: (value: T) => void): () => void;
+  map<U>(project: (value: T) => U): Signal<U>;
+}
 export interface MediaData {
   title: string;
   artist: string;
@@ -73,6 +78,7 @@ export interface MediaTransport {
   previous(): Promise<boolean>;
   seek(ms: number): Promise<boolean>;
 }
+type ProviderValue = TimeData | CpuData | MemoryData | AudioData | MediaData;
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
 export interface CanvasFrame { t: number; dt: number }
@@ -103,8 +109,13 @@ interface HostInstance {
   type: NodeType;
   key?: string | number;
   id: number;
+  className?: string;
   props: ClassProps;
   elementProps: HostElementProps;
+  text?: string;
+  textBinding?: Signal<string | number>;
+  textUnsubscribe?: () => void;
+  mounted: boolean;
   children: Instance[];
 }
 
@@ -143,7 +154,7 @@ interface FragmentInstance {
 type Instance = HostInstance | ComponentInstance | FragmentInstance;
 type Hook = StateHook<unknown> | RefHook<unknown> | EffectHook;
 interface StateHook<T> { kind: "state"; value: T }
-interface RefHook<T> { kind: "ref"; value: { current: T } }
+interface RefHook<T> { kind: "ref"; value: { current: T }; initialValueType: HotSwapValueType }
 interface EffectHook { kind: "effect"; deps?: unknown[]; cleanup?: () => void; effect?: () => void | (() => void) }
 
 type HotSwapValueType = "undefined" | "null" | "boolean" | "number" | "string" | "bigint" | "symbol" | "function" | "array" | "object";
@@ -182,7 +193,9 @@ interface CanvasBinding {
   active: boolean;
   ctx: CanvasCtx;
 }
+interface MutableSignal<T> extends Signal<T> { emit(value: T): void }
 const canvases = new Map<number, CanvasBinding>();
+const signals = new WeakSet<object>();
 const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
 native.onCanvasResize((id, width, height) => runWidgetCallback("canvas resize callback", () => {
@@ -267,7 +280,11 @@ export function useRef<T>(initial: T): { current: T } {
   const index = component.hookIndex++;
   let hook = component.hooks[index] as RefHook<T> | undefined;
   if (!hook) {
-    hook = { kind: "ref", value: { current: seedHookValue(component, index, "ref", initial) } };
+    hook = {
+      kind: "ref",
+      value: { current: seedHookValue(component, index, "ref", initial) },
+      initialValueType: hotSwapValueType(initial),
+    };
     component.hooks[index] = hook as RefHook<unknown>;
   } else if (hook.kind !== "ref") {
     throw hookOrderError("useRef", index);
@@ -309,42 +326,24 @@ export function useProvider(name: "memory"): MemoryData;
 export function useProvider(name: "audio"): AudioData;
 export function useProvider(name: "media"): MediaData;
 export function useProvider(name: ProviderName): TimeData | CpuData | MemoryData | AudioData | MediaData {
-  if (!activeConfig?.subscribe?.includes(name)) {
-    throw new Error(`useProvider("${name}") requires subscribe: ["${name}"] in the widget config`);
-  }
-  if (name === "time") {
-    const [value, setValue] = useState<TimeData>(() => currentTime());
-    useEffect(() => timeProvider.subscribe(setValue), []);
-    return value;
-  }
-  if (!native.hostAvailable()) throw new Error(`Provider "${name}" requires weaverd; run "weaver up"`);
-  if (name === "cpu") {
-    const [value, setValue] = useState<CpuData>(() => ({ percent: 0, perCore: [] }));
-    useEffect(() => hostProviders.subscribeCpu(setValue), []);
-    return value;
-  }
-  if (name === "memory") {
-    const [value, setValue] = useState<MemoryData>(() => ({ usedMb: 0, totalMb: 0, percent: 0 }));
-    useEffect(() => hostProviders.subscribeMemory(setValue), []);
-    return value;
-  }
-  if (name === "audio") {
-    const [value, setValue] = useState<AudioData>(() => ({ rms: 0, bands: Array.from({ length: 32 }, () => 0) }));
-    useEffect(() => hostProviders.subscribeAudio(setValue), []);
-    return value;
-  }
-  const [value, setValue] = useState<MediaData>(() => ({
-    title: "",
-    artist: "",
-    album: "",
-    status: "stopped",
-    playing: false,
-    sourceApp: "",
-    positionMs: 0,
-    durationMs: 0,
-  }));
-  useEffect(() => hostProviders.subscribeMedia(setValue), []);
+  requireProvider(name, "useProvider");
+  const [value, setValue] = useState<ProviderValue>(() => initialProviderValue(name));
+  useEffect(() => subscribeProvider(name, setValue), [name]);
   return value;
+}
+
+export function useProviderSignal(name: "time"): Signal<TimeData>;
+export function useProviderSignal(name: "cpu"): Signal<CpuData>;
+export function useProviderSignal(name: "memory"): Signal<MemoryData>;
+export function useProviderSignal(name: "audio"): Signal<AudioData>;
+export function useProviderSignal(name: "media"): Signal<MediaData>;
+export function useProviderSignal(name: ProviderName): Signal<ProviderValue> {
+  requireProvider(name, "useProviderSignal");
+  const holder = useRef<MutableSignal<ProviderValue> | null>(null);
+  if (!holder.current) holder.current = createSignal(initialProviderValue(name));
+  const signal = holder.current;
+  useEffect(() => subscribeProvider(name, (next) => signal.emit(next)), [name, signal]);
+  return signal;
 }
 
 let nextMediaCommandId = 1;
@@ -505,18 +504,29 @@ function reconcileHost(parentId: number | null, previous: Instance | null, vnode
   const reusable = previous?.kind === "host" && previous.type === type && previous.key === vnode.key;
   const instance: HostInstance = reusable
     ? previous
-    : { kind: "host", type, key: vnode.key, id: native.createNode(type), props: {}, elementProps: {}, children: [] };
+    : { kind: "host", type, key: vnode.key, id: native.createNode(type), props: {}, elementProps: {}, mounted: true, children: [] };
   if (!reusable && previous) unmount(previous);
-  const nextProps = compileClass(typeof vnode.props.class === "string" ? vnode.props.class : "");
-  applyProps(instance.id, instance.props, nextProps);
-  instance.props = nextProps;
+  const className = typeof vnode.props.class === "string" ? vnode.props.class : "";
+  if (instance.className !== className) {
+    const nextProps = compileClass(className);
+    applyProps(instance.id, instance.props, nextProps);
+    instance.props = nextProps;
+    instance.className = className;
+  }
   applyElementProps(instance, vnode.props);
   if (type === "text") {
-    const text = vnode.children.map((child) => {
-      if (typeof child !== "string" && typeof child !== "number") throw new Error("<text> children must be strings or numbers");
-      return String(child);
-    }).join("");
-    native.setText(instance.id, text);
+    const binding = vnode.children.find(isSignal);
+    if (binding) {
+      if (vnode.children.length !== 1) throw new Error("A bound <text> must contain exactly one Signal child; format the complete label with signal.map(...)");
+      bindHostText(instance, binding);
+    } else {
+      unbindHostText(instance);
+      const text = vnode.children.map((child) => {
+        if (typeof child !== "string" && typeof child !== "number") throw new Error("<text> children must be strings, numbers, or one Signal");
+        return String(child);
+      }).join("");
+      setHostText(instance, text);
+    }
   } else if (type === "canvas") {
     if (vnode.children.some(isRenderable)) throw new Error("<canvas> does not accept children");
   } else {
@@ -656,9 +666,39 @@ function unmount(instance: Instance): void {
     for (const child of instance.children) unmount(child);
     return;
   }
+  for (const child of instance.children) unmount(child);
+  instance.mounted = false;
+  unbindHostText(instance);
   handlers.delete(instance.id);
   disposeCanvas(instance.id);
   native.removeNode(instance.id);
+}
+
+function bindHostText(instance: HostInstance, binding: Signal<string | number>): void {
+  if (instance.textBinding === binding) {
+    setHostText(instance, String(binding.value));
+    return;
+  }
+  unbindHostText(instance);
+  instance.textBinding = binding;
+  setHostText(instance, String(binding.value));
+  instance.textUnsubscribe = binding.subscribe((value) => {
+    runWidgetCallback("bound <text> update", () => {
+      if (instance.mounted) setHostText(instance, String(value));
+    });
+  });
+}
+
+function unbindHostText(instance: HostInstance): void {
+  instance.textUnsubscribe?.();
+  instance.textUnsubscribe = undefined;
+  instance.textBinding = undefined;
+}
+
+function setHostText(instance: HostInstance, text: string): void {
+  if (instance.text === text) return;
+  native.setText(instance.id, text);
+  instance.text = text;
 }
 
 function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: number | undefined, width: number, height: number): void {
@@ -865,9 +905,10 @@ function firstNativeId(instance: Instance): number {
 }
 
 function instanceKey(instance: Instance): string | number | undefined { return instance.key; }
-function isRenderable(value: WidgetChild): value is VNode | string | number { return value !== null && value !== undefined && value !== false; }
+function isRenderable(value: WidgetChild): value is VNode | string | number | Signal<string | number> { return value !== null && value !== undefined && value !== false; }
 function isVNode(value: unknown): value is VNode { return typeof value === "object" && value !== null && (value as { __weaverElement?: boolean }).__weaverElement === true; }
-function toVNode(value: VNode | string | number): VNode { return isVNode(value) ? value : h("text", null, value); }
+function isSignal(value: unknown): value is Signal<string | number> { return typeof value === "object" && value !== null && signals.has(value); }
+function toVNode(value: VNode | string | number | Signal<string | number>): VNode { return isVNode(value) ? value : h("text", null, value); }
 
 function flatten(values: readonly unknown[]): WidgetChild[] {
   const output: WidgetChild[] = [];
@@ -993,6 +1034,9 @@ function captureHotSwap(): string | null {
     return JSON.stringify(rootInstance.hooks.map((hook): HotSwapSlot => {
       if (hook.kind === "effect") return { kind: "effect" };
       const value = hook.kind === "ref" ? hook.value.current : hook.value;
+      if (hook.kind === "ref" && value !== null && typeof value === "object" && signals.has(value)) {
+        return { kind: "ref", valueType: hook.initialValueType, transferable: false };
+      }
       const valueType = hotSwapValueType(value);
       if (["undefined", "bigint", "symbol", "function"].includes(valueType)) return { kind: hook.kind, valueType, transferable: false };
       return { kind: hook.kind, valueType, value };
@@ -1085,6 +1129,79 @@ function currentTime(): TimeData {
     weekday: weekdays[now.getDay()], month: months[now.getMonth()], day: now.getDate(),
     year: now.getFullYear(), epochMs: now.getTime(),
   };
+}
+
+function requireProvider(name: ProviderName, hook: "useProvider" | "useProviderSignal"): void {
+  if (!activeConfig?.subscribe?.includes(name)) {
+    throw new Error(`${hook}("${name}") requires subscribe: ["${name}"] in the widget config`);
+  }
+  if (name !== "time" && !native.hostAvailable()) {
+    throw new Error(`Provider "${name}" requires weaverd; run "weaver up"`);
+  }
+}
+
+function initialProviderValue(name: ProviderName): ProviderValue {
+  if (name === "time") return currentTime();
+  if (name === "cpu") return { percent: 0, perCore: [] };
+  if (name === "memory") return { usedMb: 0, totalMb: 0, percent: 0 };
+  if (name === "audio") return { rms: 0, bands: Array.from({ length: 32 }, () => 0) };
+  return {
+    title: "",
+    artist: "",
+    album: "",
+    status: "stopped",
+    playing: false,
+    sourceApp: "",
+    positionMs: 0,
+    durationMs: 0,
+  };
+}
+
+function subscribeProvider(name: ProviderName, listener: (value: ProviderValue) => void): () => void {
+  if (name === "time") return timeProvider.subscribe(listener);
+  if (name === "cpu") return hostProviders.subscribeCpu(listener);
+  if (name === "memory") return hostProviders.subscribeMemory(listener);
+  if (name === "audio") return hostProviders.subscribeAudio(listener);
+  return hostProviders.subscribeMedia(listener);
+}
+
+function createSignal<T>(initial: T): MutableSignal<T> {
+  let current = initial;
+  const listeners = new Set<(value: T) => void>();
+  const signal: MutableSignal<T> = {
+    get value(): T { return current; },
+    subscribe(listener: (value: T) => void): () => void {
+      if (typeof listener !== "function") throw new Error("Signal.subscribe(listener) requires a function");
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    map<U>(project: (value: T) => U): Signal<U> {
+      if (typeof project !== "function") throw new Error("Signal.map(project) requires a function");
+      return mapSignal(signal, project);
+    },
+    emit(value: T): void {
+      current = value;
+      for (const listener of listeners) listener(value);
+    },
+  };
+  signals.add(signal);
+  return signal;
+}
+
+function mapSignal<T, U>(source: Signal<T>, project: (value: T) => U): Signal<U> {
+  const mapped: Signal<U> = {
+    get value(): U { return project(source.value); },
+    subscribe(listener: (value: U) => void): () => void {
+      if (typeof listener !== "function") throw new Error("Signal.subscribe(listener) requires a function");
+      return source.subscribe((value) => listener(project(value)));
+    },
+    map<V>(next: (value: U) => V): Signal<V> {
+      if (typeof next !== "function") throw new Error("Signal.map(project) requires a function");
+      return mapSignal(mapped, next);
+    },
+  };
+  signals.add(mapped);
+  return mapped;
 }
 
 const timeProvider = (() => {

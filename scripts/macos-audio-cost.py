@@ -26,6 +26,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sample-seconds", type=int, default=10)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--visualizer-revision",
+                        help="read examples/visualizer/widget.tsx from this git revision instead of the working tree")
     return parser.parse_args()
 
 
@@ -49,16 +51,41 @@ def wait_for(description: str, predicate: Callable[[], Any], timeout: float = 20
     raise RuntimeError(f"timed out waiting for {description}")
 
 
-def process_sample(pids: list[int]) -> dict[str, Any]:
-    rows = command(["/bin/ps", "-o", "pid=,%cpu=,rss=", "-p", ",".join(map(str, pids))]).splitlines()
-    values = [row.split() for row in rows if row.strip()]
+def cpu_seconds(value: str) -> float:
+    """Parse macOS ps cputime ([[dd-]hh:]mm:ss.xx) into seconds."""
+    days = 0
+    if "-" in value:
+        day_text, value = value.split("-", 1)
+        days = int(day_text)
+    parts = value.split(":")
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours, minutes, seconds = "0", parts[0], parts[1]
+    else:
+        hours, minutes, seconds = "0", "0", parts[0]
+    return days * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def process_cpu_time(pids: list[int]) -> float:
+    rows = command(["/bin/ps", "-o", "cputime=", "-p", ",".join(map(str, pids))]).splitlines()
+    return sum(cpu_seconds(row.strip()) for row in rows if row.strip())
+
+
+def process_sample(pids: list[int], interval_seconds: float = 1.0) -> dict[str, Any]:
+    cpu_before = process_cpu_time(pids)
+    interval_before = time.monotonic()
+    time.sleep(interval_seconds)
+    cpu_after = process_cpu_time(pids)
+    interval_after = time.monotonic()
+    rows = command(["/bin/ps", "-o", "rss=", "-p", ",".join(map(str, pids))]).splitlines()
     footprint = command(["/usr/bin/footprint", "-f", "bytes", *sum((["-p", str(pid)] for pid in pids), [])])
     match = re.search(r"^\s*phys_footprint:\s+(\d+) B$", footprint, re.MULTILINE)
     if not match:
         raise RuntimeError("footprint did not report aggregate phys_footprint")
     return {
-        "cpu_percent_one_core": sum(float(value[1]) for value in values),
-        "rss_bytes": sum(int(value[2]) * 1024 for value in values),
+        "cpu_percent_one_core": max(0, cpu_after - cpu_before) / (interval_after - interval_before) * 100,
+        "rss_bytes": sum(int(row.strip()) * 1024 for row in rows if row.strip()),
         "physical_footprint_bytes": int(match.group(1)),
     }
 
@@ -78,6 +105,8 @@ def main() -> int:
     if sys.platform != "darwin":
         raise RuntimeError("macOS audio cost harness requires macOS")
     args = parse_args()
+    visualizer_source = (command(["git", "show", f"{args.visualizer_revision}:examples/visualizer/widget.tsx"])
+                         if args.visualizer_revision else VISUALIZER.read_text(encoding="utf-8"))
     scratch = Path(tempfile.mkdtemp(prefix="weaver-audio-cost-", dir="/tmp"))
     environment = dict(os.environ)
     environment["HOME"] = str(scratch / "home")
@@ -104,7 +133,6 @@ def main() -> int:
         samples = []
         for _ in range(args.sample_seconds):
             samples.append(process_sample(pids))
-            time.sleep(1)
         after = status()
         return {
             "label": label,
@@ -126,7 +154,8 @@ def main() -> int:
         "zig": command(["zig", "version"]),
         "node": command([node, "--version"]),
         "sample_seconds": args.sample_seconds,
-        "cpu_metric": "ps percent of one core summed across weaverd and participating Widget processes",
+        "visualizer_source": args.visualizer_revision or "working tree",
+        "cpu_metric": "one-second deltas of ps cumulative CPU time divided by monotonic wall time, summed across weaverd and participating Widget processes; 100 percent is one saturated core",
         "memory_metrics": {
             "physical_footprint": "footprint aggregate phys_footprint, de-duplicated across selected processes",
             "rss": "ps RSS summed across selected processes",
@@ -143,9 +172,11 @@ def main() -> int:
         for index in (1, 2):
             directory = scratch / f"visualizer-{index}"
             cli("init", directory.name)
-            source = VISUALIZER.read_text(encoding="utf-8")
+            shutil.copytree(VISUALIZER.parent, directory, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("dist", "tsconfig.json", "widget.tsx"))
+            source = visualizer_source
             source = source.replace('name: "Visualizer"', f'name: "Visualizer {index}"')
-            source = source.replace("offset: [24, 24]", f"offset: [{24 + (index - 1) * 312}, 24]")
+            source = source.replace("offset: [420, 400]", f"offset: [{24 + (index - 1) * 352}, 24]")
             (directory / "widget.tsx").write_text(source, encoding="utf-8")
             cli("install", str(directory))
             installed.append(f"Visualizer {index}")
