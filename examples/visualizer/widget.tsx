@@ -12,6 +12,7 @@ const cellCount = 14;
 const cellHeight = 3;
 const cellGap = 2;
 const barGap = 2;
+const barWidth = 11;
 const segments = 24;
 
 const levels = Array.from({ length: barCount }, () => 0);
@@ -51,7 +52,11 @@ export default widget({
               onFrame={(ctx, frame) => {
                 const sample = audio.value;
                 ctx.clear();
-                const barWidth = (ctx.width - barGap * (barCount - 1)) / barCount;
+                // Integer point geometry remains pixel-aligned at every
+                // integral backing scale, so solid cells stay direct Metal
+                // quads instead of taking the antialiased raster fallback.
+                const meterWidth = barCount * barWidth + (barCount - 1) * barGap;
+                const meterX = Math.floor((ctx.width - meterWidth) / 2);
                 const pitch = cellHeight + cellGap;
                 const ladder = cellCount * pitch - cellGap;
                 const base = ctx.height - (ctx.height - ladder) / 2;
@@ -70,7 +75,7 @@ export default widget({
                   // Peak-hold falls far slower than the bar, the way a hardware
                   // meter parks its cap after a transient.
                   peaks[index] = Math.max(levels[index], peaks[index] - 0.22 * dt);
-                  const x = index * (barWidth + barGap);
+                  const x = meterX + index * (barWidth + barGap);
                   ctx.fillRect(x, base - ladder, barWidth, ladder, "#ffffff17");
                   const lit = Math.round(levels[index] * cellCount);
                   if (lit > 0) {
