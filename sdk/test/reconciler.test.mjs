@@ -276,6 +276,59 @@ function isolatedNative() {
   };
 }
 
+test("provider signals update bound text and sampled values without a root render", async () => {
+  const source = `
+    import { h, useProviderSignal, useState, widget } from "./src/index.ts";
+    widget({ name: "Signal fixture", size: [100, 50], subscribe: ["audio"] }, () => {
+      const audio = useProviderSignal("audio");
+      const [visible, setVisible] = useState(true);
+      globalThis.readRms = () => audio.value.rms;
+      globalThis.hideText = () => setVisible(false);
+      return visible
+        ? h("text", { class: "text-white" }, audio.map((value) => Math.round(value.rms * 100)))
+        : h("panel", null);
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "provider-signal-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const fixtureOperations = [];
+  let fixtureProviderCallback;
+  const native = {
+    ...isolatedNative(),
+    hostAvailable() { return true; },
+    onProvider(callback) { fixtureProviderCallback = callback; },
+    createNode(type) { fixtureOperations.push(["createNode", type]); return 1; },
+    setProp(...args) { fixtureOperations.push(["setProp", ...args]); },
+    setText(...args) { fixtureOperations.push(["setText", ...args]); },
+    setRoot(...args) { fixtureOperations.push(["setRoot", ...args]); },
+    beginBatch() { fixtureOperations.push(["beginBatch"]); },
+    endBatch() { fixtureOperations.push(["endBatch"]); },
+    abortBatch() { fixtureOperations.push(["abortBatch"]); },
+    reportError(...args) { fixtureOperations.push(["reportError", ...args]); },
+  };
+  const context = { native };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+  assert.equal(fixtureOperations.filter(([name]) => name === "beginBatch").length, 1);
+  assert.equal(fixtureOperations.findLast(([name]) => name === "setText")[2], "0");
+
+  fixtureProviderCallback('{"provider":"audio","value":{"rms":0.42,"bands":[0.75]}}');
+  await Promise.resolve();
+
+  assert.equal(context.readRms(), 0.42);
+  assert.equal(fixtureOperations.findLast(([name]) => name === "setText")[2], "42");
+  assert.equal(fixtureOperations.filter(([name]) => name === "beginBatch").length, 1);
+  assert.equal(fixtureOperations.some(([name]) => name === "reportError"), false);
+
+  context.hideText();
+  await Promise.resolve();
+  const textWritesAfterUnmount = fixtureOperations.filter(([name]) => name === "setText").length;
+  fixtureProviderCallback('{"provider":"audio","value":{"rms":0.7,"bands":[0.9]}}');
+  assert.equal(context.readRms(), 0.7);
+  assert.equal(fixtureOperations.filter(([name]) => name === "setText").length, textWritesAfterUnmount);
+});
+
 async function runBoundaryFixture(mode) {
   const source = `
     import { h, useEffect, useInterval, useState, widget } from "./src/index.ts";

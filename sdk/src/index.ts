@@ -5,6 +5,7 @@ export {
   useInterval,
   useMediaTransport,
   useProvider,
+  useProviderSignal,
   useRef,
   useState,
   useStorage,
@@ -18,6 +19,7 @@ export {
   type MediaData,
   type MediaTransport,
   type PressEvent,
+  type Signal,
   type TimeData,
   type WFetchInit,
   type WFetchResponse,
@@ -25,4 +27,3 @@ export {
   type WidgetConfig,
   type WidgetModule,
 } from "./reconciler.js";
-

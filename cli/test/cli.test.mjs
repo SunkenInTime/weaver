@@ -162,11 +162,12 @@ test("bundle manifest is the subscription origin of truth", () => {
   try {
     assert.equal(spawnSync(process.execPath, [cli, "init", "system-card"], { cwd: root, encoding: "utf8" }).status, 0);
     const sourcePath = join(widget, "widget.tsx");
-    const source = `import { useProvider, widget } from "@weaver/sdk";
+    const source = `import { useProvider, useProviderSignal, widget } from "@weaver/sdk";
 export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu", "memory", "audio", "media"] }, () => {
   const cpu = useProvider("cpu");
   const audio = useProvider("audio");
-  return <text>{cpu.percent + audio.rms}</text>;
+  const memory = useProviderSignal("memory");
+  return <row><text>{cpu.percent + audio.rms}</text><text>{memory.map((value) => value.percent)}</text></row>;
 });
 `;
     writeFileSync(sourcePath, source, "utf8");
@@ -182,6 +183,11 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
     assert.equal(readFileSync(join(widget, "dist", "data", "widget.json"), "utf8"), "nested manifest asset");
     assert.equal(readFileSync(join(widget, "dist", "assets", "dist", "pixel.bin"), "utf8"), "nested dist asset");
     assert.equal(existsSync(join(widget, "dist", "widget.tsx")), false);
+
+    writeFileSync(sourcePath, source.replace('subscribe: ["cpu", "memory", "audio", "media"]', 'subscribe: ["cpu", "audio", "media"]'), "utf8");
+    const missingSignalSubscription = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(missingSignalSubscription.status, 1);
+    assert.match(missingSignalSubscription.stderr, /useProviderSignal\("memory"\) requires subscribe: \["memory"\]/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
