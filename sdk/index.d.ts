@@ -1,4 +1,4 @@
-export type WidgetChild = JSX.Element | string | number | null | undefined | false;
+export type WidgetChild = JSX.Element | string | number | Signal<string | number> | null | undefined | false;
 export interface PressEvent { x: number; y: number; u: number; v: number }
 
 export interface WidgetConfig {
@@ -34,6 +34,11 @@ export interface TimeData {
 export interface CpuData { percent: number; perCore: number[] }
 export interface MemoryData { usedMb: number; totalMb: number; percent: number }
 export interface AudioData { rms: number; bands: number[] }
+export interface Signal<out T> {
+  readonly value: T;
+  subscribe(listener: (value: T) => void): () => void;
+  map<U>(project: (value: T) => U): Signal<U>;
+}
 export interface MediaData {
   title: string;
   artist: string;
@@ -88,6 +93,11 @@ export function useProvider(name: "cpu"): CpuData;
 export function useProvider(name: "memory"): MemoryData;
 export function useProvider(name: "audio"): AudioData;
 export function useProvider(name: "media"): MediaData;
+export function useProviderSignal(name: "time"): Signal<TimeData>;
+export function useProviderSignal(name: "cpu"): Signal<CpuData>;
+export function useProviderSignal(name: "memory"): Signal<MemoryData>;
+export function useProviderSignal(name: "audio"): Signal<AudioData>;
+export function useProviderSignal(name: "media"): Signal<MediaData>;
 export function useMediaTransport(): MediaTransport;
 export function useStorage<T>(key: string, initial: T): [T, (next: T | ((prev: T) => T)) => void];
 export function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
@@ -116,7 +126,7 @@ declare global {
 
     interface TextProps {
       class?: string;
-      children?: string | number | (string | number)[];
+      children?: string | number | Signal<string | number> | (string | number)[];
     }
 
     type IconProps =
@@ -145,4 +155,3 @@ declare global {
 declare global {
   function wfetch(url: string, init?: WFetchInit): Promise<WFetchResponse>;
 }
-
