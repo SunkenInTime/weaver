@@ -691,7 +691,8 @@ fn projectSameViewUpdate(
 
     var updates: [tree_mod.max_canvases]native_sdk.runtime.CanvasWidgetImmediateUpdate = undefined;
     var update_count: usize = 0;
-    for (&model.tree.canvases) |*canvas_state| {
+    for (&model.tree.canvases, 0..) |*canvas_state, canvas_index| {
+        if (!model.tree.canvas_occupied.isSet(canvas_index)) continue;
         const id = canvas_state.owner;
         if (id == 0) continue;
         const node = try model.tree.nodeConst(id);
