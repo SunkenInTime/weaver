@@ -220,8 +220,11 @@ protocol cleanliness. Deliverable: the widget process's footprint with real
 weaver content (QuickJS + packet ABI) and a screenshot proving it renders.
 Record the number here.
 
-**GATE:** widget process should land in the 20s-30s. If it doesn't, vmmap
-it, name what is still resident, and record that before any Phase 2 work.
+**SUPERSEDED GATE:** the original target was for the widget process to land in
+the 20s-30s, but the Phase 1 kickoff calibration below replaced that fixed
+total-footprint target. The active gate is categorical: the widget process's
+`ledger_tag_graphics_footprint` must stay near zero. Report the remaining
+hardware-specific content cost separately before any Phase 2 work.
 
 **Scaling check (falsification condition 3):** extend the spike to N
 clients — run 1, 2, 4, 8 myclock instances through the one host and record
@@ -521,10 +524,10 @@ mise exec zig@0.16.0 -- zig build -Doptimize=ReleaseFast
 # Use `--candidate software` for the software-path comparison.
 python3 scripts/macos-renderer-bakeoff.py \
   --runtime runtime/zig-out/bin/weaver-widget \
-  --candidate metal-composite \
+  --candidate software \
   --bundles examples/myclock/dist \
   --count 1 --warmup-seconds 5 --sample-seconds 5 \
-  --output .zig-cache/myclock-metal.json --stage-trace
+  --output .zig-cache/myclock-software.json --stage-trace
 
 # live measurement (get ACTIVE pid from weaver status --json first)
 footprint --noCategories --swapped --format bytes -p <PID>
