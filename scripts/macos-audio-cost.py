@@ -70,19 +70,29 @@ def cpu_seconds(value: str) -> float:
     return days * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def process_cpu_time(pids: list[int]) -> float:
-    rows = command(["/bin/ps", "-o", "cputime=", "-p", ",".join(map(str, pids))]).splitlines()
-    return sum(cpu_seconds(row.strip()) for row in rows if row.strip())
+def process_cpu_times(pids: list[int]) -> dict[int, float]:
+    requested = list(dict.fromkeys(pids))
+    rows = command([
+        "/bin/ps", "-o", "pid=", "-o", "cputime=", "-p", ",".join(map(str, requested)),
+    ]).splitlines()
+    snapshot: dict[int, float] = {}
+    for row in rows:
+        fields = row.strip().split(maxsplit=1)
+        if len(fields) == 2:
+            snapshot[int(fields[0])] = cpu_seconds(fields[1])
+    missing = [pid for pid in requested if pid not in snapshot]
+    if missing:
+        raise RuntimeError(f"ps CPU snapshot omitted pids: {missing}")
+    return snapshot
 
 
 def process_sample(pids: list[int], window_server_pid: int,
                    interval_seconds: float = 1.0) -> dict[str, Any]:
-    cpu_before = {pid: process_cpu_time([pid]) for pid in pids}
-    window_server_cpu_before = process_cpu_time([window_server_pid])
+    sampled_pids = [*pids, window_server_pid]
+    cpu_before = process_cpu_times(sampled_pids)
     interval_before = time.monotonic()
     time.sleep(interval_seconds)
-    cpu_after = {pid: process_cpu_time([pid]) for pid in pids}
-    window_server_cpu_after = process_cpu_time([window_server_pid])
+    cpu_after = process_cpu_times(sampled_pids)
     interval_after = time.monotonic()
     rows = command(["/bin/ps", "-o", "rss=", "-p", ",".join(map(str, pids))]).splitlines()
     footprint = command(["/usr/bin/footprint", "-f", "bytes", *sum((["-p", str(pid)] for pid in pids), [])])
@@ -97,12 +107,22 @@ def process_sample(pids: list[int], window_server_pid: int,
         "cpu_percent_one_core": sum(cpu_percent_by_pid.values()),
         "cpu_percent_one_core_by_pid": cpu_percent_by_pid,
         "window_server_cpu_percent_one_core": (
-            max(0, window_server_cpu_after - window_server_cpu_before)
+            max(0, cpu_after[window_server_pid] - cpu_before[window_server_pid])
             / (interval_after - interval_before) * 100
         ),
         "rss_bytes": sum(int(row.strip()) * 1024 for row in rows if row.strip()),
         "physical_footprint_bytes": int(match.group(1)),
     }
+
+
+def replace_unique(source: str, old: str, new: str, *, label: str, revision: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise RuntimeError(
+            f"Cannot prepare Visualizer from {revision}: expected exactly one {label} marker "
+            f"{old!r}, found {count}. Select a compatible revision or update the harness source markers."
+        )
+    return source.replace(old, new, 1)
 
 
 def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -199,8 +219,12 @@ def main() -> int:
             shutil.copytree(VISUALIZER.parent, directory, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("dist", "tsconfig.json", "widget.tsx"))
             source = visualizer_source
-            source = source.replace('name: "Visualizer"', f'name: "Visualizer {index}"')
-            source = source.replace("offset: [420, 400]", f"offset: [{24 + (index - 1) * 352}, 24]")
+            revision = args.visualizer_revision or "working tree"
+            source = replace_unique(source, 'name: "Visualizer"', f'name: "Visualizer {index}"',
+                                    label="widget name", revision=revision)
+            source = replace_unique(source, "offset: [420, 400]",
+                                    f"offset: [{24 + (index - 1) * 352}, 24]",
+                                    label="anchor offset", revision=revision)
             (directory / "widget.tsx").write_text(source, encoding="utf-8")
             cli("install", str(directory))
             installed.append(f"Visualizer {index}")

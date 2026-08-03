@@ -24,6 +24,10 @@ function readout(rms: number): string {
   return `${db > 0 ? "+" : ""}${db} DB`;
 }
 
+function readoutValue(audio: AudioData): string {
+  return readout(audio.rms);
+}
+
 function hasSignal(audio: AudioData): boolean {
   return audio.bands.some((value) => value > 0.002);
 }
@@ -40,7 +44,7 @@ export default widget({
   useEffect(() => audio.subscribe((next) => {
     if (hasSignal(next)) setActive(true);
   }), [audio]);
-  const readoutSignal = audio.map((next) => readout(next.rms));
+  const readoutSignal = audio.map(readoutValue);
   return (
     <stack class="size-full rounded-[20px]">
       <column class="size-full bg-[#1a1a1a] rounded-[20px] border border-[#000000] shadow-[0_1px_2px_0_#ffffff1a] shadow-inner p-[14px]">
@@ -98,8 +102,10 @@ export default widget({
                   ? Math.max(0, Math.min(1, (20 * Math.log10(sample.rms) + 48) / 48))
                   : 0;
                 const lit = Math.round(level * segments);
+                const stripWidth = segments * 13 - 1;
+                const stripX = Math.floor((ctx.width - stripWidth) / 2);
                 for (let index = 0; index < segments; index += 1) {
-                  ctx.fillRect(index * 13, ctx.height - 3, 12, 3, index < lit ? "#ffffffff" : "#ffffff17");
+                  ctx.fillRect(stripX + index * 13, ctx.height - 3, 12, 3, index < lit ? "#ffffffff" : "#ffffff17");
                 }
                 if (!hasSignal(sample) && levels.every((value) => value < 0.008) && peaks.every((value) => value < 0.02)) {
                   setActive(false);

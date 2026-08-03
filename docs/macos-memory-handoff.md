@@ -5,7 +5,7 @@ harness) on Dara's other laptop, session id
 `019fafbc-4c73-7ef3-a1e6-cd3ffd497f8f`, 2026-07-29. This doc is the recovered
 state of that thread plus everything needed to continue. It lives on branch
 `feat/macos-memory-work`, which is the complete working set: this doc, the
-audit briefs, the `myclock/` bakeoff fixture, and the pinned native-sdk
+audit briefs, the `examples/myclock/` bakeoff fixture, and the pinned native-sdk
 memory work.
 
 ## Goal
@@ -35,10 +35,10 @@ widgets are available as test subjects.
   framebufferOnly, analytic rounded clips, the Metal tiled-image primitive,
   and diagnostics-only screenshot/cache/task-ledger receipts. Setup:
   `git submodule update --init`, then in `runtime/native-sdk`:
-  `git fetch origin && git checkout macos-memory-shared-renderer-prep`.
-- `myclock/` at the repo root is the clean isolated-benchmark fixture
-  (`myclock/dist` is the bundle the bakeoff harness takes). Ignore any
-  stale `.weaver-dev-port` in it.
+  `git fetch origin macos-memory-shared-renderer-prep && git checkout --detach
+  6a8e6178`.
+- `examples/myclock/` is the clean isolated-benchmark fixture
+  (`examples/myclock/dist` is the bundle the bakeoff harness takes).
 - The audit briefs (`docs/receipt-sweep-brief.md`,
   `docs/error-propagation-brief.md`) are separate passes; do not mix
   them into this work.
@@ -111,29 +111,26 @@ use the window-capture approach in the weaver memory note
 
 ## Remaining work, in order
 
-1. Rebuild, restart Noro on the new binary (verify PID start time > build
-   time), confirm the tiled-image win: expect cache payload to drop ~4 MB
-   more and entries 37 -> ~31, IOAccelerator to drop further.
-2. Visually verify: outer 51px rounded clip, tile seams/orientation/opacity,
-   progress-strip bottom corners, button borders / asymmetric corner radii.
-   Re-run `test-canvas` (841 tests) after the tile patch.
-3. Shadows: 28 entries / 2.45 MB still rasterized. Analytic shadow parity is
+1. Tiled-image validation is complete: the cache payload fell by the expected
+   ~4 MB, the composited screenshot passed visual comparison, and
+   `test-canvas` passed 841/841 after the patch (checkpoint below).
+2. Shadows: 28 entries / 2.45 MB still rasterized. Analytic shadow parity is
    harder; measure before attempting.
-4. **The remaining wall:** see "The shared-renderer experiment" below. This
+3. **The remaining wall:** see "The shared-renderer experiment" below. This
    is the real fight for the 20 MB target and has its own phased plan.
-5. Keep the per-widget heap wins honest: re-sample after each change,
+4. Keep the per-widget heap wins honest: re-sample after each change,
    multiple samples (footprint numbers were noisy run to run, ±10 MB).
 
 ## The shared-renderer experiment (the ~90 MB wall)
 
 ### Background
 
-~89-91 MB "owned unmapped graphics" per process exists for EVERY widget,
-tiny or complex, Metal composite or software pixels — because both paths
-present through the same CAMetalLayer. Isolated bakeoff: Myclock 131.9 MB
-(metal) vs 128.6 MB (software), only 3.4 MB apart. This baseline is
-Metal/IOAccelerator driver + framework memory, not widget content. Without
-solving it, the per-widget floor is ~130 MB.
+On the measured M3 Pro-class machine, sustained Metal submission at roughly
+1 Hz or faster establishes an ~89-96 MB per-process "owned unmapped graphics"
+working set. Both the Metal-composite and software-pixel paths paid it because
+both presented through CAMetalLayer. The same workload's graphics ledger was
+near zero on the M2 Air, so ~130 MB is not a universal per-widget floor; it is
+a hardware- and workload-scoped result.
 
 **Key discovery: weaver's Windows runtime already solved this.** Widget
 processes on Windows are device-less — display-list packets go over a pipe
@@ -216,7 +213,7 @@ renderer will not reclaim it, and the plan must stop here and be rethought
 
 ### Phase 1 — one-widget spike (ugly, hardcoded, throwaway)
 
-Route ONE widget (myclock/dist, the clean fixture) through a minimal Metal
+Route ONE widget (`examples/myclock/dist`, the clean fixture) through a minimal Metal
 presenter running in a second process, frames delivered via IOSurface into
 the widget window's CALayer. Ignore crash-reconnect, multi-client, and
 protocol cleanliness. Deliverable: the widget process's footprint with real
@@ -492,22 +489,21 @@ answer: the wall is real, it moves with whoever submits, and it is paid
 per process. Event-driven presenting (drop the unconditional 60 Hz pump;
 Windows already works this way — "frames exist only on demand") is worth
 doing for CPU/battery and makes the shared host cheap, but is NOT the
-memory fix by itself: 1 Hz submission still holds the full arena, so any
-live widget stays pinned until it stops submitting Metal at all.
+memory fix by itself for the measured seconds-clock workload: 1 Hz submission
+still holds the full arena, while the measured 0.2 Hz workload does not
+establish it. Intermediate cadences were not measured.
 
 Phase 1 (the one-widget spike, myclock through an out-of-process Metal
-presenter into an IOSurface-backed CALayer) is therefore the next step,
-with its gates unchanged — expect the widget process in the 20s-30s MB
-given the measured ~10 MB device-less floor plus Myclock's ~31 MB
-software-content footprint on the Air. Note the Phase 1 gate numbers were
-written against Air-class content costs; on this machine the honest
-expectation is "widget footprint minus the ~95 MB arena", verified by
-vmmap category, not a single total.
+presenter into an IOSurface-backed CALayer) is therefore the next step, with
+the recalibrated gate: the widget process must keep
+`ledger_tag_graphics_footprint` near zero. Report the hardware-specific content
+cost separately from the removed arena; do not treat a fixed total-footprint
+estimate as the acceptance criterion.
 
 ## Validation status at handoff
 
 - Native platform tests: pass.
-- `test-canvas`: 841/841 pass (before tile patch — rerun after).
+- `test-canvas`: 841/841 pass after the tile patch.
 - Direct runtime suite: 57 pass, 1 skip.
 - Known false negative: `zig build test` wrapper misclassifies an intentional
   provider-timeout warning on stderr as failure; the direct test executable
@@ -522,10 +518,11 @@ mise exec zig@0.16.0 -- zig build -Doptimize=ReleaseFast
 
 # isolated bakeoff (myclock is the clean fixture; Noro can't run isolated —
 # its media provider intentionally requires Weaverd)
+# Use `--candidate software` for the software-path comparison.
 python3 scripts/macos-renderer-bakeoff.py \
   --runtime runtime/zig-out/bin/weaver-widget \
-  --candidate metal-composite \        # or: software
-  --bundles myclock/dist \
+  --candidate metal-composite \
+  --bundles examples/myclock/dist \
   --count 1 --warmup-seconds 5 --sample-seconds 5 \
   --output .zig-cache/myclock-metal.json --stage-trace
 
