@@ -112,6 +112,7 @@ SDK fork commit with the repository:
 git clone --recurse-submodules https://github.com/SunkenInTime/weaver
 cd weaver
 npm ci
+npm run link   # puts `weaver` on PATH for this checkout
 ```
 
 On macOS:
@@ -120,9 +121,9 @@ On macOS:
 (cd runtime && zig build -Doptimize=ReleaseFast)
 (cd host && zig build -Doptimize=ReleaseFast)
 
-node cli/bin/weaver.js init myclock
-node cli/bin/weaver.js check myclock
-node cli/bin/weaver.js dev myclock
+weaver init myclock
+weaver check myclock
+weaver dev myclock
 ```
 
 On Windows PowerShell:
@@ -143,16 +144,16 @@ node cli\bin\weaver.js dev myclock
 Stop `dev` with Ctrl-C. The portable artifact loop is the same on both systems:
 
 ```sh
-node cli/bin/weaver.js pack myclock
-node cli/bin/weaver.js inspect myclock.weave
-node cli/bin/weaver.js install myclock.weave
-node cli/bin/weaver.js uninstall Myclock
+weaver pack myclock
+weaver inspect myclock.weave
+weaver install myclock.weave
+weaver uninstall Myclock
 ```
 
 For deterministic, windowless inspection, capture the widget directly:
 
 ```sh
-node cli/bin/weaver.js capture myclock --out /tmp/myclock.png
+weaver capture myclock --out /tmp/myclock.png
 ```
 
 This writes a PNG, a semantic `.snapshot.txt`, and a machine-readable
@@ -166,15 +167,15 @@ On Windows, use backslashes in the CLI path. Before running an audio-reactive
 Widget on macOS, authorize the signed host identity in the foreground:
 
 ```sh
-node cli/bin/weaver.js audio authorize
+weaver audio authorize
 ```
 
 ### macOS diagnostics and permission reset
 
 ```sh
-node cli/bin/weaver.js status --json
-node cli/bin/weaver.js logs "Clock"
-node cli/bin/weaver.js logs "Clock" --follow
+weaver status --json
+weaver logs "Clock"
+weaver logs "Clock" --follow
 codesign --verify --deep --strict host/zig-out/Weaverd.app
 plutil -p host/zig-out/Weaverd.app/Contents/Info.plist
 ```
@@ -183,10 +184,10 @@ To discard every privacy decision associated with the development host bundle,
 stop it, reset that one bundle identity, rebuild, and authorize again:
 
 ```sh
-node cli/bin/weaver.js down
+weaver down
 tccutil reset All com.sunkenintime.weaver.host
 (cd host && zig build -Doptimize=ReleaseFast)
-node cli/bin/weaver.js audio authorize
+weaver audio authorize
 ```
 
 `tccutil reset All` is intentionally bundle-scoped but broader than audio: it
