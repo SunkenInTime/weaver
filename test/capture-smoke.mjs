@@ -36,6 +36,14 @@ try {
   assert.match(snapshotText(canvasGrowTicked), /role=text name="02"/);
   assert.ok(countPixels(canvasGrowTicked, [0x5e, 0xea, 0xd4]) > 1000, `grow canvas after re-render painted ${countPixels(canvasGrowTicked, [0x5e, 0xea, 0xd4])} accent pixels`);
 
+  // A number-typed template hole is the one dynamic class shape check allows;
+  // prove it round-trips through the runtime class compiler on state change.
+  const classHole = capture("class-hole", "test/fixtures/class-hole");
+  assert.match(snapshotText(classHole), /role=group name="" bounds=\(\d+(?:\.\d+)?,\d+(?:\.\d+)? 0x8\)/, "hole fill starts at 0px");
+  const classHoleClicked = capture("class-hole-clicked", "test/fixtures/class-hole", ["--action-file", "test/capture/log-three.actions"]);
+  assert.match(snapshotText(classHoleClicked), /role=group name="" bounds=\(\d+(?:\.\d+)?,\d+(?:\.\d+)? 42x8\)/, "hole fill is 42px after three clicks");
+  assert.ok(countPixels(classHoleClicked, [0x5e, 0xea, 0xd4]) > countPixels(classHole, [0x5e, 0xea, 0xd4]), "hole fill painted more accent after clicks");
+
   const images = capture("styling-images", "examples/styling-images");
   assert.equal(images.renderer.images, 3);
   assert.equal(images.pending.images, 0);
