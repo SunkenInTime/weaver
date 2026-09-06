@@ -6,7 +6,10 @@ description: Create or change a Weaver desktop widget, then prove its code, pixe
 # Conjure a Weaver widget
 
 Turn the request into one checked and captured widget while the user watches it
-take shape on the desktop. Start the **Live loop** before the first source edit.
+take shape on the desktop. Run the CLI as `weaver …`; it is on `PATH` after
+`npm run link` in the Weaver repository. Without that link, `npx --no-install
+weaver …` works only from inside the repository tree, and from anywhere else
+fails with an unrelated npm message about a missing `weaver` package. Start the **Live loop** before the first source edit.
 Its audience is the user. It keeps `weaver dev` running in the background so
 each valid save can appear while the next edit is underway. Use the **Render
 loop** for the agent's deterministic inspection and interaction proof. Get the
@@ -17,7 +20,7 @@ honest. Report any part Weaver does not support as a boundary.
 ## Workflow
 
 1. Inspect the target before editing. For a new widget, run
-   `npx --no-install weaver init <path>` from the Weaver repository root; the
+   `weaver init <path>` from the Weaver repository root; the
    final path segment becomes the starter display name. For an existing widget,
    read its `widget.tsx`, local modules, assets, and licenses without running
    `init` over it.
@@ -28,7 +31,7 @@ honest. Report any part Weaver does not support as a boundary.
    Define stable capture inputs and a name for each state the request needs so
    every pass renders the same evidence.
 3. Start the **Live loop** before the first source edit. Run
-   `npx --no-install weaver dev <path>` in a long-lived background session and
+   `weaver dev <path>` in a long-lived background session and
    keep its output available and its widget visible to the user. Return to
    authoring once the command reports that it is watching. Keep observing the
    Live loop for the next 10 seconds while authoring continues. Report the
@@ -42,10 +45,17 @@ honest. Report any part Weaver does not support as a boundary.
    `export default widget({ ... }, () => <... />);`. Import Weaver APIs from
    `@weaver/sdk`; keep other modules, assets, and their licenses inside the
    widget source root.
-5. Enter the **Render loop** as soon as that slice can render. Run it before
-   building the rest of the widget, then after each edit that can change pixels,
-   semantics, or interaction behavior. No such edit is complete until its PNG
-   has been opened and inspected.
+5. Enter the **Render loop** as soon as that slice can render, then after each
+   added visual region (header, then each content block, then the controls and
+   every requested state), and after any edit that changes semantics or
+   interaction behavior. Each pass is a step the user can watch land. When the
+   user is not watching the desktop, one pass after the last edit is enough.
+   The final pass is never optional: no widget is complete until its last PNG
+   has been opened and inspected and its snapshot read. Fix what contradicts
+   the request or the contract. When a capture shows renderer behavior that
+   contradicts the contract, keep the requested design and report a framework
+   reproduction (see **Framework failures**); do not redesign the request
+   around the surprise.
 6. After the final source save, keep the **Live loop** running until it reports
    that save through `weaver dev bundle ready for in-place hot swap` or
    `weaver dev restarted widget: window config changed`. An `OUT OF DATE`
@@ -62,16 +72,18 @@ honest. Report any part Weaver does not support as a boundary.
 
 For each defined state:
 
-1. Run `npx --no-install weaver check <path>` until it exits successfully. Fix
+1. Run `weaver check <path>` until it exits successfully. Fix
    every named widget error. Preserve unsupported intent as a reported boundary
    rather than suppressing unknown utilities, undeclared providers or origins,
    invalid assets, or import failures.
-2. Run `npx --no-install weaver capture <path> --out <capture-name>.png` with the
+2. Run `weaver capture <path> --out <capture-name>.png` with the
    state's fixed clock, semantic actions, provider fixture, or session journal.
 3. Open the PNG with the available image-viewing tool. File creation and a green
    receipt are not visual proof. Inspect layout, overlap, clipping, duplication,
    spacing, alignment, contrast, assets, and the requested state at the actual
-   widget dimensions.
+   widget dimensions. Secondary text on the dark house surface needs at least
+   `/45` opacity to read at 1×; dimmer text is the most common thing a first
+   capture reveals.
 4. Inspect `<capture-name>.snapshot.txt` and `<capture-name>.receipt.json`. The
    receipt must have `status: "ok"`; the semantic tree must expose the intended
    content and controls; every warning and pending item must be understood.
