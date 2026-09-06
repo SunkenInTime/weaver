@@ -455,6 +455,46 @@ export default widget({ name: "JSX Mutable Class", size: [160, 80] }, () => (
       assert.match(checked.stderr, expected, label);
     }
 
+    // The one dynamic class shape: a number-typed hole as the number of a pixel
+    // arbitrary value. The utility stays statically known; the number is
+    // validated by the class compiler when the widget runs.
+    writeFileSync(sourcePath, `import { useState, widget } from "@weaver/sdk";
+export default widget({ name: "JSX Pixel Hole", size: [160, 80] }, () => {
+  const [sessions] = useState(3);
+  return <panel class={\`w-[\${sessions * 14}px] h-[8px] rounded-full bg-black\`} />;
+});
+`, "utf8");
+    const pixelHole = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(pixelHole.status, 0, pixelHole.stderr);
+
+    const rejectedHoles = [
+      [`import { useState, widget } from "@weaver/sdk";
+export default widget({ name: "JSX String Hole", size: [160, 80] }, () => {
+  const [width] = useState("42");
+  return <panel class={\`w-[\${width}px] h-[8px] bg-black\`} />;
+});
+`, /class template hole must be a number-typed expression/, "string-typed hole"],
+      [`import { useState, widget } from "@weaver/sdk";
+export default widget({ name: "JSX Utility Hole", size: [160, 80] }, () => {
+  const [utility] = useState("w-[42px]");
+  return <panel class={\`\${utility} h-[8px] bg-black\`} />;
+});
+`, /class template hole must be the number of a pixel arbitrary value/, "hole as a whole utility"],
+      [`import { useState, widget } from "@weaver/sdk";
+export default widget({ name: "JSX Percent Hole", size: [160, 80] }, () => {
+  const [percent] = useState(15);
+  return <panel class={\`w-[\${percent}%] h-[8px] bg-black\`} />;
+});
+`, /class template hole must be the number of a pixel arbitrary value/, "percent hole"],
+    ];
+    for (const [source, expected, label] of rejectedHoles) {
+      writeFileSync(sourcePath, source, "utf8");
+      const checked = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(checked.status, 1, label);
+      assert.match(checked.stderr, expected, label);
+      assert.match(checked.stderr, /three routes/, label);
+    }
+
     const tooManyVariants = Array.from({ length: 33 }, (_, index) =>
       `choice === ${index} ? "bg-[#${index.toString(16).padStart(6, "0")}]" : `,
     ).join("") + '"bg-black"';

@@ -485,6 +485,13 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
     }
 
     warnings.push(...(nativeResult.warnings ?? []));
+    // The runtime appends capture-only warnings here (see
+    // runtime/src/capture_warnings.zig): conditions the pixels show but do not
+    // explain, such as a canvas whose commands were drawn for another size.
+    const runtimeWarningsPath = join(captureRoot, "warnings.txt");
+    if (existsSync(runtimeWarningsPath)) {
+      warnings.push(...readFileSync(runtimeWarningsPath, "utf8").split("\n").map((line) => line.trim()).filter((line) => line.length > 0));
+    }
     const nativeRenderer = nativeResult.renderer;
     const nativeOutput = nativeResult.output;
     const nativePending = nativeResult.pending;
@@ -838,11 +845,29 @@ interface StaticExpressionContext {
   unwrap(expression: ts.Expression): ts.Expression;
   boundExpression(name: string): ts.Expression | null | undefined;
   stringVariants(expression: ts.Expression): readonly string[] | null;
+  /**
+   * Why the most recent failed resolution rejected a template hole, so the
+   * class diagnostic can name the fix instead of the cap. Reset it before a
+   * resolution whose failure you intend to report.
+   */
+  holeProblem: "position" | "type" | null;
 }
+
+/**
+ * The one dynamic shape `class` may take: a number-typed template hole as the
+ * number of a pixel arbitrary value, `w-[${px}px]`. The utility prefix and the
+ * `px]` suffix are literal, so weaver check still knows every utility; the
+ * number itself is validated by the same class compiler when the widget runs.
+ * `numberTyped` is the caller's type oracle; without one, holes are rejected.
+ */
+const pixelHoleOpens = /(?:^|\s)[a-z][a-z0-9-]*-\[$/;
+const pixelHoleCloses = /^px\](?:\s|$)/;
+const pixelHolePlaceholder = "1";
 
 function walkSourceWithStaticExpressions(
   sourceFile: ts.SourceFile,
   visitor: (node: ts.Node, context: StaticExpressionContext) => boolean,
+  numberTyped?: (expression: ts.Expression) => boolean,
 ): boolean {
   const bindingScopes: Array<Map<string, ts.Expression | null>> = [new Map()];
   const bindName = (name: ts.BindingName, value: ts.Expression | null): void => {
@@ -924,7 +949,7 @@ function walkSourceWithStaticExpressions(
     if (ts.isTemplateExpression(current)) {
       let values: readonly string[] = [current.head.text];
       for (const span of current.templateSpans) {
-        const substitution = stringVariants(span.expression, new Set(seen));
+        const substitution = stringVariants(span.expression, new Set(seen)) ?? pixelValueHole(values, span);
         if (!substitution) return null;
         const expanded = combine(values, substitution);
         if (!expanded) return null;
@@ -934,7 +959,18 @@ function walkSourceWithStaticExpressions(
     }
     return null;
   };
-  const context: StaticExpressionContext = { unwrap, boundExpression, stringVariants };
+  const pixelValueHole = (prefixes: readonly string[], span: ts.TemplateSpan): readonly string[] | null => {
+    if (!prefixes.every((prefix) => pixelHoleOpens.test(prefix)) || !pixelHoleCloses.test(span.literal.text)) {
+      context.holeProblem = "position";
+      return null;
+    }
+    if (!numberTyped || !numberTyped(span.expression)) {
+      context.holeProblem = "type";
+      return null;
+    }
+    return [pixelHolePlaceholder];
+  };
+  const context: StaticExpressionContext = { unwrap, boundExpression, stringVariants, holeProblem: null };
   const visitChildren = (node: ts.Node): boolean => {
     let stopped = false;
     ts.forEachChild(node, (child) => {
@@ -977,6 +1013,19 @@ function walkSourceWithStaticExpressions(
   };
   predeclareStatements(sourceFile.statements);
   return walk(sourceFile);
+}
+
+const classValueRoutes = "Data-driven values have three routes: a number-typed template hole as the number of a pixel arbitrary value (`w-[${px}px]`; the number is validated when the widget runs), a fraction utility for quantized values (`w-3/20`), or a <canvas> for continuous geometry.";
+
+function classResolutionMessage(holeProblem: StaticExpressionContext["holeProblem"]): string {
+  switch (holeProblem) {
+    case "position":
+      return `class template hole must be the number of a pixel arbitrary value, like \`w-[\${px}px]\`; a hole anywhere else (a whole utility, a color, a percentage) leaves weaver check unable to validate the utility. ${classValueRoutes}`;
+    case "type":
+      return `class template hole must be a number-typed expression; a string hole leaves weaver check unable to validate the utility. ${classValueRoutes}`;
+    default:
+      return `class must resolve to at most ${maxStaticClassVariants} literal strings so weaver check can validate every utility. ${classValueRoutes}`;
+  }
 }
 
 function jsxClassVariants(attribute: ts.JsxAttribute, context: StaticExpressionContext): readonly string[] | null {
@@ -1258,11 +1307,11 @@ function sourceUsesIcon(sourceFile: ts.SourceFile): boolean {
   return found;
 }
 
-/// `dist` is the runtime artifact, so local image paths must mean the same
-/// thing after install as they did beside widget.tsx. Copy every ordinary
-/// widget-owned file recursively while excluding authoring/build outputs;
-/// dynamic local `src` expressions then remain valid without a magic asset
-/// directory or source-tree dependency.
+// `dist` is the runtime artifact, so local image paths must mean the same
+// thing after install as they did beside widget.tsx. Copy every ordinary
+// widget-owned file recursively while excluding authoring/build outputs;
+// dynamic local `src` expressions then remain valid without a magic asset
+// directory or source-tree dependency.
 function copyWidgetAssets(sourceDirectory: string, outputDirectory: string, root = true): void {
   for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
     if (!isWeaveSourceEntryIncluded(entry.name, root) || (root && entry.name === "widget.tsx")) continue;
@@ -2502,24 +2551,70 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
   }
 }
 
-function validateMediaTransportCapability(project: SourceProject, errors: string[]): void {
+const projectPrograms = new WeakMap<SourceProject, ts.Program | null>();
+
+// The typed view of a widget project, built once per check. Bundling owns the
+// two SDK specifiers regardless of widget-authored paths, so check compiles
+// the same graph the bundle binds; a local look-alike declaration could
+// otherwise hide SDK use. Returns null when tsconfig itself is unreadable,
+// which the ordinary TypeScript invocation reports.
+function projectProgram(project: SourceProject): ts.Program | null {
+  if (projectPrograms.has(project)) return projectPrograms.get(project) ?? null;
   const configPath = join(project.directory, "tsconfig.json");
   const configRead = ts.readConfigFile(configPath, (path) => readFileSync(path, "utf8"));
-  if (configRead.error) return; // The ordinary TypeScript invocation reports it.
-  const parsed = ts.parseJsonConfigFileContent(configRead.config, ts.sys, project.directory, undefined, configPath);
-  const sdkDirectory = join(repoRoot, "sdk");
-  // Bundling owns these two specifiers regardless of widget-authored paths.
-  // Check must compile the same graph or a local compatible declaration can
-  // hide capability use that the bundle later binds to Weaver's real SDK.
-  const options: ts.CompilerOptions = {
-    ...parsed.options,
-    paths: {
-      ...parsed.options.paths,
-      "@weaver/sdk": [join(sdkDirectory, "index.d.ts")],
-      "@weaver/sdk/jsx-runtime": [join(sdkDirectory, "jsx-runtime.d.ts")],
-    },
+  let program: ts.Program | null = null;
+  if (!configRead.error) {
+    const parsed = ts.parseJsonConfigFileContent(configRead.config, ts.sys, project.directory, undefined, configPath);
+    const sdkDirectory = join(repoRoot, "sdk");
+    const options: ts.CompilerOptions = {
+      ...parsed.options,
+      paths: {
+        ...parsed.options.paths,
+        "@weaver/sdk": [join(sdkDirectory, "index.d.ts")],
+        "@weaver/sdk/jsx-runtime": [join(sdkDirectory, "jsx-runtime.d.ts")],
+      },
+    };
+    program = ts.createProgram({ rootNames: parsed.fileNames, options });
+  }
+  projectPrograms.set(project, program);
+  return program;
+}
+
+// Project source files are parsed standalone, so the type checker cannot be
+// asked about their nodes directly. Find the same node in the program's copy
+// of the file by span and kind.
+function programNode(program: ts.Program, node: ts.Node): ts.Node | null {
+  const path = resolve(node.getSourceFile().fileName);
+  const programFile = program.getSourceFiles().find((candidate) => pathsEqual(resolve(candidate.fileName), path));
+  if (!programFile) return null;
+  let match: ts.Node | null = null;
+  const visit = (candidate: ts.Node): void => {
+    if (match || candidate.pos > node.end || candidate.end < node.pos) return;
+    if (candidate.pos === node.pos && candidate.end === node.end && candidate.kind === node.kind) {
+      match = candidate;
+      return;
+    }
+    ts.forEachChild(candidate, visit);
   };
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options });
+  visit(programFile);
+  return match;
+}
+
+function numberTypedOracle(project: SourceProject): ((expression: ts.Expression) => boolean) | undefined {
+  const program = projectProgram(project);
+  if (!program) return undefined;
+  const checker = program.getTypeChecker();
+  return (expression) => {
+    const node = programNode(program, expression);
+    if (!node) return false;
+    return (checker.getTypeAtLocation(node).flags & ts.TypeFlags.NumberLike) !== 0;
+  };
+}
+
+function validateMediaTransportCapability(project: SourceProject, errors: string[]): void {
+  const program = projectProgram(project);
+  if (!program) return; // The ordinary TypeScript invocation reports the tsconfig failure.
+  const sdkDirectory = join(repoRoot, "sdk");
   const checker = program.getTypeChecker();
 
   const sdkHookDeclaration = (declaration: ts.Declaration | undefined): boolean => {
@@ -2824,12 +2919,9 @@ function validateSource(project: SourceProject): string[] {
       if (tag === "button" || tag === "slider") validateAccessibleName(node, tag);
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
+        context.holeProblem = null;
         const classVariants = jsxClassVariants(classAttribute, context);
-        if (classVariants === null) errors.push(locationMessage(
-          sourceFile,
-          classAttribute,
-          `class must resolve to at most ${maxStaticClassVariants} literal strings so weaver check can validate every utility`,
-        ));
+        if (classVariants === null) errors.push(locationMessage(sourceFile, classAttribute, classResolutionMessage(context.holeProblem)));
         else {
           const classErrors = new Set<string>();
           for (const classText of classVariants) try {
@@ -2849,25 +2941,10 @@ function validateSource(project: SourceProject): string[] {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
               classErrors.add(`Unknown bundled font "${compiled.fontFamily}"; ${available}`);
             }
-            if (tag === "canvas") {
-              const sizes = compiled as Record<string, unknown>;
-              for (const axis of ["width", "height"] as const) {
-                const percent = sizes[axis === "width" ? "widthPercent" : "heightPercent"] !== undefined;
-                if (percent || sizes[axis] === undefined) {
-                  const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
-                  classErrors.add(
-                    `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
-                  );
-                }
-              }
-            }
           }
           catch (error) { classErrors.add(error instanceof UtilityError ? error.message : String(error)); }
           for (const error of classErrors) errors.push(locationMessage(sourceFile, classAttribute, error));
         }
-      }
-      if (tag === "canvas" && !classAttribute) {
-        errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "canvas") {
         const opacityAncestor = canvasOpacityAncestor(node, context);
@@ -2923,7 +3000,8 @@ function validateSource(project: SourceProject): string[] {
     }
     return false;
   };
-  for (const sourceFile of project.sourceFiles) walkSourceWithStaticExpressions(sourceFile, visit);
+  const numberTyped = numberTypedOracle(project);
+  for (const sourceFile of project.sourceFiles) walkSourceWithStaticExpressions(sourceFile, visit, numberTyped);
   for (const [provider, hooks] of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) {
       for (const hook of hooks) errors.push(`${hook}("${provider}") requires subscribe: ["${provider}"] in the widget config`);
