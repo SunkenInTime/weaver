@@ -15,6 +15,7 @@ const storage_mod = @import("storage.zig");
 const windows_monitor = if (builtin.os.tag == .windows) @import("platform/windows_monitor.zig") else struct {};
 const tree_mod = @import("tree.zig");
 const widget_diagnostic = @import("widget_diagnostic.zig");
+const capture_warnings = @import("capture_warnings.zig");
 const widget_log = @import("widget_log.zig");
 
 comptime {
@@ -120,6 +121,10 @@ pub const Msg = union(enum) {
     right_press: native_sdk.canvas.WidgetPressEvent,
     slider: tree_mod.NodeId,
     canvas_frame: u64,
+    /// A presented frame laid a canvas out at a size the SDK has not been
+    /// told yet. The dispatch itself carries the fix: `syncNativeState` runs
+    /// before `update` and fires `onCanvasResize`.
+    canvas_layout: void,
     external_wake: struct { provider: bool, dev_reload: bool },
     frame_moved: geometry_mod.Saved,
 };
@@ -245,6 +250,7 @@ fn update(model: *Model, msg: Msg, effects: *Effects) void {
                 .on_fire = Effects.timerMsg(.timer),
             });
         },
+        .canvas_layout => {},
         .canvas_frame => |timestamp_ns| {
             if (model.provider_poll_interval_ms <= 33) {
                 dispatchProviderFrames(model, effects, "canvas frame");
@@ -617,6 +623,7 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
         }
     }
     const engine = model.engine orelse return null;
+    if (canvasLayoutStale(model, frame)) return Msg{ .canvas_layout = {} };
     const canvas_clock = engine.hasCanvasFrames();
     if (!canvas_clock) return null;
     // Hybrid presentation now rejects a clean completion revision before it
@@ -637,6 +644,29 @@ fn onFrame(model: *const Model, frame: native_sdk.platform.GpuFrame) ?Msg {
 /// that frame boundary into the ordinary update/rebuild path. Static widgets
 /// therefore hot-swap without borrowing a GPU completion from animation,
 /// input, or resize.
+/// Layout sizes a canvas after the retained tree is built, but the SDK learns
+/// that size only through `syncNativeState`, which Native runs at the start of
+/// the next dispatch. A widget with nothing else to dispatch (a fixed-clock
+/// capture, a live widget before its first event) would draw at its
+/// class-declared size forever. So a presented frame whose canvas layout
+/// disagrees with what the tree last published requests exactly one dispatch.
+/// The comparison mirrors `syncNativeState` so the two agree after that sync.
+fn canvasLayoutStale(model: *const Model, frame: native_sdk.platform.GpuFrame) bool {
+    const runtime = diagnostic_runtime orelse return false;
+    const layout = runtime.canvasWidgetLayout(frame.window_id, frame.label) catch return false;
+    for (&model.tree.canvases, 0..) |*canvas_state, index| {
+        if (!model.tree.canvas_occupied.isSet(index) or canvas_state.owner == 0) continue;
+        const widget_id = native_sdk.canvas.globalWidgetId(.stack, native_sdk.canvas.uiKey(canvas_state.owner));
+        for (layout.nodes) |layout_node| {
+            if (layout_node.widget.id != widget_id) continue;
+            const laid_out = layout_node.frame.normalized();
+            if (@max(laid_out.width, 0) != canvas_state.layout_width or @max(laid_out.height, 0) != canvas_state.layout_height) return true;
+            break;
+        }
+    }
+    return false;
+}
+
 fn onFrameRequested(_: *const Model) ?Msg {
     const provider = provider_wake_pending.swap(false, .acq_rel);
     const dev = dev_reload_pending.swap(false, .acq_rel);
@@ -720,7 +750,10 @@ fn projectSameViewUpdate(
     );
 
     switch (msg) {
-        .canvas_frame => {},
+        // Both carry fresh canvas commands that the retained tree must show
+        // without a rebuild: a draw tick, or the redraw that follows a layout
+        // size reaching the SDK.
+        .canvas_frame, .canvas_layout => {},
         else => return true,
     }
 
@@ -940,7 +973,7 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
         .style = .{
             .background = retained.background,
             .foreground = retained.text_color,
-            .radius = if (retained.radius > 0) retained.radius else null,
+            .radius = if (retained.radius >= 0) retained.radius else null,
             .border = retained.border_color,
             .stroke_width = retained.border_width,
             .quiet_hover = true,
@@ -1044,7 +1077,21 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
             options.gap = 0;
             break :block ui.panel(options, .{ui.stack(stack_options, children)});
         } else ui.stack(options, children),
-        .panel => ui.panel(options, children),
+        // `<panel>` is a painted box with column layout (CONTRACT: "a styled
+        // box; column layout"). Native's panel kind overlays its children, so
+        // the panel owns paint and effects while an inner column owns child
+        // layout, exactly like a styled `<column>`.
+        .panel => block: {
+            const column_options: WidgetUi.ElementOptions = .{
+                .gap = retained.gap,
+                .grow = 1,
+                .cross = options.cross,
+                .main = options.main,
+                .flex_wrap = retained.flex_wrap,
+            };
+            options.gap = 0;
+            break :block ui.panel(options, .{ui.column(column_options, children)});
+        },
         .icon => ui.el(.icon, options, .{}),
         .button => ui.panel(options, children),
         .slider => ui.el(.slider, block: {
@@ -1392,6 +1439,7 @@ pub fn main(init: std.process.Init) !void {
     // also go to a file the CLI copies into the capture receipt.
     if (capture_state_root) |root| {
         widget_diagnostic.initCaptureSink(init.io, try std.fs.path.join(allocator, &.{ root, "diagnostic.txt" }));
+        capture_warnings.initCaptureSink(init.io, try std.fs.path.join(allocator, &.{ root, "warnings.txt" }));
     }
     std.log.info("widget runtime starting pid={d}{s}", .{ platform.currentProcessId(), if (dev) " dev=true" else "" });
     var storage = try storage_mod.Store.init(init.io, allocator, data_root, loaded.manifest.name);
@@ -1673,6 +1721,23 @@ fn validateCapture(context: *anyopaque) !void {
     }
     if (app_state.model.engine) |engine| {
         if (engine.renderFailed()) return error.CaptureWidgetFailed;
+    }
+    reportCanvasLayoutMismatches(&app_state.model);
+}
+
+/// A canvas whose retained commands were published for a different layout
+/// size than the one it now has is showing stale geometry: typically a blank
+/// or clipped bar. The PNG shows the symptom; this warning names the cause so
+/// the receipt alone is enough to act on. With `canvasLayoutStale` in place
+/// no correct widget reaches it; it is a tripwire for a regression there.
+fn reportCanvasLayoutMismatches(model: *const Model) void {
+    for (&model.tree.canvases, 0..) |*canvas_state, index| {
+        if (!model.tree.canvas_occupied.isSet(index) or canvas_state.owner == 0 or canvas_state.command_count == 0) continue;
+        if (canvas_state.command_layout_width == canvas_state.layout_width and canvas_state.command_layout_height == canvas_state.layout_height) continue;
+        capture_warnings.report(
+            "CanvasDrewForStaleLayout: canvas node {d} drew its last frame for a {d}x{d} layout but layout now gives it {d}x{d}; onFrame did not run after layout sized it",
+            .{ canvas_state.owner, canvas_state.command_layout_width, canvas_state.command_layout_height, canvas_state.layout_width, canvas_state.layout_height },
+        );
     }
 }
 
@@ -2185,6 +2250,47 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
+}
+
+test "painted boxes without a rounded utility project square corners, not the theme radius" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{};
+    const unset = try model.tree.createNode(.stack);
+    try model.tree.setBackground(unset, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    const zero = try model.tree.createNode(.stack);
+    try model.tree.setBackground(zero, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    try model.tree.setNumberProp(zero, "radius", 0);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built_unset = try ui.finalize(buildNodeForTest(&ui, &model, unset, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built_unset.root.kind);
+    try std.testing.expectEqual(@as(?f32, 0), built_unset.root.style.radius);
+    var zero_ui = WidgetUi.init(arena_state.allocator());
+    const built_zero = try zero_ui.finalize(buildNodeForTest(&zero_ui, &model, zero, true));
+    try std.testing.expectEqual(@as(?f32, 0), built_zero.root.style.radius);
+}
+
+test "panel lowers to a painted box around a column so children stack vertically" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{};
+    const panel = try model.tree.createNode(.panel);
+    const first = try model.tree.createNode(.text);
+    const second = try model.tree.createNode(.text);
+    try model.tree.appendChild(panel, first);
+    try model.tree.appendChild(panel, second);
+    try model.tree.setNumberProp(panel, "gap", 6);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, panel, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(f32, 0), built.root.layout.gap);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    const column = built.root.children[0];
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.column, column.kind);
+    try std.testing.expectEqual(@as(f32, 6), column.layout.gap);
+    try std.testing.expectEqual(@as(usize, 2), column.children.len);
 }
 
 test "attached effects combine builder metadata with box and text shadows" {

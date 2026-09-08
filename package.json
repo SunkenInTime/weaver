@@ -13,6 +13,7 @@
   "scripts": {
     "audit:release": "node scripts/release-audit.mjs",
     "build": "node cli/build.mjs",
+    "link": "npm link --workspace cli",
     "postinstall": "npm run build",
     "test": "node --test test/all.test.mjs",
     "test:capture": "node test/capture-smoke.mjs",

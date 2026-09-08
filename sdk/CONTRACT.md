@@ -149,6 +149,7 @@ utility.
 | `gap-N`, `gap-[Npx]` | flex gap |
 | `rounded`, `rounded-{md,lg,xl,2xl,3xl,full}`, `rounded-[Npx]` | corner radius |
 | `rounded-{t,r,b,l,tl,tr,br,bl}[-{md,lg,xl,2xl,3xl,full}]`, arbitrary `[Npx]` | selected corner radii; later classes win per corner |
+| no `rounded-*` utility, or `rounded-[0px]` | square corners; a painted box never inherits the native theme radius |
 | `border`, `border-N`, `border-[Npx]` | border width in pixels; width-only utilities default to `#E5E7EBFF` (gray-200) |
 | `border-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | border color; color alone does not create width |
 | `bg-`, `text-`, `border-` + Tailwind v4 named color (`red-50` through `taupe-950`, `white`, `black`, `transparent`), optional `/NN` | official v4.3.3 palette converted from OKLCH to the runtime's sRGB8 wire format; alpha multiplies the named color's alpha |
@@ -833,3 +834,39 @@ Click-to-seek uses the event's normalized local `u` coordinate. The handler
 clamps `event.u` to `[0, 1]`, multiplies by `durationMs`, and passes that
 absolute value to `seek(ms)`. The SDK owns whole-millisecond normalization.
 Click-only seek is the contracted example behavior; dragging is not implied.
+
+
+## Canvas layout sizing amendment
+
+A `<canvas>` is sized by layout like every other element. Explicit pixel
+sizes, `w-full`, fractions, and `grow` all work. Inside `onFrame`,
+`ctx.width` and `ctx.height` are the laid-out size, and `onFrame` runs again
+whenever layout changes that size, including the first layout after mount. The
+class-declared size is only the guess used for the very first draw; a
+re-render never shrinks the draw size back to it. `weaver check` no longer
+requires explicit pixel dimensions on a canvas (`CanvasNeedsExplicitSize` is
+retired). A capture whose canvas commands were drawn for a different size than
+the canvas's layout reports `CanvasDrewForStaleLayout` in `warnings`.
+
+## Amendment: data-driven class values
+
+`weaver check` validates every class utility before a widget runs, so a
+`class` must resolve statically: string literals, `const` bindings, ternaries,
+concatenation, and template literals whose holes resolve the same way, up to
+32 distinct strings per attribute. One dynamic shape is allowed on top of
+that: a **number-typed template hole as the number of a pixel arbitrary
+value**.
+
+```tsx
+<stack class={`w-[${sessions * 14}px] h-full rounded-full bg-[#5eead4]`} />
+```
+
+The utility prefix (`w-[`) and the unit suffix (`px]`) are literal, so check
+still knows the utility. The hole must be typed `number` by TypeScript; a
+string hole, a hole that spans a whole utility, a color, or a percentage is a
+check error that names the rule and the routes. The number itself is
+validated by the same class compiler when the widget runs, once per change to
+the class string, which costs about 6 µs; a negative, non-finite, or
+non-numeric value fails the widget onto its error surface with the offending
+utility named. Fraction utilities (`w-3/20`) remain the route for quantized
+values and `<canvas>` for continuous geometry.
